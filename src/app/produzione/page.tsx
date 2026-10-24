@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { OrdineProduzione, FaseOdP, Articolo } from '@/types/database'
 import { SEED_ODP, SEED_ARTICOLI } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 type OdPConFasi = OrdineProduzione & {
   fasi: FaseOdP[]
@@ -33,27 +34,41 @@ export default function ProduzionePage() {
   const [filtroStato, setFiltroStato] = useState<string>('tutti')
 
   useEffect(() => {
-    const parseSicuro = <T,>(chiave: string, fallback: T): T => {
-      try {
-        const item = localStorage.getItem(chiave)
-        if (!item || item === 'undefined' || item === 'null') return fallback
-        return JSON.parse(item) as T
-      } catch {
-        return fallback
+    const caricaDati = async () => {
+      const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+        try {
+          const item = localStorage.getItem(chiave)
+          if (!item || item === 'undefined' || item === 'null') return fallback
+          return JSON.parse(item) as T
+        } catch {
+          return fallback
+        }
       }
+
+      const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
+      setArticoli(articoliList)
+
+      // Carica ordini sincronizzati da Supabase Cloud
+      const odpCaricati = await syncService.getOrdiniProduzione()
+
+      // Se c'erano ordini in localStorage mai sincronizzati, caricali su Supabase
+      const locali = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', [])
+      for (const loc of locali) {
+        if (!odpCaricati.some((c) => c.id === loc.id)) {
+          await syncService.salvaOrdineProduzione(loc)
+          odpCaricati.push(loc)
+        }
+      }
+
+      const arricchiti: OdPConFasi[] = odpCaricati.map((odp) => ({
+        ...odp,
+        articolo: articoliList.find((a) => a.id === odp.articolo_id)
+      }))
+
+      setOdpList(arricchiti)
     }
 
-    const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
-    setArticoli(articoliList)
-
-    const odpCaricati = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
-
-    const arricchiti: OdPConFasi[] = odpCaricati.map((odp) => ({
-      ...odp,
-      articolo: articoliList.find((a) => a.id === odp.articolo_id)
-    }))
-
-    setOdpList(arricchiti)
+    caricaDati()
   }, [])
 
   const odpFiltrati = odpList.filter((o) => {

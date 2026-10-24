@@ -30,6 +30,7 @@ import {
   SEED_ARTICOLI,
   SEED_ORDINI_CLIENTI
 } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 export default function DashboardPage() {
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
@@ -42,20 +43,30 @@ export default function DashboardPage() {
   const [orizzonte, setOrizzonte] = useState<OrizzonteTemporale>('settimana')
 
   useEffect(() => {
-    const parseSicuro = <T,>(chiave: string, fallback: T): T => {
-      try {
-        const item = localStorage.getItem(chiave)
-        if (!item || item === 'undefined' || item === 'null') return fallback
-        return JSON.parse(item) as T
-      } catch {
-        return fallback
+    const caricaDati = async () => {
+      const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+        try {
+          const item = localStorage.getItem(chiave)
+          if (!item || item === 'undefined' || item === 'null') return fallback
+          return JSON.parse(item) as T
+        } catch {
+          return fallback
+        }
       }
+
+      setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
+      setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
+      setOrdiniClienti(parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI))
+
+      // Carica e sincronizza OdP da Supabase Cloud
+      const odpSincronizzati = await syncService.getOrdiniProduzione()
+      setOdpList(odpSincronizzati)
+
+      // Inizializza seed Supabase se vuoto
+      syncService.inizializzaDatabaseSeVuoto()
     }
 
-    setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
-    setOdpList(parseSicuro('machinaflow_odp', SEED_ODP))
-    setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
-    setOrdiniClienti(parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI))
+    caricaDati()
   }, [])
 
   // =========================================================================

@@ -38,6 +38,7 @@ import {
   SEED_DISTINTA_BASE,
   SEED_CENTRI_LAVORO
 } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 type OrdineCompleto = OrdineCliente & {
   cliente?: Cliente
@@ -544,6 +545,8 @@ export default function OrdiniPage() {
     const odpAggiornati = [nuovoOdP, ...odpList]
     setOdpList(odpAggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(odpAggiornati))
+    // Sincronizza su Supabase Cloud
+    syncService.salvaOrdineProduzione(nuovoOdP)
 
     // 4. Aggiorna stato ordine a "in_produzione"
     const ordiniAggiornati = ordini.map((o) =>
