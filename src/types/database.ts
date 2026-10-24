@@ -1,4 +1,29 @@
-export type RuoloUtente = 'amministratore' | 'responsabile_produzione' | 'operatore'
+export type RuoloUtente = 'super_admin' | 'admin_officina' | 'amministratore' | 'responsabile_produzione' | 'operatore'
+
+export interface Azienda {
+  id: string
+  nome: string
+  email_titolare: string
+  telefono?: string
+  partita_iva?: string
+  citta?: string
+  stato: 'attiva' | 'sospesa'
+  creato_il: string
+}
+
+export interface InvitoAzienda {
+  id: string
+  token: string
+  azienda_id: string
+  email_destinatario: string
+  nome_contatto?: string
+  telefono?: string
+  stato: 'in_attesa' | 'accettato' | 'scaduto'
+  creato_da?: string
+  creato_il: string
+  utilizzato_il?: string
+  azienda?: Azienda
+}
 
 export type TipoArticolo = 'prodotto_finito' | 'semilavorato' | 'materia_prima'
 
@@ -48,6 +73,18 @@ export interface Articolo {
   scorta_minima: number
   lead_time_giorni_fornitore?: number
   prezzo_riferimento?: number
+  creato_il: string
+}
+
+export interface OrdineFornitore {
+  id: string
+  articolo_id: string
+  quantita_ordinata: number
+  fornitore_nome: string
+  data_ordine: string
+  data_arrivo_prevista: string
+  stato: 'in_ordine' | 'ricevuto' | 'annullato'
+  note?: string
   creato_il: string
 }
 

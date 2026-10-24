@@ -18,13 +18,15 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Check
+  Check,
+  Lock
 } from 'lucide-react'
 import {
   Articolo,
   ComponenteDistintaBase,
   OrdineProduzione,
-  FaseOdP
+  FaseOdP,
+  OrdineFornitore
 } from '@/types/database'
 import {
   SEED_ARTICOLI,
@@ -38,7 +40,9 @@ interface RigaMRP {
   giacenzaAttuale: number
   scortaMinima: number
   fabbisognoNetto: number // Mancante se > 0
-  stato: 'critico' | 'attenzione' | 'sufficiente'
+  quantitaInArrivo: number // Ordini aperti verso fornitori
+  ordiniFornitoreAperti: OrdineFornitore[]
+  stato: 'critico' | 'in_arrivo' | 'attenzione' | 'sufficiente'
   ordiniCoinvolti: string[]
 }
 
@@ -47,9 +51,22 @@ export default function MRPPage() {
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
+  const [ordiniFornitori, setOrdiniFornitori] = useState<OrdineFornitore[]>([])
+
+  // Stato Modale Ordine a Fornitore (Anti-Doppio Ordine)
+  const [modaleOrdineAperta, setModaleOrdineAperta] = useState(false)
+  const [formOrdineFornitore, setFormOrdineFornitore] = useState({
+    articolo_id: '',
+    nome_materiale: '',
+    quantita_ordinata: 10,
+    fornitore_nome: 'Rodacciai S.p.A.',
+    data_arrivo_prevista: '',
+    note: ''
+  })
 
   // Stato Modale Carico Merce Rapido
   const [modaleCaricoAperta, setModaleCaricoAperta] = useState(false)
+  const [ordineFornitoreInRicezioneId, setOrdineFornitoreInRicezioneId] = useState<string | null>(null)
   const [ricercaMaterialeCarico, setRicercaMaterialeCarico] = useState('')
   const [formCarico, setFormCarico] = useState({
     articolo_id: '',
@@ -97,19 +114,44 @@ export default function MRPPage() {
     })
 
     const materiePrime = articoliList.filter((a) => a.tipo !== 'prodotto_finito')
+    const ordiniFornitoreSalvati: OrdineFornitore[] = (() => {
+      try {
+        const item = localStorage.getItem('machinaflow_ordini_fornitori')
+        return item ? JSON.parse(item) : []
+      } catch {
+        return []
+      }
+    })()
+
     const risultatiMrp: RigaMRP[] = materiePrime.map((materia) => {
       const infoFabbisogno = accumulatoreFabbisogni[materia.id] || { qtaLorda: 0, odpCodes: new Set() }
       const fabbisognoLordo = Number(infoFabbisogno.qtaLorda.toFixed(3))
       const giacenzaAttuale = materia.giacenza_attuale
       const scortaMinima = materia.scorta_minima
 
-      const nettoCalcolato = Math.max(0, fabbisognoLordo + scortaMinima - giacenzaAttuale)
+      // Calcola gli ordini fornitore già aperti (in arrivo) per questa materia prima
+      const aperti = ordiniFornitoreSalvati.filter(
+        (o) => o.articolo_id === materia.id && o.stato === 'in_ordine'
+      )
+      const quantitaInArrivo = aperti.reduce((acc, o) => acc + o.quantita_ordinata, 0)
 
-      let stato: 'critico' | 'attenzione' | 'sufficiente' = 'sufficiente'
+      // Formula MRP reale: Fabbisogno Netto = Fabbisogno Lordo + Scorta Minima - Giacenza - Quantità già ordinata
+      const nettoCalcolato = Math.max(0, fabbisognoLordo + scortaMinima - giacenzaAttuale - quantitaInArrivo)
+
+      let stato: 'critico' | 'in_arrivo' | 'attenzione' | 'sufficiente' = 'sufficiente'
       if (giacenzaAttuale < fabbisognoLordo) {
-        stato = 'critico'
+        // Se manca materiale ma è già stato interamente ordinato dal fornitore, passa a "in_arrivo"
+        if (quantitaInArrivo >= (fabbisognoLordo - giacenzaAttuale)) {
+          stato = 'in_arrivo'
+        } else {
+          stato = 'critico'
+        }
       } else if (giacenzaAttuale - fabbisognoLordo < scortaMinima) {
-        stato = 'attenzione'
+        if (quantitaInArrivo > 0) {
+          stato = 'in_arrivo'
+        } else {
+          stato = 'attenzione'
+        }
       }
 
       return {
@@ -118,13 +160,15 @@ export default function MRPPage() {
         giacenzaAttuale,
         scortaMinima,
         fabbisognoNetto: Number(nettoCalcolato.toFixed(3)),
+        quantitaInArrivo,
+        ordiniFornitoreAperti: aperti,
         stato,
         ordiniCoinvolti: Array.from(infoFabbisogno.odpCodes)
       }
     })
 
     risultatiMrp.sort((a, b) => {
-      const priorita = { critico: 0, attenzione: 1, sufficiente: 2 }
+      const priorita = { critico: 0, attenzione: 1, in_arrivo: 2, sufficiente: 3 }
       return priorita[a.stato] - priorita[b.stato]
     })
 
@@ -151,10 +195,83 @@ export default function MRPPage() {
     const odpCaricati = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
     setOdpList(odpCaricati)
 
+    const ordiniFornitoreCaricati = parseSicuro<OrdineFornitore[]>('machinaflow_ordini_fornitori', [])
+    setOrdiniFornitori(ordiniFornitoreCaricati)
+
     ricalcolaMrp(articoliList, distinteList, odpCaricati)
   }, [])
 
-  // Funzione di Carico Merce
+  // Apertura modale rapida ordine fornitore (Anti-Doppio Ordine)
+  const apriModaleOrdineFornitore = (riga: RigaMRP) => {
+    const leadTime = riga.componente.lead_time_giorni_fornitore || 3
+    const dataArrivo = new Date()
+    dataArrivo.setDate(dataArrivo.getDate() + leadTime)
+
+    setFormOrdineFornitore({
+      articolo_id: riga.componente.id,
+      nome_materiale: `${riga.componente.codice_articolo} - ${riga.componente.descrizione}`,
+      quantita_ordinata: riga.fabbisognoNetto > 0 ? riga.fabbisognoNetto : 10,
+      fornitore_nome: riga.componente.codice_articolo.includes('ALL') ? 'Eural Gnutti S.p.A.' : 'Rodacciai S.p.A.',
+      data_arrivo_prevista: dataArrivo.toISOString().split('T')[0],
+      note: `Ordine fornitore per copertura OdP: ${riga.ordiniCoinvolti.join(', ')}`
+    })
+    setModaleOrdineAperta(true)
+  }
+
+  // Registrazione Ordine Fornitore
+  const handleConfermaOrdineFornitore = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formOrdineFornitore.articolo_id || formOrdineFornitore.quantita_ordinata <= 0) return
+
+    const nuovoOrdine: OrdineFornitore = {
+      id: 'ord-forn-' + Date.now(),
+      articolo_id: formOrdineFornitore.articolo_id,
+      quantita_ordinata: Number(formOrdineFornitore.quantita_ordinata),
+      fornitore_nome: formOrdineFornitore.fornitore_nome,
+      data_ordine: new Date().toISOString().split('T')[0],
+      data_arrivo_prevista: formOrdineFornitore.data_arrivo_prevista,
+      stato: 'in_ordine',
+      note: formOrdineFornitore.note,
+      creato_il: new Date().toISOString()
+    }
+
+    const aggiornati = [nuovoOrdine, ...ordiniFornitori]
+    setOrdiniFornitori(aggiornati)
+    localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(aggiornati))
+
+    setModaleOrdineAperta(false)
+    ricalcolaMrp(articoli, distinte, odpList)
+  }
+
+  // Apertura modale Ricezione Merce da Ordine Fornitore con Tracciabilità DDT
+  const apriRicezioneOrdineFornitore = (ordine: OrdineFornitore) => {
+    setOrdineFornitoreInRicezioneId(ordine.id)
+    setFormCarico({
+      articolo_id: ordine.articolo_id,
+      quantita_entrata: ordine.quantita_ordinata,
+      ddt_riferimento: '',
+      fornitore_nome: ordine.fornitore_nome || '',
+      note: ordine.note ? `Rif. Ordine Fornitore: ${ordine.note}` : ''
+    })
+    setRicercaMaterialeCarico('')
+    setModaleCaricoAperta(true)
+  }
+
+  // Apertura rapida per specifico articolo cliccato in tabella (Carico manuale)
+  const apriCaricoPerArticolo = (artId: string) => {
+    setOrdineFornitoreInRicezioneId(null)
+    setFormCarico({
+      articolo_id: artId,
+      quantita_entrata: 10,
+      ddt_riferimento: '',
+      fornitore_nome: '',
+      note: ''
+    })
+    setRicercaMaterialeCarico('')
+    setModaleCaricoAperta(true)
+  }
+
+  // Funzione di Carico Merce (DDT e Chiusura Ordine Fornitore se collegato)
   const handleRegistraCarico = (e: React.FormEvent) => {
     e.preventDefault()
     if (!formCarico.articolo_id || formCarico.quantita_entrata <= 0) return
@@ -172,16 +289,28 @@ export default function MRPPage() {
     setArticoli(articoliAggiornati)
     localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
 
-    // Ricalcola subito MRP con la nuova giacenza
+    // Se il carico è legato a un ordine fornitore aperto, chiudilo come 'ricevuto'
+    let ordiniAggiornati = ordiniFornitori
+    if (ordineFornitoreInRicezioneId) {
+      ordiniAggiornati = ordiniFornitori.map((o) =>
+        o.id === ordineFornitoreInRicezioneId ? { ...o, stato: 'ricevuto' as const } : o
+      )
+      setOrdiniFornitori(ordiniAggiornati)
+      localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(ordiniAggiornati))
+      setOrdineFornitoreInRicezioneId(null)
+    }
+
+    // Ricalcola subito MRP con la nuova giacenza e ordini fornitori aggiornati
     ricalcolaMrp(articoliAggiornati, distinte, odpList)
 
     setModaleCaricoAperta(false)
+    const ddtInfo = formCarico.ddt_riferimento ? ` (DDT: ${formCarico.ddt_riferimento})` : ''
     setNotificaCarico(
-      `✓ Caricati +${formCarico.quantita_entrata} ${artTarget.unita_misura} di ${artTarget.codice_articolo}! Nuova giacenza: ${nuovaGiacenza} ${artTarget.unita_misura}.`
+      `✓ Registrata entrata merce${ddtInfo}: +${formCarico.quantita_entrata} ${artTarget.unita_misura} di ${artTarget.codice_articolo}! Nuova giacenza: ${nuovaGiacenza} ${artTarget.unita_misura}.`
     )
     setTimeout(() => setNotificaCarico(null), 5000)
 
-    // Reset parziale form
+    // Reset form
     setFormCarico({
       articolo_id: '',
       quantita_entrata: 10,
@@ -189,17 +318,6 @@ export default function MRPPage() {
       fornitore_nome: '',
       note: ''
     })
-  }
-
-  // Apertura rapida per specifico articolo cliccato in tabella
-  const apriCaricoPerArticolo = (artId: string) => {
-    setFormCarico((prev) => ({
-      ...prev,
-      articolo_id: artId,
-      quantita_entrata: 10
-    }))
-    setRicercaMaterialeCarico('')
-    setModaleCaricoAperta(true)
   }
 
   // Export Excel / CSV Professionale e Pulito
@@ -537,14 +655,15 @@ export default function MRPPage() {
                 <tr>
                   <th className="p-3.5">Codice Materia Prima</th>
                   <th className="p-3.5">Descrizione</th>
-                  <th className="p-3.5 text-center">Lead Time Fornitore</th>
-                  <th className="p-3.5 text-center">Giacenza Attuale</th>
-                  <th className="p-3.5 text-center">Fabbisogno Lordo OdP</th>
-                  <th className="p-3.5 text-center">Scorta Minima</th>
-                  <th className="p-3.5 text-center">Fabbisogno Netto da Ordinare</th>
+                  <th className="p-3.5 text-center">Lead Time</th>
+                  <th className="p-3.5 text-center">Giacenza</th>
+                  <th className="p-3.5 text-center">Fabbisogno Lordo</th>
+                  <th className="p-3.5 text-center">Scorta Min.</th>
+                  <th className="p-3.5 text-center">Fabbisogno Netto</th>
+                  <th className="p-3.5 text-center">Già Ordinato (In Arrivo)</th>
                   <th className="p-3.5 text-center">Stato Approvvigionamento</th>
                   <th className="p-3.5">OdP Coinvolti</th>
-                  <th className="p-3.5 text-right">Azione Rapida</th>
+                  <th className="p-3.5 text-right">Azioni Anti-Doppio Ordine</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -588,20 +707,45 @@ export default function MRPPage() {
                             + {riga.fabbisognoNetto} {mat.unita_misura}
                           </span>
                         ) : (
-                          <span className="text-emerald-400 font-semibold">0 (Coperto)</span>
+                          <span className="text-emerald-400 font-semibold text-xs">0 (Coperto)</span>
                         )}
                       </td>
+
+                      {/* Colonna Già Ordinato (In Arrivo) */}
                       <td className="p-3.5 text-center">
+                        {riga.quantitaInArrivo > 0 ? (
+                          <div className="inline-flex flex-col items-center">
+                            <span className="font-mono font-bold text-xs text-sky-400 bg-sky-950/70 px-2 py-0.5 rounded border border-sky-800">
+                              📦 {riga.quantitaInArrivo} {mat.unita_misura}
+                            </span>
+                            <span className="text-[10px] text-slate-400 mt-0.5">
+                              {riga.ordiniFornitoreAperti[0]?.fornitore_nome?.split(' ')[0]} ({riga.ordiniFornitoreAperti[0]?.data_arrivo_prevista})
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-600 text-xs">-</span>
+                        )}
+                      </td>
+
+                      <td className="p-3.5 text-center whitespace-nowrap">
                         <span
-                          className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-                            isCritico
+                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border whitespace-nowrap inline-flex items-center justify-center gap-1 ${
+                            riga.stato === 'in_arrivo'
+                              ? 'bg-sky-950/80 text-sky-300 border-sky-700 font-black'
+                              : isCritico
                               ? 'bg-rose-950 text-rose-300 border-rose-800'
                               : isAttenzione
                               ? 'bg-amber-950 text-amber-300 border-amber-800'
                               : 'bg-emerald-950 text-emerald-300 border-emerald-800'
                           }`}
                         >
-                          {isCritico ? 'ORDINA SUBITO' : isAttenzione ? 'SOTTO SCORTA' : 'OK DISPONIBILE'}
+                          {riga.stato === 'in_arrivo'
+                            ? '🔒 IN ARRIVO (ORDINATO)'
+                            : isCritico
+                            ? 'ORDINA SUBITO'
+                            : isAttenzione
+                            ? 'SOTTO SCORTA'
+                            : 'OK DISPONIBILE'}
                         </span>
                       </td>
                       <td className="p-3.5">
@@ -620,14 +764,41 @@ export default function MRPPage() {
                         </div>
                       </td>
                       <td className="p-3.5 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => apriCaricoPerArticolo(mat.id)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-orange-600 text-slate-200 hover:text-white text-xs font-semibold border border-slate-700 hover:border-orange-500 transition-all cursor-pointer group"
-                          title={`Registra arrivo ${mat.codice_articolo}`}
-                        >
-                          <Truck className="w-3.5 h-3.5 text-orange-400 group-hover:text-white" />
-                          <span>Carica DDT</span>
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* CASO 1: Materiale già ordinato -> Mostra UN SOLO pulsante verde per registrare il DDT */}
+                          {riga.stato === 'in_arrivo' && riga.ordiniFornitoreAperti.length > 0 ? (
+                            <button
+                              onClick={() => apriRicezioneOrdineFornitore(riga.ordiniFornitoreAperti[0])}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
+                              title="Registra arrivo camion con DDT e carica a magazzino"
+                            >
+                              <Truck className="w-3.5 h-3.5" />
+                              <span>Arrivato DDT</span>
+                            </button>
+                          ) : (
+                            /* CASO 2: Materiale non in arrivo */
+                            <>
+                              {riga.fabbisognoNetto > 0 && (
+                                <button
+                                  onClick={() => apriModaleOrdineFornitore(riga)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
+                                  title="Segna come ordinato per evitare doppi acquisti"
+                                >
+                                  <ShoppingCart className="w-3.5 h-3.5" />
+                                  <span>Segna Ordinato</span>
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => apriCaricoPerArticolo(mat.id)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all cursor-pointer"
+                                title={`Carico manuale DDT ${mat.codice_articolo}`}
+                              >
+                                <Truck className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -643,10 +814,17 @@ export default function MRPPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Truck className="w-5 h-5 text-orange-500" />
-                Registra Entrata Merci da Fornitore (DDT)
-              </h2>
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Truck className="w-5 h-5 text-emerald-400" />
+                  {ordineFornitoreInRicezioneId ? 'Ricezione Merce da Fornitore (DDT)' : 'Registra Entrata Merci (DDT)'}
+                </h2>
+                {ordineFornitoreInRicezioneId && (
+                  <p className="text-xs text-emerald-400 mt-0.5">
+                    Riferimento a ordine fornitore in arrivo: la registrazione chiuderà l&apos;ordine e caricherà il materiale a magazzino.
+                  </p>
+                )}
+              </div>
               <button
                 onClick={() => setModaleCaricoAperta(false)}
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
@@ -828,6 +1006,125 @@ export default function MRPPage() {
                 >
                   <Plus className="w-4 h-4" />
                   <span>Conferma Carico a Magazzino</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE ANTI-DOPPIO ORDINE: REGISTRA ORDINE A FORNITORE */}
+      {modaleOrdineAperta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-sky-400" />
+                Registra Emissione Ordine a Fornitore
+              </h2>
+              <button
+                onClick={() => setModaleOrdineAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfermaOrdineFornitore} className="p-5 space-y-4">
+              <div className="p-3 bg-sky-950/40 rounded-xl border border-sky-800/60 text-xs text-sky-200">
+                🔒 <strong>Protezione Anti-Doppio Ordine:</strong> Appena confermi, questo materiale verrà contrassegnato come <strong>"In Arrivo"</strong> nell'MRP per tutto il team, evitando che altri colleghi ordinino per errore lo stesso pezzo.
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Materiale / Barra da Ordinare
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={formOrdineFornitore.nome_materiale}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-300 font-mono opacity-80"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Quantità da Ordinare *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.1"
+                    required
+                    value={formOrdineFornitore.quantita_ordinata}
+                    onChange={(e) =>
+                      setFormOrdineFornitore({ ...formOrdineFornitore, quantita_ordinata: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 font-mono font-bold focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Fornitore Selezionato
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formOrdineFornitore.fornitore_nome}
+                    onChange={(e) =>
+                      setFormOrdineFornitore({ ...formOrdineFornitore, fornitore_nome: e.target.value })
+                    }
+                    placeholder="es. Rodacciai, Lucefin..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Data Arrivo Stimata / Promessa dal Fornitore *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formOrdineFornitore.data_arrivo_prevista}
+                  onChange={(e) =>
+                    setFormOrdineFornitore({ ...formOrdineFornitore, data_arrivo_prevista: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Note Ordine d'Acquisto
+                </label>
+                <textarea
+                  rows={2}
+                  value={formOrdineFornitore.note}
+                  onChange={(e) =>
+                    setFormOrdineFornitore({ ...formOrdineFornitore, note: e.target.value })
+                  }
+                  placeholder="Riferimento offerta n., certificato 3.1 richiesto..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+                <button
+                  type="button"
+                  onClick={() => setModaleOrdineAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-md shadow-sky-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Conferma e Blocca Riordini</span>
                 </button>
               </div>
             </form>

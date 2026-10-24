@@ -84,8 +84,8 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
     }
   }, [pathname])
 
-  // Se siamo nella pagina di login, mostra solo la pagina senza menu né header
-  if (pathname === '/login') {
+  // Se siamo nella pagina di login o imposta-password, mostra solo la pagina senza menu né header
+  if (pathname === '/login' || pathname === '/imposta-password') {
     return <>{children}</>
   }
 

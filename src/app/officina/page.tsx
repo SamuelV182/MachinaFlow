@@ -36,12 +36,14 @@ import {
   CentroLavoro,
   OrdineProduzione,
   FaseOdP,
-  Articolo
+  Articolo,
+  ComponenteDistintaBase
 } from '@/types/database'
 import {
   SEED_CENTRI_LAVORO,
   SEED_ODP,
-  SEED_ARTICOLI
+  SEED_ARTICOLI,
+  SEED_DISTINTA_BASE
 } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
 
@@ -49,6 +51,7 @@ export default function TerminaleOfficinaPage() {
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
   const [articoli, setArticoli] = useState<Articolo[]>([])
+  const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
 
   const [macchinaSelezionataId, setMacchinaSelezionataId] = useState<string>('tutte')
   const [modalitaVista, setModalitaVista] = useState<'cards' | 'tabella'>('cards')
@@ -90,6 +93,7 @@ export default function TerminaleOfficinaPage() {
 
       setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
+      setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
 
       // Carica OdP sincronizzati dal Cloud Supabase
       const odpSincronizzati = await syncService.getOrdiniProduzione()
@@ -291,7 +295,7 @@ export default function TerminaleOfficinaPage() {
     return fasiPrecedenti.every((f) => f.stato === 'completata')
   }
 
-  // Estrai tutte le fasi da eseguire o in corso con metadati avanzati di sequenza e blocco
+  // Estrai tutte le fasi da eseguire o in corso con metadati avanzati di sequenza e disponibilità materiale
   const fasiInOfficina = useMemo(() => {
     const lista: {
       odp: OrdineProduzione & { fasi: FaseOdP[] }
@@ -299,25 +303,51 @@ export default function TerminaleOfficinaPage() {
       articolo?: Articolo
       centro?: CentroLavoro
       fasePrecedenteCompletata: boolean
+      materiaPrimaMancante: boolean
+      nomeMateriaPrimaMancante?: string
     }[] = []
 
     odpList.forEach((odp) => {
       const articolo = articoli.find((a) => a.id === odp.articolo_id)
+
+      // Controlla se le materie prime in distinta base (BOM) per questo articolo sono disponibili a stock
+      let materiaPrimaMancante = false
+      let nomeMateriaPrimaMancante: string | undefined = undefined
+
+      const componentiBom = distinte.filter((d) => d.articolo_padre_id === odp.articolo_id)
+      for (const comp of componentiBom) {
+        const mat = articoli.find((a) => a.id === comp.articolo_componente_id)
+        if (mat) {
+          const fabbisogno = comp.quantita_necessaria * odp.quantita_da_produrre
+          if (mat.giacenza_attuale < fabbisogno) {
+            materiaPrimaMancante = true
+            nomeMateriaPrimaMancante = `${mat.codice_articolo} (Giacenza: ${mat.giacenza_attuale} ${mat.unita_misura}, serve: ${fabbisogno})`
+            break
+          }
+        }
+      }
+
       odp.fasi.forEach((fase) => {
         const centro = centriLavoro.find((c) => c.id === fase.centro_lavoro_id)
         const fasePrecedenteCompletata = checkFasiPrecedentiCompletate(odp, fase.sequenza)
+        // La mancanza di materia prima impatta le fasi di prima lavorazione (es. Taglio, CAD o prima operazione meccanica)
+        const isFaseIniziale = fase.sequenza <= 20
+        const matMancanteSuQuestaFase = isFaseIniziale && materiaPrimaMancante
+
         lista.push({
           odp,
           fase,
           articolo,
           centro,
-          fasePrecedenteCompletata
+          fasePrecedenteCompletata,
+          materiaPrimaMancante: matMancanteSuQuestaFase,
+          nomeMateriaPrimaMancante
         })
       })
     })
 
     return lista
-  }, [odpList, articoli, centriLavoro])
+  }, [odpList, articoli, centriLavoro, distinte])
 
   // Calcolo Puntualità e Scadenza per Capo Officina / Supervisore
   const calcolaScadenzaFase = (odp: OrdineProduzione, fase: FaseOdP) => {
@@ -393,8 +423,12 @@ export default function TerminaleOfficinaPage() {
       const scoreB = statoScore(b)
       if (scoreA !== scoreB) return scoreA - scoreB
 
-      // Tra quelle da avviare, se una ha il materiale già pronto (fase prec completata) precede quella in attesa
+      // Tra quelle da avviare, se una ha il materiale già pronto al banco precede quella in attesa
       if (a.fase.stato !== 'completata' && b.fase.stato !== 'completata') {
+        // Se a una manca la materia prima, scivola dopo quelle che hanno il materiale a stock
+        if (!a.materiaPrimaMancante && b.materiaPrimaMancante) return -1
+        if (a.materiaPrimaMancante && !b.materiaPrimaMancante) return 1
+
         if (a.fasePrecedenteCompletata && !b.fasePrecedenteCompletata) return -1
         if (!a.fasePrecedenteCompletata && b.fasePrecedenteCompletata) return 1
 
@@ -413,19 +447,37 @@ export default function TerminaleOfficinaPage() {
     })
   }, [fasiFiltrateRaw])
 
-  // Controlla se sulla macchina selezionata (o in officina se 'tutte') c'è già una lavorazione in corso
-  const haLavorazioneInCorso = useMemo(() => {
-    return fasiOrdinate.some((f) => f.fase.stato === 'in_corso')
-  }, [fasiOrdinate])
+  // Identifica per CIASCUNA macchina la prima fase autorizzata ad essere avviata
+  // Una macchina può avviare un pezzo solo se attualmente non ne ha già un altro "in_corso"
+  const idsFasiAutorizzateDaAvviare = useMemo(() => {
+    const autorizzate = new Set<string>()
 
-  // Identifica l'UNICA fase che ha il diritto di essere avviata per prima (la prima non completata che ha le fasi prec completate)
-  const idFaseProssimaAutorizzata = useMemo(() => {
-    if (haLavorazioneInCorso) return null // Nessun'altra fase può essere avviata se ce n'è già una in corso
-    const primaDisponibile = fasiOrdinate.find(
-      (f) => f.fase.stato !== 'completata' && f.fasePrecedenteCompletata
-    )
-    return primaDisponibile ? primaDisponibile.fase.id : null
-  }, [fasiOrdinate, haLavorazioneInCorso])
+    // Trova l'insieme di tutti i centri di lavoro presenti nelle fasi
+    const centriIds = new Set(fasiOrdinate.map((item) => item.fase.centro_lavoro_id))
+
+    centriIds.forEach((centroId) => {
+      // Controlla se QUESTA specifica macchina ha già una lavorazione attiva sul mandrino
+      const macchinaOccupata = fasiOrdinate.some(
+        (item) => item.fase.centro_lavoro_id === centroId && item.fase.stato === 'in_corso'
+      )
+
+      // Se la macchina è libera, la sua prima fase con materiale disponibile e fasi precedenti completate è autorizzata
+      if (!macchinaOccupata) {
+        const primaPronta = fasiOrdinate.find(
+          (item) =>
+            item.fase.centro_lavoro_id === centroId &&
+            item.fase.stato !== 'completata' &&
+            item.fasePrecedenteCompletata &&
+            !item.materiaPrimaMancante
+        )
+        if (primaPronta) {
+          autorizzate.add(primaPronta.fase.id)
+        }
+      }
+    })
+
+    return autorizzate
+  }, [fasiOrdinate])
 
   // Macchina attualmente associata al terminale
   const macchinaAttiva = centriLavoro.find((c) => c.id === postazioneLoginId)
@@ -853,13 +905,17 @@ export default function TerminaleOfficinaPage() {
       {/* VISTA A SCHEDE (CARDS TOUCH) */}
       {modalitaVista === 'cards' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {fasiOrdinate.map(({ odp, fase, articolo, centro, fasePrecedenteCompletata }) => {
+          {fasiOrdinate.map(({ odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, nomeMateriaPrimaMancante }) => {
             const isCompletata = fase.stato === 'completata'
             const isInCorso = fase.stato === 'in_corso'
 
-            // Controllo autorizzazione di avvio:
-            // Può essere avviata SOLTANTO la fase che è la prossima autorizzata dal sistema.
-            const isAutorizzataAdAvviare = fase.id === idFaseProssimaAutorizzata
+            // Controlla se la specifica macchina di questa fase ha già un pezzo in lavorazione attiva
+            const macchinaQuestaFaseOccupata = fasiOrdinate.some(
+              (item) => item.fase.centro_lavoro_id === fase.centro_lavoro_id && item.fase.stato === 'in_corso'
+            )
+
+            // Controllo autorizzazione di avvio per centro di lavoro
+            const isAutorizzataAdAvviare = idsFasiAutorizzateDaAvviare.has(fase.id)
             const isBloccata = !isInCorso && !isCompletata && !isAutorizzataAdAvviare
 
             // Configurazione badge Priorità OdP
@@ -1048,26 +1104,30 @@ export default function TerminaleOfficinaPage() {
                       </button>
                     )}
 
-                    {/* CASO 2: FASE BLOCCATA DALLA CODA O DA LAVORAZIONE IN CORSO */}
+                    {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO O MATERIA PRIMA */}
                     {isBloccata && (
                       <div className="col-span-2 py-3 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs flex items-center justify-between select-none">
                         <div className="flex items-center gap-2">
                           <Lock className="w-4 h-4 text-slate-500 shrink-0" />
                           <div>
-                            <p className="font-bold text-slate-400">
-                              {haLavorazioneInCorso
+                            <p className={`font-bold ${materiaPrimaMancante ? 'text-amber-400' : 'text-slate-400'}`}>
+                              {materiaPrimaMancante
+                                ? '⚠️ In attesa materia prima da fornitore (Stock insufficiente)'
+                                : macchinaQuestaFaseOccupata
                                 ? 'Macchina occupata: lavorazione già in corso'
                                 : !fasePrecedenteCompletata
                                 ? 'Fase bloccata: attesa completamento fase precedente'
                                 : 'In attesa del tuo turno (segui la priorità di coda)'}
                             </p>
                             <p className="text-[10px] text-slate-500">
-                              L’operatore non può avviare questo ordine prima degli ordini prioritari.
+                              {materiaPrimaMancante && nomeMateriaPrimaMancante
+                                ? `Materiale: ${nomeMateriaPrimaMancante} - La macchina esegue intanto il pezzo successivo disponibile.`
+                                : 'L’operatore non può avviare questo ordine prima degli ordini prioritari pronti.'}
                             </p>
                           </div>
                         </div>
-                        <span className="font-mono text-slate-600 font-black text-sm shrink-0">
-                          🔒 BLOCCO
+                        <span className={`font-mono font-black text-sm shrink-0 ${materiaPrimaMancante ? 'text-amber-500' : 'text-slate-600'}`}>
+                          {materiaPrimaMancante ? '⚠️ MATERIA PRIMA' : '🔒 BLOCCO'}
                         </span>
                       </div>
                     )}
@@ -1153,37 +1213,39 @@ export default function TerminaleOfficinaPage() {
         </div>
       )}
 
-      {/* VISTA A LISTA DETTAGLIATA (TABELLA COMPATTA) */}
+      {/* VISTA A LISTA DETTAGLIATA (TABELLA COMPATTA ULTRA-RESPONSIVA) */}
       {modalitaVista === 'tabella' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              <thead className="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 <tr>
-                  <th className="py-3.5 px-4">Pos / Priorità</th>
-                  <th className="py-3.5 px-4">OdP / Articolo</th>
-                  <th className="py-3.5 px-4">Fase & Sequenza</th>
-                  <th className="py-3.5 px-4">Macchina</th>
-                  <th className="py-3.5 px-4">Quantità</th>
-                  <th className="py-3.5 px-4">Tempo Previsto</th>
-                  {isSupervisore && <th className="py-3.5 px-4">Scadenza & Ritardo (Supervisore)</th>}
-                  <th className="py-3.5 px-4">Stato Flusso Monte</th>
-                  <th className="py-3.5 px-4 text-center">Stato</th>
-                  <th className="py-3.5 px-4 text-right">Azione Operatore</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap"># / Priorità</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">OdP / Particolare</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Fase Operativa</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Centro / Macchina</th>
+                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Q.tà</th>
+                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Previsto</th>
+                  {isSupervisore && <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Scadenza</th>}
+                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Stato Monte</th>
+                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Stato Fase</th>
+                  <th className="py-2.5 px-3 text-right whitespace-nowrap sticky right-0 bg-slate-950/95 shadow-l">
+                    Azione
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {fasiOrdinate.map(({ odp, fase, articolo, centro, fasePrecedenteCompletata }, index) => {
+                {fasiOrdinate.map(({ odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, nomeMateriaPrimaMancante }, index) => {
                   const isCompletata = fase.stato === 'completata'
                   const isInCorso = fase.stato === 'in_corso'
-                  const isAutorizzataAdAvviare = fase.id === idFaseProssimaAutorizzata
+                  const isAutorizzataAdAvviare = idsFasiAutorizzateDaAvviare.has(fase.id)
                   const isBloccata = !isInCorso && !isCompletata && !isAutorizzataAdAvviare
 
                   const prioritaMappa: Record<number, { label: string; bg: string; icon: typeof Flame }> = {
-                    4: { label: 'URGENTE', bg: 'bg-red-500/20 text-red-400 border-red-500/40', icon: Flame },
+                    4: { label: 'URG.', bg: 'bg-red-500/20 text-red-400 border-red-500/40', icon: Flame },
                     3: { label: 'ALTA', bg: 'bg-amber-500/20 text-amber-400 border-amber-500/40', icon: AlertCircle },
-                    2: { label: 'MEDIA', bg: 'bg-blue-500/20 text-blue-400 border-blue-500/40', icon: Clock },
-                    1: { label: 'BASSA', bg: 'bg-slate-700/50 text-slate-400 border-slate-600/40', icon: Clock }
+                    2: { label: 'MED.', bg: 'bg-blue-500/20 text-blue-400 border-blue-500/40', icon: Clock },
+                    1: { label: 'BAS.', bg: 'bg-slate-700/50 text-slate-400 border-slate-600/40', icon: Clock }
                   }
                   const prioritaConfig = prioritaMappa[odp.priorita] || prioritaMappa[2]
                   const PrioritaIcon = prioritaConfig.icon
@@ -1202,10 +1264,10 @@ export default function TerminaleOfficinaPage() {
                       }`}
                     >
                       {/* Posizione in Coda & Priorità */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
                           <span
-                            className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
                               isInCorso
                                 ? 'bg-blue-500 text-white'
                                 : isAutorizzataAdAvviare
@@ -1216,7 +1278,7 @@ export default function TerminaleOfficinaPage() {
                             #{index + 1}
                           </span>
                           <span
-                            className={`text-[9px] font-bold px-2 py-0.5 rounded border flex items-center gap-1 ${prioritaConfig.bg}`}
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 ${prioritaConfig.bg}`}
                           >
                             <PrioritaIcon className="w-2.5 h-2.5" />
                             {prioritaConfig.label}
@@ -1225,49 +1287,49 @@ export default function TerminaleOfficinaPage() {
                       </td>
 
                       {/* OdP & Articolo */}
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-orange-400">
+                      <td className="py-2.5 px-3">
+                        <div className="font-mono font-bold text-orange-400 text-xs">
                           {odp.codice_odp}
                         </div>
-                        <div className="text-white text-[11px] truncate max-w-[200px]" title={articolo?.descrizione}>
-                          {articolo?.codice_articolo} — {articolo?.descrizione}
+                        <div className="text-slate-300 text-[11px] truncate max-w-[170px]" title={articolo?.descrizione}>
+                          {articolo?.codice_articolo} &bull; {articolo?.descrizione}
                         </div>
                       </td>
 
                       {/* Fase */}
-                      <td className="py-3 px-4">
-                        <span className="text-[10px] text-slate-400 block font-mono">Seq. {fase.sequenza}</span>
-                        <span className="font-bold text-slate-100">{fase.nome_fase}</span>
+                      <td className="py-2.5 px-3">
+                        <span className="text-[10px] text-slate-400 block font-mono">Fase #{fase.sequenza}</span>
+                        <span className="font-bold text-slate-100 text-xs">{fase.nome_fase}</span>
                       </td>
 
                       {/* Macchina */}
-                      <td className="py-3 px-4">
-                        <div className="text-slate-200 font-medium">
+                      <td className="py-2.5 px-3">
+                        <div className="text-slate-200 font-medium text-xs truncate max-w-[160px]" title={centro?.nome}>
                           {centro ? centro.nome : 'N/D'}
                         </div>
                         {macchinaSelezionataId !== 'tutte' && fase.centro_lavoro_id !== macchinaSelezionataId && (
-                          <span className="text-[10px] text-blue-400 block font-bold">⚡ Alternativa</span>
+                          <span className="text-[9px] text-blue-400 font-bold block">⚡ Macchina Alternativa</span>
                         )}
                       </td>
 
                       {/* Quantità */}
-                      <td className="py-3 px-4 font-bold text-white whitespace-nowrap">
-                        {odp.quantita_da_produrre} {articolo?.unita_misura}
+                      <td className="py-2.5 px-2.5 font-bold text-white text-center whitespace-nowrap text-xs">
+                        {odp.quantita_da_produrre} <span className="text-[10px] text-slate-400 font-normal">{articolo?.unita_misura}</span>
                       </td>
 
                       {/* Tempo */}
-                      <td className="py-3 px-4 text-slate-300 font-mono whitespace-nowrap">
-                        {fase.tempo_stimato_totale_min} min
+                      <td className="py-2.5 px-2.5 text-slate-300 font-mono text-center whitespace-nowrap text-xs">
+                        {fase.tempo_stimato_totale_min} <span className="text-[10px] text-slate-500">m</span>
                       </td>
 
-                      {/* Scadenza & Ritardo: VISIBILE SOLO AL SUPERVISORE */}
+                      {/* Scadenza: VISIBILE SOLO AL SUPERVISORE */}
                       {isSupervisore && (
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                           {(() => {
                             const sc = calcolaScadenzaFase(odp, fase)
                             if (!sc) return <span className="text-slate-500">-</span>
                             return (
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${sc.badgeColor}`}>
+                              <span className={`text-[9px] px-2 py-0.5 rounded-full border ${sc.badgeColor}`}>
                                 {sc.testoLabel}
                               </span>
                             )
@@ -1275,30 +1337,35 @@ export default function TerminaleOfficinaPage() {
                         </td>
                       )}
 
-                      {/* Stato Flusso Monte */}
-                      <td className="py-3 px-4">
+                      {/* Stato Flusso Monte / Materiali */}
+                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                         {isCompletata ? (
-                          <span className="text-slate-500 text-[11px] flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-slate-500" />
+                          <span className="text-slate-500 text-[10px] inline-flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-slate-500" />
                             Conclusa
                           </span>
+                        ) : materiaPrimaMancante ? (
+                          <span className="text-amber-400 font-bold text-[10px] inline-flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80" title={nomeMateriaPrimaMancante}>
+                            <AlertTriangle className="w-3 h-3 text-amber-400" />
+                            Manca Grezzo
+                          </span>
                         ) : fasePrecedenteCompletata ? (
-                          <span className="text-emerald-400 font-bold text-[11px] flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Pronto al banco
+                          <span className="text-emerald-400 font-bold text-[10px] inline-flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Pronto banco
                           </span>
                         ) : (
-                          <span className="text-amber-400 font-semibold text-[11px] flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
+                          <span className="text-amber-400 font-semibold text-[10px] inline-flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
                             In attesa monte
                           </span>
                         )}
                       </td>
 
                       {/* Badge Stato */}
-                      <td className="py-3 px-4 text-center">
+                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                         <span
-                          className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full whitespace-nowrap ${
+                          className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap ${
                             isInCorso
                               ? 'bg-blue-600 text-white animate-pulse'
                               : isCompletata
@@ -1311,23 +1378,23 @@ export default function TerminaleOfficinaPage() {
                           {isInCorso
                             ? 'IN MACCHINA'
                             : isCompletata
-                            ? 'COMPLETATA'
+                            ? 'FATTA'
                             : isAutorizzataAdAvviare
                             ? 'PRONTA'
                             : 'IN CODA'}
                         </span>
                       </td>
 
-                      {/* Azioni con Sicurezza e Blocco */}
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                      {/* Azioni con Sicurezza e Blocco (Sticky colonna a destra) */}
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap sticky right-0 bg-slate-900/95 group-hover:bg-slate-800/95 shadow-l">
+                        <div className="flex items-center justify-end gap-1.5">
                           {isAutorizzataAdAvviare && (
                             <button
                               onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wide flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] uppercase tracking-wide flex items-center gap-1 shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95"
                             >
-                              <Play className="w-3.5 h-3.5 fill-current" />
-                              Avvia (#1)
+                              <Play className="w-3 h-3 fill-current" />
+                              Avvia
                             </button>
                           )}
 
@@ -1335,27 +1402,27 @@ export default function TerminaleOfficinaPage() {
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'completata')}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase flex items-center gap-1 cursor-pointer"
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95"
                               >
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                Completa
+                                <CheckCircle className="w-3 h-3" />
+                                Fatta
                               </button>
                               <button
                                 onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'non_iniziata')}
-                                className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
                                 title="Sospendi"
                               >
-                                <Pause className="w-3.5 h-3.5" />
+                                <Pause className="w-3 h-3" />
                               </button>
                             </div>
                           )}
 
                           {isBloccata && (
                             <span
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[11px] font-bold select-none"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-bold select-none"
                               title="L'operatore deve prima eseguire l'ordine prioritario o attendere che il materiale sia pronto."
                             >
-                              <Lock className="w-3 h-3 text-slate-500" />
+                              <Lock className="w-2.5 h-2.5 text-slate-500" />
                               Bloccato
                             </span>
                           )}
@@ -1363,7 +1430,7 @@ export default function TerminaleOfficinaPage() {
                           {isCompletata && (
                             <button
                               onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
-                              className="text-[10px] text-slate-500 hover:text-white underline cursor-pointer"
+                              className="text-[9px] text-slate-500 hover:text-white underline cursor-pointer px-1"
                             >
                               Riapri
                             </button>
@@ -1381,20 +1448,20 @@ export default function TerminaleOfficinaPage() {
                               setTestoNota(fase.note_officina || '')
                               setModaleNoteAperta(true)
                             }}
-                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-orange-400 cursor-pointer"
+                            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-orange-400 cursor-pointer"
                             title="Aggiungi / Modifica Nota Operatore"
                           >
-                            <MessageSquare className="w-3.5 h-3.5" />
+                            <MessageSquare className="w-3 h-3" />
                           </button>
 
                           {/* Pulsante Scheda A4 in Overlay Touch */}
                           <button
                             type="button"
                             onClick={() => setSchedaA4OdpId(odp.id)}
-                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-orange-400 cursor-pointer"
+                            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-orange-400 cursor-pointer"
                             title="Apri Scheda Lavoro A4"
                           >
-                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            <ArrowUpRight className="w-3 h-3" />
                           </button>
                         </div>
                       </td>

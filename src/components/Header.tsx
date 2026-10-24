@@ -14,17 +14,38 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
   const router = useRouter()
   const [dataCorrente, setDataCorrente] = useState('')
   const [utenteEmail, setUtenteEmail] = useState<string | null>(null)
+  const [ruoloUtente, setRuoloUtente] = useState<string | null>(null)
+  const [aziendaNome, setAziendaNome] = useState<string>('Stabilimento Principale (Lucca)')
   const supabase = createClient()
 
   useEffect(() => {
     const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
+
       if (user?.email) {
         setUtenteEmail(user.email)
+
+        // Recupera profilo e azienda
+        const { data: profilo } = await supabase
+          .from('profili_utenti')
+          .select('ruolo, azienda_id, azienda:aziende(nome)')
+          .eq('id', user.id)
+          .single()
+
+        if (profilo) {
+          setRuoloUtente(profilo.ruolo)
+          if ((profilo as any).azienda?.nome) {
+            setAziendaNome((profilo as any).azienda.nome)
+          }
+        } else if (user.email.includes('admin')) {
+          setRuoloUtente('super_admin')
+        }
       }
     }
     fetchUser()
-  }, [])
+  }, [supabase])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -75,11 +96,18 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
           </button>
         )}
 
-        {/* Titolo di contesto stabilimento */}
+        {/* Titolo di contesto stabilimento o Badge Super Admin */}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-orange-400 border border-slate-700 hidden sm:inline-block">
-            Stabilimento Principale (Lucca)
-          </span>
+          {ruoloUtente === 'super_admin' ? (
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-sky-950 text-sky-300 border border-sky-700/80 hidden sm:inline-flex items-center gap-1.5 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+              Piattaforma Super Admin SaaS
+            </span>
+          ) : (
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-orange-400 border border-slate-700 hidden sm:inline-block">
+              {aziendaNome}
+            </span>
+          )}
         </div>
       </div>
 

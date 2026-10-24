@@ -43,6 +43,7 @@ export async function middleware(request: NextRequest) {
   // Pagine pubbliche che non richiedono login
   const isPaginaPubblica =
     pathname.startsWith('/login') ||
+    pathname.startsWith('/imposta-password') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/favicon.ico') ||
