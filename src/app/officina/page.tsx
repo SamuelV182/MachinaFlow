@@ -238,12 +238,6 @@ export default function TerminaleOfficinaPage() {
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
 
-    // Sincronizza l'avanzamento della fase su Supabase
-    const odpModificato = aggiornati.find((o) => o.id === odpId)
-    const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
-    if (faseModificata) {
-      syncService.aggiornaFaseOdP(faseModificata)
-    }
     setModaleNoteAperta(false)
     setNotifica('Nota operatore registrata!')
     setTimeout(() => setNotifica(null), 3000)
