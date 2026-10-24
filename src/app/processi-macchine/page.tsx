@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { CentroLavoro, TipoProcesso } from '@/types/database'
 import { SEED_CENTRI_LAVORO, SEED_TIPI_PROCESSO, SEED_ARTICOLI, SEED_DISTINTA_BASE, SEED_FASI_CICLO, SEED_CLIENTI, SEED_ORDINI_CLIENTI } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 export default function ProcessiMacchinePage() {
   const [tabAttivo, setTabAttivo] = useState<'macchine' | 'processi'>('macchine')
@@ -134,6 +135,13 @@ export default function ProcessiMacchinePage() {
 
     setCentriLavoro(aggiornati)
     localStorage.setItem('machinaflow_centri_lavoro', JSON.stringify(aggiornati))
+
+    // Sincronizza centro di lavoro su Supabase
+    const salvata = aggiornati.find((m) => m.id === (modificaMacchinaId || aggiornati[0].id))
+    if (salvata) {
+      syncService.salvaCentroLavoro(salvata)
+    }
+
     chiudiModaleMacchina()
   }
 
@@ -199,6 +207,13 @@ export default function ProcessiMacchinePage() {
 
     setTipiProcesso(aggiornati)
     localStorage.setItem('machinaflow_tipi_processo', JSON.stringify(aggiornati))
+
+    // Sincronizza tipo processo su Supabase
+    const salvato = aggiornati.find((p) => p.id === (modificaProcessoId || aggiornati[0].id))
+    if (salvato) {
+      syncService.salvaTipoProcesso(salvato)
+    }
+
     chiudiModaleProcesso()
   }
 

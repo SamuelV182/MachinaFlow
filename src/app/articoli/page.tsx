@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { Articolo, TipoArticolo, ComponenteDistintaBase, FaseCicloStandard } from '@/types/database'
 import { SEED_ARTICOLI, SEED_DISTINTA_BASE, SEED_FASI_CICLO } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 export default function ArticoliPage() {
   const [articoli, setArticoli] = useState<Articolo[]>([])
@@ -100,6 +101,13 @@ export default function ArticoliPage() {
 
     setArticoli(aggiornati)
     localStorage.setItem('machinaflow_articoli', JSON.stringify(aggiornati))
+
+    // Sincronizza su Supabase Cloud
+    const salvato = aggiornati.find((a) => a.id === (modificaId || aggiornati[0].id))
+    if (salvato) {
+      syncService.salvaArticolo(salvato)
+    }
+
     chiudiModale()
   }
 

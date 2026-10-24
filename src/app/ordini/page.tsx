@@ -126,15 +126,24 @@ export default function OrdiniPage() {
 
       const ordiniCaricati = parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
 
-      // Arricchisci con oggetti collegati
-      const arricchiti: OrdineCompleto[] = ordiniCaricati.map((ord) => ({
-        ...ord,
-        cliente: clientiList.find((c) => c.id === ord.cliente_id),
-        righe: ord.righe.map((r) => ({
-          ...r,
-          articolo: articoliList.find((a) => a.id === r.articolo_id)
-        }))
-      }))
+      // Arricchisci con oggetti collegati e determina lo stato reale in base agli OdP esistenti
+      const arricchiti: OrdineCompleto[] = ordiniCaricati.map((ord) => {
+        // Se tutte le righe di questo ordine hanno già un OdP associato, lo stato è "in_produzione"
+        const tutteRigheInProduzione = ord.righe.length > 0 && ord.righe.every((r) =>
+          odpCaricati.some((o) => o.riga_ordine_cliente_id === r.id)
+        )
+        const statoReale = tutteRigheInProduzione ? ('in_produzione' as const) : ord.stato
+
+        return {
+          ...ord,
+          stato: statoReale,
+          cliente: clientiList.find((c) => c.id === ord.cliente_id),
+          righe: ord.righe.map((r) => ({
+            ...r,
+            articolo: articoliList.find((a) => a.id === r.articolo_id)
+          }))
+        }
+      })
       setOrdini(arricchiti)
 
       // Preimposta data consegna suggerita a +10 giorni
@@ -319,6 +328,9 @@ export default function OrdiniPage() {
     setOrdini(aggiornati)
     localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(aggiornati))
 
+    // Sincronizza su Supabase Cloud
+    syncService.salvaOrdineCliente(nuovoOrdine)
+
     chiudiModaleOrdine()
     setNotifica(`Ordine ${nuovoOrdine.numero_ordine} con ${nuovoOrdine.righe.length} articoli creato con successo!`)
     setTimeout(() => setNotifica(null), 4000)
@@ -423,11 +435,21 @@ export default function OrdiniPage() {
       setOdpList(tempOdpList)
       localStorage.setItem('machinaflow_odp', JSON.stringify(tempOdpList))
 
+      // Sincronizza tutti gli OdP creati su Supabase
+      tempOdpList.slice(0, countCreati).forEach((odp) => {
+        syncService.salvaOrdineProduzione(odp)
+      })
+
       const ordiniAggiornati = ordini.map((o) =>
         ordiniCoinvoltiIds.has(o.id) ? { ...o, stato: 'in_produzione' as const } : o
       )
       setOrdini(ordiniAggiornati)
       localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+
+      // Sincronizza stato ordini coinvolti su Supabase
+      ordiniCoinvoltiIds.forEach((ordId) => {
+        syncService.aggiornaStatoOrdineCliente(ordId, 'in_produzione')
+      })
 
       setRigheSelezionate([])
       setNotifica(`🚀 Lanciati con successo in produzione ${countCreati} OdP con tutte le relative fasi di ciclo e postazione CAD/CAM!`)
@@ -501,9 +523,21 @@ export default function OrdiniPage() {
       )
       setOrdini(ordiniAggiornati)
       localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+      // Sincronizza stato su Supabase
+      syncService.aggiornaStatoOrdineCliente(ordine.id, 'in_produzione')
 
       setNotifica(`Generati ${countCreati} OdP per l'ordine ${ordine.numero_ordine}! Tutti i pezzi sono ora in officina.`)
       setTimeout(() => setNotifica(null), 5000)
+    } else {
+      // Se erano già stati creati in precedenza, aggiorna lo stato dell'ordine
+      const ordiniAggiornati = ordini.map((o) =>
+        o.id === ordine.id ? { ...o, stato: 'in_produzione' as const } : o
+      )
+      setOrdini(ordiniAggiornati)
+      localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+      syncService.aggiornaStatoOrdineCliente(ordine.id, 'in_produzione')
+      setNotifica(`L'ordine ${ordine.numero_ordine} è già interamente coperto da OdP in officina!`)
+      setTimeout(() => setNotifica(null), 4000)
     }
   }
 
@@ -564,6 +598,8 @@ export default function OrdiniPage() {
     )
     setOrdini(ordiniAggiornati)
     localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+    // Sincronizza stato su Supabase
+    syncService.aggiornaStatoOrdineCliente(ordine.id, 'in_produzione')
 
     setNotifica(`Generato OdP ${codiceOdp} per ${riga.quantita} pz con ${fasiEsecutive.length} fasi di lavorazione!`)
     setTimeout(() => setNotifica(null), 5000)

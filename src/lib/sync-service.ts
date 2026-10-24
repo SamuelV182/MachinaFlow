@@ -142,13 +142,44 @@ export const syncService = {
       localStorage.setItem('machinaflow_odp', JSON.stringify(lista))
     } catch {}
 
-    // 2. Salva su Supabase Cloud
+    // 2. Salva su Supabase Cloud (solo colonne presenti nel database)
     try {
-      const { fasi, ...datiOdp } = nuovoOdp
-      await supabase.from('ordini_produzione').upsert(datiOdp)
+      const datiOdpPuliti = {
+        id: nuovoOdp.id,
+        codice_odp: nuovoOdp.codice_odp,
+        riga_ordine_cliente_id: nuovoOdp.riga_ordine_cliente_id || null,
+        articolo_id: nuovoOdp.articolo_id,
+        quantita_da_produrre: nuovoOdp.quantita_da_produrre,
+        quantita_prodotta: nuovoOdp.quantita_prodotta || 0,
+        data_inizio_pianificata: nuovoOdp.data_inizio_pianificata || null,
+        data_fine_pianificata: nuovoOdp.data_fine_pianificata || null,
+        stato: nuovoOdp.stato || 'pianificato',
+        priorita: nuovoOdp.priorita || 2,
+        qr_code_token: nuovoOdp.qr_code_token,
+        note: nuovoOdp.note || null
+      }
+      await supabase.from('ordini_produzione').upsert(datiOdpPuliti)
 
-      if (fasi && fasi.length > 0) {
-        await supabase.from('fasi_odp').upsert(fasi)
+      if (nuovoOdp.fasi && nuovoOdp.fasi.length > 0) {
+        const fasiPulite = nuovoOdp.fasi.map((f) => ({
+          id: f.id,
+          odp_id: f.odp_id,
+          sequenza: f.sequenza,
+          nome_fase: f.nome_fase,
+          tipo_processo_id: f.tipo_processo_id || null,
+          centro_lavoro_id: f.centro_lavoro_id,
+          tempo_stimato_totale_min: f.tempo_stimato_totale_min || 0,
+          tempo_effettivo_min: f.tempo_effettivo_min || 0,
+          stato: f.stato || 'non_iniziata',
+          operatore_id: f.operatore_id || null,
+          data_inizio_reale: f.data_inizio_reale || null,
+          data_fine_reale: f.data_fine_reale || null,
+          note_officina: f.note_officina || null
+        }))
+        const resFasi = await supabase.from('fasi_odp').upsert(fasiPulite)
+        if (resFasi.error) {
+          console.error('Errore inserimento fasi_odp:', resFasi.error)
+        }
       }
     } catch (e) {
       console.error('Errore sincronizzazione cloud OdP:', e)
@@ -172,11 +203,100 @@ export const syncService = {
       }
     } catch {}
 
-    // Aggiorna Cloud
+    // Aggiorna Cloud (solo colonne valide)
     try {
-      await supabase.from('fasi_odp').upsert(fase)
+      const fasePulita = {
+        id: fase.id,
+        odp_id: fase.odp_id,
+        sequenza: fase.sequenza,
+        nome_fase: fase.nome_fase,
+        tipo_processo_id: fase.tipo_processo_id || null,
+        centro_lavoro_id: fase.centro_lavoro_id,
+        tempo_stimato_totale_min: fase.tempo_stimato_totale_min || 0,
+        tempo_effettivo_min: fase.tempo_effettivo_min || 0,
+        stato: fase.stato || 'non_iniziata',
+        operatore_id: fase.operatore_id || null,
+        data_inizio_reale: fase.data_inizio_reale || null,
+        data_fine_reale: fase.data_fine_reale || null,
+        note_officina: fase.note_officina || null
+      }
+      await supabase.from('fasi_odp').upsert(fasePulita)
     } catch (e) {
       console.error('Errore aggiornamento cloud fase:', e)
+    }
+  },
+
+  // 3. ORDINI CLIENTI
+  async salvaOrdineCliente(ordine: OrdineCliente & { righe?: RigaOrdineCliente[] }) {
+    try {
+      await supabase.from('ordini_clienti').upsert({
+        id: ordine.id,
+        numero_ordine: ordine.numero_ordine,
+        cliente_id: ordine.cliente_id,
+        data_ordine: ordine.data_ordine,
+        data_consegna_concordata: ordine.data_consegna_concordata,
+        stato: ordine.stato,
+        note: ordine.note || null
+      })
+
+      if (ordine.righe && ordine.righe.length > 0) {
+        const righeDaSalvare = ordine.righe.map((r) => ({
+          id: r.id,
+          ordine_cliente_id: ordine.id,
+          articolo_id: r.articolo_id,
+          quantita: r.quantita,
+          prezzo_unitario: r.prezzo_unitario || 0
+        }))
+        await supabase.from('righe_ordine_cliente').upsert(righeDaSalvare)
+      }
+    } catch (e) {
+      console.error('Errore salvataggio ordine cliente su Supabase:', e)
+    }
+  },
+
+  async aggiornaStatoOrdineCliente(ordineId: string, nuovoStato: 'bozza' | 'confermato' | 'in_produzione' | 'evaso' | 'annullato') {
+    try {
+      await supabase
+        .from('ordini_clienti')
+        .update({ stato: nuovoStato })
+        .eq('id', ordineId)
+    } catch (e) {
+      console.error('Errore aggiornamento stato ordine cliente su Supabase:', e)
+    }
+  },
+
+  // 4. ARTICOLI E GIACENZE
+  async salvaArticolo(articolo: Articolo) {
+    try {
+      await supabase.from('articoli').upsert({
+        id: articolo.id,
+        codice_articolo: articolo.codice_articolo,
+        descrizione: articolo.descrizione,
+        tipo: articolo.tipo,
+        unita_misura: articolo.unita_misura,
+        giacenza_attuale: articolo.giacenza_attuale,
+        scorta_minima: articolo.scorta_minima,
+        prezzo_riferimento: articolo.prezzo_riferimento || 0
+      })
+    } catch (e) {
+      console.error('Errore salvataggio articolo su Supabase:', e)
+    }
+  },
+
+  // 5. CENTRI DI LAVORO E PROCESSI
+  async salvaCentroLavoro(centro: CentroLavoro) {
+    try {
+      await supabase.from('centri_lavoro').upsert(centro)
+    } catch (e) {
+      console.error('Errore salvataggio centro lavoro su Supabase:', e)
+    }
+  },
+
+  async salvaTipoProcesso(processo: TipoProcesso) {
+    try {
+      await supabase.from('tipi_processo').upsert(processo)
+    } catch (e) {
+      console.error('Errore salvataggio tipo processo su Supabase:', e)
     }
   }
 }
