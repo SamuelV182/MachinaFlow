@@ -1,7 +1,9 @@
 'use client'
 
-import { Bell, Calendar, UserCheck, PanelLeft, PanelLeftClose } from 'lucide-react'
+import { Bell, Calendar, UserCheck, PanelLeft, PanelLeftClose, LogOut } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 
 interface HeaderProps {
   isSidebarCollassata?: boolean
@@ -9,7 +11,26 @@ interface HeaderProps {
 }
 
 export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderProps) {
+  const router = useRouter()
   const [dataCorrente, setDataCorrente] = useState('')
+  const [utenteEmail, setUtenteEmail] = useState<string | null>(null)
+  const supabase = createClient()
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.email) {
+        setUtenteEmail(user.email)
+      }
+    }
+    fetchUser()
+  }, [])
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
 
   useEffect(() => {
     const formattaData = () => {
@@ -76,9 +97,21 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
             <UserCheck className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="hidden md:block text-left">
-            <p className="text-xs font-semibold text-slate-200">Capo Officina</p>
-            <p className="text-[10px] text-slate-400">Pianificazione & MES</p>
+            <p className="text-xs font-semibold text-slate-200">
+              {utenteEmail ? utenteEmail.split('@')[0] : 'Capo Officina'}
+            </p>
+            <p className="text-[10px] text-slate-400 truncate max-w-[130px]">
+              {utenteEmail || 'Pianificazione & MES'}
+            </p>
           </div>
+
+          <button
+            onClick={handleLogout}
+            title="Disconnetti (Logout)"
+            className="ml-2 p-1.5 rounded-lg bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700/60 transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>

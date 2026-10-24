@@ -84,6 +84,11 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
     }
   }, [pathname])
 
+  // Se siamo nella pagina di login, mostra solo la pagina senza menu né header
+  if (pathname === '/login') {
+    return <>{children}</>
+  }
+
   // Se siamo in modalità Operatore a Bordo Macchina: layout pulito a tutto schermo (Full Kiosk)
   if (isModalitaOperatoreKiosk) {
     return (
