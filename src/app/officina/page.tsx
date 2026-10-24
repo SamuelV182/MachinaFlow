@@ -29,7 +29,8 @@ import {
   KeyRound,
   AlertTriangle,
   Calendar,
-  Hourglass
+  Hourglass,
+  Printer
 } from 'lucide-react'
 import {
   CentroLavoro,
@@ -71,6 +72,9 @@ export default function TerminaleOfficinaPage() {
   const [modaleNoteAperta, setModaleNoteAperta] = useState(false)
   const [fasePerNota, setFasePerNota] = useState<{ odpId: string; faseId: string; notaAttuale: string } | null>(null)
   const [testoNota, setTestoNota] = useState('')
+
+  // Modale Blindata Scheda A4 per Bordo Macchina (nessuna navigazione fuori dall'officina)
+  const [schedaA4OdpId, setSchedaA4OdpId] = useState<string | null>(null)
 
   useEffect(() => {
     const caricaDati = async () => {
@@ -1123,12 +1127,14 @@ export default function TerminaleOfficinaPage() {
                       {fase.note_officina ? 'Modifica Nota Operatore' : '+ Aggiungi Nota Operatore'}
                     </button>
 
-                    <Link
-                      href={`/produzione/${odp.id}`}
-                      className="text-orange-400 hover:text-orange-300 font-semibold text-[11px]"
+                    <button
+                      type="button"
+                      onClick={() => setSchedaA4OdpId(odp.id)}
+                      className="text-orange-400 hover:text-orange-300 font-semibold text-[11px] cursor-pointer inline-flex items-center gap-1"
                     >
-                      Vedi Scheda A4 →
-                    </Link>
+                      <QrCode className="w-3.5 h-3.5" />
+                      Vedi Scheda A4
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1381,14 +1387,15 @@ export default function TerminaleOfficinaPage() {
                             <MessageSquare className="w-3.5 h-3.5" />
                           </button>
 
-                          {/* Link Scheda A4 */}
-                          <Link
-                            href={`/produzione/${odp.id}`}
-                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-orange-400"
+                          {/* Pulsante Scheda A4 in Overlay Touch */}
+                          <button
+                            type="button"
+                            onClick={() => setSchedaA4OdpId(odp.id)}
+                            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-orange-400 cursor-pointer"
                             title="Apri Scheda Lavoro A4"
                           >
                             <ArrowUpRight className="w-3.5 h-3.5" />
-                          </Link>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1459,6 +1466,167 @@ export default function TerminaleOfficinaPage() {
           </div>
         </div>
       )}
+
+      {/* MODALE BLINDATA SCHEDA LAVORO A4 (TOUCH KIOSK BORDO MACCHINA) */}
+      {schedaA4OdpId && (() => {
+        const odpDettaglio = odpList.find((o) => o.id === schedaA4OdpId)
+        if (!odpDettaglio) return null
+        const articoloDettaglio = articoli.find((a) => a.id === odpDettaglio.articolo_id)
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            {/* Barra superiore Kiosk Blindata */}
+            <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800 mb-6 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-500/40 text-orange-400 flex items-center justify-center font-bold">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-white font-mono flex items-center gap-2">
+                    {odpDettaglio.codice_odp}
+                    <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-sans font-semibold">
+                      SCHEDA OPERATIVA A4
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Consultazione bordo macchina &bull; Nessun accesso al gestionale esterno
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  Stampa Scheda
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSchedaA4OdpId(null)}
+                  className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-orange-600/30 transition-all cursor-pointer"
+                >
+                  ✕ Chiudi Scheda (Torna al Banco)
+                </button>
+              </div>
+            </div>
+
+            {/* Foglio Scheda Lavoro A4 Blindato in sola lettura */}
+            <div className="max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
+              {/* Intestazione A4 */}
+              <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
+                <div>
+                  <span className="text-[10px] font-black tracking-widest text-orange-600 uppercase">
+                    OFFICINA MECCANICA DI PRECISIONE &bull; SCHEDA TECNICA DI PRODUZIONE
+                  </span>
+                  <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 mt-0.5">
+                    {odpDettaglio.codice_odp}
+                  </h1>
+                  <p className="text-xs text-slate-600 font-medium">
+                    Data emissione: {new Date(odpDettaglio.creato_il).toLocaleDateString('it-IT')} &bull; Consegna richiesta:{' '}
+                    <strong>{odpDettaglio.data_fine_pianificata || 'N/D'}</strong>
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Codice Disegno / Token</span>
+                  <span className="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded border border-slate-300">
+                    {odpDettaglio.qr_code_token}
+                  </span>
+                </div>
+              </div>
+
+              {/* Dati Articolo */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Codice Particolare</span>
+                  <span className="text-base font-black text-slate-900 font-mono">
+                    {articoloDettaglio?.codice_articolo || 'N/D'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Descrizione Tecnica</span>
+                  <span className="text-sm font-bold text-slate-800">
+                    {articoloDettaglio?.descrizione || 'Particolare Meccanico'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Quantità da Lavorare</span>
+                  <span className="text-xl font-black text-orange-600 font-mono">
+                    {odpDettaglio.quantita_da_produrre} {articoloDettaglio?.unita_misura || 'pz'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Note OdP */}
+              {odpDettaglio.note && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-900">
+                  <strong>Note di produzione:</strong> {odpDettaglio.note}
+                </div>
+              )}
+
+              {/* Sequenza Ciclo di Lavorazione */}
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-orange-600" />
+                  Ciclo di Fabbricazione & Sequenza Macchine
+                </h3>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold">
+                      <tr>
+                        <th className="py-2.5 px-3">Fase</th>
+                        <th className="py-2.5 px-3">Operazione</th>
+                        <th className="py-2.5 px-3">Centro di Lavoro</th>
+                        <th className="py-2.5 px-3 text-right">Tempo Stimato</th>
+                        <th className="py-2.5 px-3 text-center">Stato</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {odpDettaglio.fasi.map((f) => {
+                        const centro = centriLavoro.find((c) => c.id === f.centro_lavoro_id)
+                        return (
+                          <tr key={f.id} className={f.stato === 'completata' ? 'bg-emerald-50/50' : f.stato === 'in_corso' ? 'bg-blue-50/50 font-bold' : ''}>
+                            <td className="py-2.5 px-3 font-mono font-bold text-slate-500">#{f.sequenza}</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">{f.nome_fase}</td>
+                            <td className="py-2.5 px-3 text-slate-700">{centro?.nome || centro?.codice || f.centro_lavoro_id}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-700">{f.tempo_stimato_totale_min} min</td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                f.stato === 'completata'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : f.stato === 'in_corso'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {f.stato === 'in_corso' ? 'In Macchina' : f.stato === 'completata' ? 'Completata' : 'In Coda'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Pulsante Chiusura Footer A4 */}
+              <div className="pt-4 border-t border-slate-200 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSchedaA4OdpId(null)}
+                  className="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase cursor-pointer"
+                >
+                  Torna alla Postazione
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* MODALE DI SBLOCCO CON PIN CAPO OFFICINA / RESPONSABILE */}
       {modalePinAperta && (
@@ -1579,6 +1747,167 @@ export default function TerminaleOfficinaPage() {
           </div>
         </div>
       )}
+
+      {/* MODALE BLINDATA SCHEDA LAVORO A4 (TOUCH KIOSK BORDO MACCHINA) */}
+      {schedaA4OdpId && (() => {
+        const odpDettaglio = odpList.find((o) => o.id === schedaA4OdpId)
+        if (!odpDettaglio) return null
+        const articoloDettaglio = articoli.find((a) => a.id === odpDettaglio.articolo_id)
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            {/* Barra superiore Kiosk Blindata */}
+            <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800 mb-6 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-500/40 text-orange-400 flex items-center justify-center font-bold">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-white font-mono flex items-center gap-2">
+                    {odpDettaglio.codice_odp}
+                    <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-sans font-semibold">
+                      SCHEDA OPERATIVA A4
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Consultazione bordo macchina &bull; Nessun accesso al gestionale esterno
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  Stampa Scheda
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSchedaA4OdpId(null)}
+                  className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-orange-600/30 transition-all cursor-pointer"
+                >
+                  ✕ Chiudi Scheda (Torna al Banco)
+                </button>
+              </div>
+            </div>
+
+            {/* Foglio Scheda Lavoro A4 Blindato in sola lettura */}
+            <div className="max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
+              {/* Intestazione A4 */}
+              <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
+                <div>
+                  <span className="text-[10px] font-black tracking-widest text-orange-600 uppercase">
+                    OFFICINA MECCANICA DI PRECISIONE &bull; SCHEDA TECNICA DI PRODUZIONE
+                  </span>
+                  <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 mt-0.5">
+                    {odpDettaglio.codice_odp}
+                  </h1>
+                  <p className="text-xs text-slate-600 font-medium">
+                    Data emissione: {new Date(odpDettaglio.creato_il).toLocaleDateString('it-IT')} &bull; Consegna richiesta:{' '}
+                    <strong>{odpDettaglio.data_fine_pianificata || 'N/D'}</strong>
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Codice Disegno / Token</span>
+                  <span className="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded border border-slate-300">
+                    {odpDettaglio.qr_code_token}
+                  </span>
+                </div>
+              </div>
+
+              {/* Dati Articolo */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Codice Particolare</span>
+                  <span className="text-base font-black text-slate-900 font-mono">
+                    {articoloDettaglio?.codice_articolo || 'N/D'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Descrizione Tecnica</span>
+                  <span className="text-sm font-bold text-slate-800">
+                    {articoloDettaglio?.descrizione || 'Particolare Meccanico'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Quantità da Lavorare</span>
+                  <span className="text-xl font-black text-orange-600 font-mono">
+                    {odpDettaglio.quantita_da_produrre} {articoloDettaglio?.unita_misura || 'pz'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Note OdP */}
+              {odpDettaglio.note && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-900">
+                  <strong>Note di produzione:</strong> {odpDettaglio.note}
+                </div>
+              )}
+
+              {/* Sequenza Ciclo di Lavorazione */}
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-orange-600" />
+                  Ciclo di Fabbricazione & Sequenza Macchine
+                </h3>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold">
+                      <tr>
+                        <th className="py-2.5 px-3">Fase</th>
+                        <th className="py-2.5 px-3">Operazione</th>
+                        <th className="py-2.5 px-3">Centro di Lavoro</th>
+                        <th className="py-2.5 px-3 text-right">Tempo Stimato</th>
+                        <th className="py-2.5 px-3 text-center">Stato</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {odpDettaglio.fasi.map((f) => {
+                        const centro = centriLavoro.find((c) => c.id === f.centro_lavoro_id)
+                        return (
+                          <tr key={f.id} className={f.stato === 'completata' ? 'bg-emerald-50/50' : f.stato === 'in_corso' ? 'bg-blue-50/50 font-bold' : ''}>
+                            <td className="py-2.5 px-3 font-mono font-bold text-slate-500">#{f.sequenza}</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">{f.nome_fase}</td>
+                            <td className="py-2.5 px-3 text-slate-700">{centro?.nome || centro?.codice || f.centro_lavoro_id}</td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-700">{f.tempo_stimato_totale_min} min</td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                f.stato === 'completata'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : f.stato === 'in_corso'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {f.stato === 'in_corso' ? 'In Macchina' : f.stato === 'completata' ? 'Completata' : 'In Coda'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Pulsante Chiusura Footer A4 */}
+              <div className="pt-4 border-t border-slate-200 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSchedaA4OdpId(null)}
+                  className="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase cursor-pointer"
+                >
+                  Torna alla Postazione
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

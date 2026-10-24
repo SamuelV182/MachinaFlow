@@ -1,21 +1,31 @@
 {
-  "name": "MachinaFlow - PCP & MES",
+  "name": "MachinaFlow - PCP & MES Industriale",
   "short_name": "MachinaFlow",
-  "description": "Controllo e pianificazione della produzione industriale",
+  "description": "Controllo, pianificazione e avanzamento della produzione industriale in officina",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
-  "background_color": "#090d16",
+  "orientation": "any",
+  "background_color": "#020617",
   "theme_color": "#ea580c",
   "icons": [
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }
