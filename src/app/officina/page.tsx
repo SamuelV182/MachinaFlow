@@ -42,6 +42,7 @@ import {
   SEED_ODP,
   SEED_ARTICOLI
 } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 export default function TerminaleOfficinaPage() {
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
@@ -72,27 +73,34 @@ export default function TerminaleOfficinaPage() {
   const [testoNota, setTestoNota] = useState('')
 
   useEffect(() => {
-    const parseSicuro = <T,>(chiave: string, fallback: T): T => {
-      try {
-        const item = localStorage.getItem(chiave)
-        if (!item || item === 'undefined' || item === 'null') return fallback
-        return JSON.parse(item) as T
-      } catch {
-        return fallback
+    const caricaDati = async () => {
+      const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+        try {
+          const item = localStorage.getItem(chiave)
+          if (!item || item === 'undefined' || item === 'null') return fallback
+          return JSON.parse(item) as T
+        } catch {
+          return fallback
+        }
       }
+
+      setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
+      setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
+
+      // Carica OdP sincronizzati dal Cloud Supabase
+      const odpSincronizzati = await syncService.getOrdiniProduzione()
+      setOdpList(odpSincronizzati)
+
+      // Recupera la postazione salvata nel tablet
+      const salvata = localStorage.getItem('machinaflow_postazione_corrente_id')
+      if (salvata) {
+        setPostazioneLoginId(salvata)
+        setMacchinaSelezionataId(salvata === 'supervisore' ? 'tutte' : salvata)
+      }
+      setCaricamentoSessione(false)
     }
 
-    setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
-    setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
-    setOdpList(parseSicuro('machinaflow_odp', SEED_ODP))
-
-    // Recupera la postazione salvata nel tablet
-    const salvata = localStorage.getItem('machinaflow_postazione_corrente_id')
-    if (salvata) {
-      setPostazioneLoginId(salvata)
-      setMacchinaSelezionataId(salvata === 'supervisore' ? 'tutte' : salvata)
-    }
-    setCaricamentoSessione(false)
+    caricaDati()
   }, [])
 
   // Apertura modale richiesta PIN
@@ -192,6 +200,13 @@ export default function TerminaleOfficinaPage() {
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
 
+    // Sincronizza l'avanzamento della fase su Supabase
+    const odpModificato = aggiornati.find((o) => o.id === odpId)
+    const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
+    if (faseModificata) {
+      syncService.aggiornaFaseOdP(faseModificata)
+    }
+
     const messaggio =
       nuovoStato === 'in_corso'
         ? 'Lavorazione avviata!'
@@ -222,6 +237,13 @@ export default function TerminaleOfficinaPage() {
 
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    // Sincronizza l'avanzamento della fase su Supabase
+    const odpModificato = aggiornati.find((o) => o.id === odpId)
+    const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
+    if (faseModificata) {
+      syncService.aggiornaFaseOdP(faseModificata)
+    }
     setModaleNoteAperta(false)
     setNotifica('Nota operatore registrata!')
     setTimeout(() => setNotifica(null), 3000)
@@ -253,6 +275,13 @@ export default function TerminaleOfficinaPage() {
 
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    // Sincronizza l'avanzamento della fase su Supabase
+    const odpModificato = aggiornati.find((o) => o.id === odpId)
+    const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
+    if (faseModificata) {
+      syncService.aggiornaFaseOdP(faseModificata)
+    }
     setNotifica(`Lavorazione spostata con successo su ${macchinaDest?.codice || 'nuova macchina'}!`)
     setTimeout(() => setNotifica(null), 4000)
   }
