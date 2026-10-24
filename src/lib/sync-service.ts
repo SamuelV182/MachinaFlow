@@ -76,7 +76,14 @@ export const syncService = {
   // 1. ORDINI DI PRODUZIONE (OdP)
   async getOrdiniProduzione(): Promise<(OrdineProduzione & { fasi: FaseOdP[] })[]> {
     try {
-      const { data: odp, error } = await supabase
+      // Recupera ordini salvati localmente nel browser
+      let locali: (OrdineProduzione & { fasi: FaseOdP[] })[] = []
+      try {
+        const salvati = localStorage.getItem('machinaflow_odp')
+        if (salvati) locali = JSON.parse(salvati)
+      } catch {}
+
+      const { data: odpCloud, error } = await supabase
         .from('ordini_produzione')
         .select(`
           *,
@@ -84,24 +91,40 @@ export const syncService = {
         `)
         .order('creato_il', { ascending: false })
 
-      if (error || !odp) {
-        // Fallback localStorage se offline o non configurato
-        const salvati = localStorage.getItem('machinaflow_odp')
-        return salvati ? JSON.parse(salvati) : []
+      if (error || !odpCloud) {
+        return locali
+      }
+
+      // Se nel browser ci sono ordini non ancora presenti su Supabase, inviali in background
+      if (locali.length > 0) {
+        for (const loc of locali) {
+          if (!odpCloud.some((c) => c.id === loc.id)) {
+            // Salva su cloud senza bloccare
+            this.salvaOrdineProduzione(loc)
+            odpCloud.push(loc)
+          }
+        }
       }
 
       // Ordina le fasi per sequenza
-      const formattati = odp.map((o) => ({
+      const formattati = odpCloud.map((o) => ({
         ...o,
         fasi: (o.fasi || []).sort((a: FaseOdP, b: FaseOdP) => a.sequenza - b.sequenza)
       }))
 
-      // Aggiorna anche localStorage per ridondanza/offline
-      localStorage.setItem('machinaflow_odp', JSON.stringify(formattati))
+      // Aggiorna cache locale per massima reattività
+      try {
+        localStorage.setItem('machinaflow_odp', JSON.stringify(formattati))
+      } catch {}
+
       return formattati
     } catch {
-      const salvati = localStorage.getItem('machinaflow_odp')
-      return salvati ? JSON.parse(salvati) : []
+      try {
+        const salvati = localStorage.getItem('machinaflow_odp')
+        return salvati ? JSON.parse(salvati) : []
+      } catch {
+        return []
+      }
     }
   },
 
