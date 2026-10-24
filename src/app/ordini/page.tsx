@@ -94,55 +94,60 @@ export default function OrdiniPage() {
   const [notifica, setNotifica] = useState<string | null>(null)
 
   useEffect(() => {
-    const parseSicuro = <T,>(chiave: string, fallback: T): T => {
-      try {
-        const item = localStorage.getItem(chiave)
-        if (!item || item === 'undefined' || item === 'null') return fallback
-        return JSON.parse(item) as T
-      } catch {
-        return fallback
+    const caricaDati = async () => {
+      const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+        try {
+          const item = localStorage.getItem(chiave)
+          if (!item || item === 'undefined' || item === 'null') return fallback
+          return JSON.parse(item) as T
+        } catch {
+          return fallback
+        }
       }
+
+      const clientiList = parseSicuro('machinaflow_clienti', SEED_CLIENTI)
+      setClienti(clientiList)
+
+      const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
+      setArticoli(articoliList)
+
+      const cicliList = parseSicuro('machinaflow_fasi_ciclo', SEED_FASI_CICLO)
+      setCicli(cicliList)
+
+      const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
+      setDistinte(distinteList)
+
+      const centriList = parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
+      setCentriLavoro(centriList)
+
+      // Carica e sincronizza OdP da Supabase Cloud
+      const odpCaricati = await syncService.getOrdiniProduzione()
+      setOdpList(odpCaricati)
+
+      const ordiniCaricati = parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+
+      // Arricchisci con oggetti collegati
+      const arricchiti: OrdineCompleto[] = ordiniCaricati.map((ord) => ({
+        ...ord,
+        cliente: clientiList.find((c) => c.id === ord.cliente_id),
+        righe: ord.righe.map((r) => ({
+          ...r,
+          articolo: articoliList.find((a) => a.id === r.articolo_id)
+        }))
+      }))
+      setOrdini(arricchiti)
+
+      // Preimposta data consegna suggerita a +10 giorni
+      const dataSuggerita = new Date()
+      dataSuggerita.setDate(dataSuggerita.getDate() + 10)
+      setFormOrdine((prev) => ({
+        ...prev,
+        numero_ordine: `ORD-2026-${String(ordiniCaricati.length + 1).padStart(3, '0')}`,
+        data_consegna_concordata: dataSuggerita.toISOString().split('T')[0]
+      }))
     }
 
-    const clientiList = parseSicuro('machinaflow_clienti', SEED_CLIENTI)
-    setClienti(clientiList)
-
-    const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
-    setArticoli(articoliList)
-
-    const cicliList = parseSicuro('machinaflow_fasi_ciclo', SEED_FASI_CICLO)
-    setCicli(cicliList)
-
-    const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
-    setDistinte(distinteList)
-
-    const centriList = parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
-    setCentriLavoro(centriList)
-
-    const odpCaricati = parseSicuro('machinaflow_odp', SEED_ODP)
-    setOdpList(odpCaricati)
-
-    const ordiniCaricati = parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
-
-    // Arricchisci con oggetti collegati
-    const arricchiti: OrdineCompleto[] = ordiniCaricati.map((ord) => ({
-      ...ord,
-      cliente: clientiList.find((c) => c.id === ord.cliente_id),
-      righe: ord.righe.map((r) => ({
-        ...r,
-        articolo: articoliList.find((a) => a.id === r.articolo_id)
-      }))
-    }))
-    setOrdini(arricchiti)
-
-    // Preimposta data consegna suggerita a +10 giorni
-    const dataSuggerita = new Date()
-    dataSuggerita.setDate(dataSuggerita.getDate() + 10)
-    setFormOrdine((prev) => ({
-      ...prev,
-      numero_ordine: `ORD-2026-${String(ordiniCaricati.length + 1).padStart(3, '0')}`,
-      data_consegna_concordata: dataSuggerita.toISOString().split('T')[0]
-    }))
+    caricaDati()
   }, [])
 
   // SIMULATORE CAPABLE-TO-PROMISE (CTP) DATA DI CONSEGNA
@@ -485,6 +490,11 @@ export default function OrdiniPage() {
     if (countCreati > 0) {
       setOdpList(tempOdpList)
       localStorage.setItem('machinaflow_odp', JSON.stringify(tempOdpList))
+
+      // Sincronizza tutti i nuovi OdP su Supabase
+      tempOdpList.slice(0, countCreati).forEach((odp) => {
+        syncService.salvaOrdineProduzione(odp)
+      })
 
       const ordiniAggiornati = ordini.map((o) =>
         o.id === ordine.id ? { ...o, stato: 'in_produzione' as const } : o
