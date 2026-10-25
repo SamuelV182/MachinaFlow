@@ -293,8 +293,8 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
                             {fase.note_officina}
                           </span>
                         )}
-                        {/* Status visuale a schermo con pulsante rapido MES */}
-                        <div className="no-print mt-2 flex items-center gap-2">
+                        {/* Status visuale a schermo (Sola Lettura) */}
+                        <div className="no-print mt-1.5 flex items-center gap-2">
                           <span
                             className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
                               fase.stato === 'completata'
@@ -306,24 +306,6 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
                           >
                             {fase.stato.replace('_', ' ')}
                           </span>
-
-                          {fase.stato === 'non_iniziata' && (
-                            <button
-                              onClick={() => handleAggiornaStatoFase(fase.id, 'in_corso')}
-                              className="px-2 py-0.5 rounded bg-blue-600 text-white text-[10px] font-semibold hover:bg-blue-500 cursor-pointer flex items-center gap-1"
-                            >
-                              <Play className="w-2.5 h-2.5" /> Start
-                            </button>
-                          )}
-
-                          {fase.stato === 'in_corso' && (
-                            <button
-                              onClick={() => handleAggiornaStatoFase(fase.id, 'completata')}
-                              className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-semibold hover:bg-emerald-500 cursor-pointer flex items-center gap-1"
-                            >
-                              <Check className="w-2.5 h-2.5" /> Concludi
-                            </button>
-                          )}
                         </div>
                       </td>
 

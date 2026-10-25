@@ -30,7 +30,8 @@ import {
   AlertTriangle,
   Calendar,
   Hourglass,
-  Printer
+  Printer,
+  Scissors
 } from 'lucide-react'
 import {
   CentroLavoro,
@@ -78,6 +79,26 @@ export default function TerminaleOfficinaPage() {
 
   // Modale Blindata Scheda A4 per Bordo Macchina (nessuna navigazione fuori dall'officina)
   const [schedaA4OdpId, setSchedaA4OdpId] = useState<string | null>(null)
+
+  // Gestione Sdoppiamento Lotto (Split OdP Parziale)
+  const [modaleSplitAperta, setModaleSplitAperta] = useState(false)
+  const [datiSplit, setDatiSplit] = useState<{
+    odp: OrdineProduzione & { fasi: FaseOdP[] }
+    fase: FaseOdP
+    quantitaDisponibile: number
+    quantitaDaSplittare: number
+  } | null>(null)
+
+  // Gestione Completamento Fase con Quantità Reale
+  const [modaleCompletaAperta, setModaleCompletaAperta] = useState(false)
+  const [datiCompleta, setDatiCompleta] = useState<{
+    odp: OrdineProduzione & { fasi: FaseOdP[] }
+    fase: FaseOdP
+    pezziBuoni: number
+    pezziScarto: number
+    opzioneResiduo: 'sospendi' | 'splitta_residuo'
+    generaRipristinoScarto: boolean
+  } | null>(null)
 
   useEffect(() => {
     const caricaDati = async () => {
@@ -195,11 +216,13 @@ export default function TerminaleOfficinaPage() {
 
         const tutteChiuse = fasiAggiornate.every((f) => f.stato === 'completata')
         const almenoUnaAvviata = fasiAggiornate.some((f) => f.stato === 'in_corso')
+        const nuovoStatoOdp = tutteChiuse ? ('completato' as const) : almenoUnaAvviata ? ('in_lavorazione' as const) : odp.stato
 
         return {
           ...odp,
           fasi: fasiAggiornate,
-          stato: tutteChiuse ? ('completato' as const) : almenoUnaAvviata ? ('in_lavorazione' as const) : odp.stato
+          stato: nuovoStatoOdp,
+          quantita_prodotta: tutteChiuse ? odp.quantita_da_produrre : odp.quantita_prodotta
         }
       }
       return odp
@@ -208,11 +231,15 @@ export default function TerminaleOfficinaPage() {
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
 
-    // Sincronizza l'avanzamento della fase su Supabase
+    // Sincronizza l'avanzamento della fase e lo stato dell'OdP su Supabase
     const odpModificato = aggiornati.find((o) => o.id === odpId)
     const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
     if (faseModificata) {
       syncService.aggiornaFaseOdP(faseModificata)
+    }
+
+    if (odpModificato) {
+      syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
     }
 
     const messaggio =
@@ -224,6 +251,259 @@ export default function TerminaleOfficinaPage() {
 
     setNotifica(messaggio)
     setTimeout(() => setNotifica(null), 4000)
+  }
+
+  // Esegue lo Split OdP (Sdoppiamento Lotto per Avvio Parziale)
+  const handleEseguiSplitOdP = async () => {
+    if (!datiSplit || datiSplit.quantitaDaSplittare <= 0) return
+    const { odp, fase, quantitaDaSplittare } = datiSplit
+
+    const quantitaResidua = odp.quantita_da_produrre - quantitaDaSplittare
+    if (quantitaResidua <= 0) return
+
+    // 1. Modifica l'OdP corrente (Lotto A) con la quantità parziale da lavorare subito
+    const codiceBase = odp.codice_odp.replace(/\/A$|\/B$|\/R\d*$/, '')
+    const splitEsistenti = odpList.filter((o) => o.codice_odp.startsWith(`${codiceBase}/`)).length
+    const codiceLottoA = odp.codice_odp.includes('/A') ? odp.codice_odp : `${codiceBase}/A`
+    const codiceLottoB = splitEsistenti > 1 ? `${codiceBase}/B${splitEsistenti}` : `${codiceBase}/B`
+
+    const odpLottoA: OrdineProduzione & { fasi: FaseOdP[] } = {
+      ...odp,
+      codice_odp: codiceLottoA,
+      quantita_da_produrre: quantitaDaSplittare,
+      stato: 'in_lavorazione',
+      fasi: odp.fasi.map((f) => {
+        if (f.id === fase.id) {
+          return {
+            ...f,
+            stato: 'in_corso' as const,
+            data_inizio_reale: new Date().toISOString()
+          }
+        }
+        return f
+      })
+    }
+
+    // 2. Crea il nuovo OdP residuo (Lotto B) con la quantità a saldo
+    const nuovoIdB = `odp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`
+    const odpLottoB: OrdineProduzione & { fasi: FaseOdP[] } = {
+      ...odp,
+      id: nuovoIdB,
+      codice_odp: codiceLottoB,
+      quantita_da_produrre: quantitaResidua,
+      quantita_prodotta: 0,
+      stato: 'pianificato',
+      qr_code_token: `QR-${codiceLottoB}`,
+      fasi: odp.fasi.map((f) => ({
+        ...f,
+        id: `fase-${Date.now()}-${f.sequenza}-${Math.random().toString(36).substring(2, 4)}`,
+        odp_id: nuovoIdB,
+        stato: 'non_iniziata' as const,
+        data_inizio_reale: undefined,
+        data_fine_reale: undefined,
+        tempo_effettivo_min: 0
+      }))
+    }
+
+    // 3. Salva entrambi su Cloud e Locale
+    const listaAggiornata = odpList.map((o) => (o.id === odp.id ? odpLottoA : o))
+    listaAggiornata.unshift(odpLottoB)
+
+    setOdpList(listaAggiornata)
+    localStorage.setItem('machinaflow_odp', JSON.stringify(listaAggiornata))
+
+    // Salva su Supabase Cloud
+    await syncService.salvaOrdineProduzione(odpLottoA)
+    await syncService.salvaOrdineProduzione(odpLottoB)
+
+    setModaleSplitAperta(false)
+    setDatiSplit(null)
+    setNotifica(`✓ Lotto sdoppiato con successo! Avviato ${codiceLottoA} (${quantitaDaSplittare} pz). Creato ${codiceLottoB} (${quantitaResidua} pz a saldo).`)
+    setTimeout(() => setNotifica(null), 5000)
+  }
+
+  // Conferma completamento fase con quantità effettiva e gestione scarti (Opzione B)
+  const handleConfermaCompletaFase = async () => {
+    if (!datiCompleta) return
+    const { odp, fase, pezziBuoni, pezziScarto, opzioneResiduo, generaRipristinoScarto } = datiCompleta
+
+    // 1. Se ci sono scarti registrati e l'operatore/capo officina ha richiesto il ripristino immediato (/R)
+    let nuovoOdpRipristino: (OrdineProduzione & { fasi: FaseOdP[] }) | null = null
+    if (pezziScarto > 0 && generaRipristinoScarto) {
+      const codiceBase = odp.codice_odp.replace(/\/A$|\/B$|\/R\d*$/, '')
+      // Controlla se esistono già altri ordini di ripristino per questo codice (es. /R1, /R2)
+      const ripristiniEsistenti = odpList.filter((o) => o.codice_odp.startsWith(`${codiceBase}/R`)).length
+      const suffissoRipristino = ripristiniEsistenti > 0 ? `/R${ripristiniEsistenti + 1}` : '/R'
+      const codiceRipristino = `${codiceBase}${suffissoRipristino}`
+      const nuovoIdRipristino = `odp-${Date.now()}-rip-${Math.random().toString(36).substring(2, 4)}`
+
+      nuovoOdpRipristino = {
+        ...odp,
+        id: nuovoIdRipristino,
+        codice_odp: codiceRipristino,
+        quantita_da_produrre: pezziScarto,
+        quantita_prodotta: 0,
+        stato: 'pianificato',
+        priorita: 4, // Priorità URGENTE automatica per i ripristini
+        qr_code_token: `QR-${codiceRipristino}`,
+        note: `⚡ Ripristino URGENTE di ${pezziScarto} pz scartati durante la Fase #${fase.sequenza} (${fase.nome_fase}).`,
+        fasi: odp.fasi.map((f) => ({
+          ...f,
+          id: `fase-${Date.now()}-${f.sequenza}-${Math.random().toString(36).substring(2, 4)}`,
+          odp_id: nuovoIdRipristino,
+          stato: 'non_iniziata' as const,
+          data_inizio_reale: undefined,
+          data_fine_reale: undefined,
+          tempo_effettivo_min: 0,
+          note_officina: `Lotto ripristino scarto (${pezziScarto} pz)`
+        }))
+      }
+    }
+
+    // 2. Se l'operatore ha fatto l'intera quantità del lotto (o di più) oppure ha scelto di sospendere
+    if (pezziBuoni >= odp.quantita_da_produrre || opzioneResiduo === 'sospendi') {
+      if (pezziBuoni < odp.quantita_da_produrre && opzioneResiduo === 'sospendi') {
+        // Sospendi la fase registrando l'avanzamento parziale
+        const aggiornati = odpList.map((o) => {
+          if (o.id === odp.id) {
+            return {
+              ...o,
+              quantita_prodotta: pezziBuoni,
+              fasi: o.fasi.map((f) =>
+                f.id === fase.id
+                  ? {
+                      ...f,
+                      stato: 'non_iniziata' as const,
+                      note_officina: `Avanzamento parziale: ${pezziBuoni}/${odp.quantita_da_produrre} pz buoni, ${pezziScarto} scarti. ${f.note_officina || ''}`
+                    }
+                  : f
+              )
+            }
+          }
+          return o
+        })
+
+        if (nuovoOdpRipristino) {
+          aggiornati.unshift(nuovoOdpRipristino)
+          await syncService.salvaOrdineProduzione(nuovoOdpRipristino)
+        }
+
+        setOdpList(aggiornati)
+        localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+        const odpModificato = aggiornati.find((o) => o.id === odp.id)
+        const faseModificata = odpModificato?.fasi.find((f) => f.id === fase.id)
+        if (faseModificata) syncService.aggiornaFaseOdP(faseModificata)
+        if (odpModificato) syncService.aggiornaStatoOdP(odpModificato.id, 'in_lavorazione', pezziBuoni)
+
+        setModaleCompletaAperta(false)
+        setDatiCompleta(null)
+        const msgRipristino = nuovoOdpRipristino ? ` Generato OdP urgente ${nuovoOdpRipristino.codice_odp} (${pezziScarto} pz)!` : ''
+        setNotifica(`Lavorazione sospesa: registrati ${pezziBuoni} pezzi buoni.${msgRipristino}`)
+        setTimeout(() => setNotifica(null), 5000)
+        return
+      }
+
+      // Altrimenti chiudi normalmente la fase
+      handleCambiaStatoFase(odp.id, fase.id, 'completata')
+
+      if (nuovoOdpRipristino) {
+        // Salva prima l'OdP di ripristino sul cloud
+        await syncService.salvaOrdineProduzione(nuovoOdpRipristino)
+
+        setOdpList((prev) => {
+          const listaConRipristino = [nuovoOdpRipristino!, ...prev.filter((o) => o.id !== nuovoOdpRipristino!.id)]
+          localStorage.setItem('machinaflow_odp', JSON.stringify(listaConRipristino))
+          return listaConRipristino
+        })
+
+        setNotifica(`✓ Fase completata (${pezziBuoni} pz buoni). Generato OdP urgente di ripristino ${nuovoOdpRipristino.codice_odp} per i ${pezziScarto} pz scartati!`)
+        setTimeout(() => setNotifica(null), 5000)
+      }
+
+      setModaleCompletaAperta(false)
+      setDatiCompleta(null)
+      return
+    }
+
+    // 3. Se ha fatto meno pezzi e ha scelto di splittare il residuo (invia i pezzi buoni avanti)
+    const quantitaResidua = odp.quantita_da_produrre - pezziBuoni
+    const codiceBase = odp.codice_odp.replace(/\/A$|\/B\d*$|\/R\d*$/, '')
+    const splitEsistenti = odpList.filter((o) => o.codice_odp.startsWith(`${codiceBase}/`)).length
+    const codiceFatti = odp.codice_odp.includes('/A') ? odp.codice_odp : `${codiceBase}/A`
+    const codiceResiduo = splitEsistenti > 1 ? `${codiceBase}/B${splitEsistenti}` : `${codiceBase}/B`
+
+    // OdP con pezzi completati (avanza alla fase successiva)
+    const odpFatti: OrdineProduzione & { fasi: FaseOdP[] } = {
+      ...odp,
+      codice_odp: codiceFatti,
+      quantita_da_produrre: pezziBuoni,
+      quantita_prodotta: pezziBuoni,
+      fasi: odp.fasi.map((f) => {
+        if (f.id === fase.id) {
+          return {
+            ...f,
+            stato: 'completata' as const,
+            data_fine_reale: new Date().toISOString(),
+            tempo_effettivo_min: f.tempo_effettivo_min || f.tempo_stimato_totale_min
+          }
+        }
+        return f
+      })
+    }
+
+    const tutteChiuse = odpFatti.fasi.every((f) => f.stato === 'completata')
+    odpFatti.stato = tutteChiuse ? 'completato' : 'in_lavorazione'
+
+    // OdP Residuo per i pezzi ancora da fare su questa fase
+    const nuovoIdResiduo = `odp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`
+    const odpResiduo: OrdineProduzione & { fasi: FaseOdP[] } = {
+      ...odp,
+      id: nuovoIdResiduo,
+      codice_odp: codiceResiduo,
+      quantita_da_produrre: quantitaResidua,
+      quantita_prodotta: 0,
+      stato: 'in_lavorazione',
+      qr_code_token: `QR-${codiceResiduo}`,
+      fasi: odp.fasi.map((f) => {
+        if (f.sequenza < fase.sequenza) {
+          return {
+            ...f,
+            id: `fase-${Date.now()}-${f.sequenza}-${Math.random().toString(36).substring(2, 4)}`,
+            odp_id: nuovoIdResiduo
+          }
+        }
+        return {
+          ...f,
+          id: `fase-${Date.now()}-${f.sequenza}-${Math.random().toString(36).substring(2, 4)}`,
+          odp_id: nuovoIdResiduo,
+          stato: 'non_iniziata' as const,
+          data_inizio_reale: undefined,
+          data_fine_reale: undefined,
+          tempo_effettivo_min: 0
+        }
+      })
+    }
+
+    const listaAggiornata = odpList.map((o) => (o.id === odp.id ? odpFatti : o))
+    listaAggiornata.unshift(odpResiduo)
+
+    if (nuovoOdpRipristino) {
+      listaAggiornata.unshift(nuovoOdpRipristino)
+      await syncService.salvaOrdineProduzione(nuovoOdpRipristino)
+    }
+
+    setOdpList(listaAggiornata)
+    localStorage.setItem('machinaflow_odp', JSON.stringify(listaAggiornata))
+
+    await syncService.salvaOrdineProduzione(odpFatti)
+    await syncService.salvaOrdineProduzione(odpResiduo)
+
+    setModaleCompletaAperta(false)
+    setDatiCompleta(null)
+    const msgRipristino = nuovoOdpRipristino ? ` Generato inoltre OdP urgente ${nuovoOdpRipristino.codice_odp} (${pezziScarto} pz)!` : ''
+    setNotifica(`✓ Inviati ${pezziBuoni} pz alle fasi successive (${codiceFatti}). Creato lotto residuo ${codiceResiduo} per i ${quantitaResidua} pz rimanenti.${msgRipristino}`)
+    setTimeout(() => setNotifica(null), 5000)
   }
 
   // Salvataggio nota operatore
@@ -304,6 +584,8 @@ export default function TerminaleOfficinaPage() {
       centro?: CentroLavoro
       fasePrecedenteCompletata: boolean
       materiaPrimaMancante: boolean
+      materiaPrimaParziale: boolean
+      pezziFattibiliConGiacenza: number
       nomeMateriaPrimaMancante?: string
     }[] = []
 
@@ -312,19 +594,37 @@ export default function TerminaleOfficinaPage() {
 
       // Controlla se le materie prime in distinta base (BOM) per questo articolo sono disponibili a stock
       let materiaPrimaMancante = false
+      let materiaPrimaParziale = false
+      let pezziFattibili = odp.quantita_da_produrre
       let nomeMateriaPrimaMancante: string | undefined = undefined
 
       const componentiBom = distinte.filter((d) => d.articolo_padre_id === odp.articolo_id)
       for (const comp of componentiBom) {
         const mat = articoli.find((a) => a.id === comp.articolo_componente_id)
         if (mat) {
-          const fabbisogno = comp.quantita_necessaria * odp.quantita_da_produrre
-          if (mat.giacenza_attuale < fabbisogno) {
-            materiaPrimaMancante = true
-            nomeMateriaPrimaMancante = `${mat.codice_articolo} (Giacenza: ${mat.giacenza_attuale} ${mat.unita_misura}, serve: ${fabbisogno})`
-            break
+          const fabbisognoTotale = comp.quantita_necessaria * odp.quantita_da_produrre
+          if (mat.giacenza_attuale < fabbisognoTotale) {
+            // Calcola quanti pezzi completi si possono fare con la giacenza attuale
+            const fattibili = comp.quantita_necessaria > 0 ? Math.floor(mat.giacenza_attuale / comp.quantita_necessaria) : 0
+            if (fattibili < pezziFattibili) {
+              pezziFattibili = fattibili
+            }
+
+            if (fattibili > 0) {
+              materiaPrimaParziale = true
+            } else {
+              materiaPrimaMancante = true
+            }
+
+            nomeMateriaPrimaMancante = `${mat.codice_articolo} (Giacenza: ${mat.giacenza_attuale} ${mat.unita_misura}, serve: ${fabbisognoTotale})`
           }
         }
+      }
+
+      // Se si possono fare zero pezzi, è mancante al 100%
+      if (pezziFattibili === 0 && componentiBom.length > 0) {
+        materiaPrimaMancante = true
+        materiaPrimaParziale = false
       }
 
       odp.fasi.forEach((fase) => {
@@ -333,6 +633,7 @@ export default function TerminaleOfficinaPage() {
         // La mancanza di materia prima impatta le fasi di prima lavorazione (es. Taglio, CAD o prima operazione meccanica)
         const isFaseIniziale = fase.sequenza <= 20
         const matMancanteSuQuestaFase = isFaseIniziale && materiaPrimaMancante
+        const matParzialeSuQuestaFase = isFaseIniziale && materiaPrimaParziale && !materiaPrimaMancante
 
         lista.push({
           odp,
@@ -341,6 +642,8 @@ export default function TerminaleOfficinaPage() {
           centro,
           fasePrecedenteCompletata,
           materiaPrimaMancante: matMancanteSuQuestaFase,
+          materiaPrimaParziale: matParzialeSuQuestaFase,
+          pezziFattibiliConGiacenza: pezziFattibili,
           nomeMateriaPrimaMancante
         })
       })
@@ -905,7 +1208,8 @@ export default function TerminaleOfficinaPage() {
       {/* VISTA A SCHEDE (CARDS TOUCH) */}
       {modalitaVista === 'cards' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {fasiOrdinate.map(({ odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, nomeMateriaPrimaMancante }) => {
+          {fasiOrdinate.map((item) => {
+            const { odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, materiaPrimaParziale, pezziFattibiliConGiacenza, nomeMateriaPrimaMancante } = item
             const isCompletata = fase.stato === 'completata'
             const isInCorso = fase.stato === 'in_corso'
 
@@ -1104,8 +1408,42 @@ export default function TerminaleOfficinaPage() {
                       </button>
                     )}
 
-                    {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO O MATERIA PRIMA */}
-                    {isBloccata && (
+                    {/* CASO SPECIFICO: DISPONIBILITÀ PARZIALE DI MATERIA PRIMA (Sdoppiamento Lotto / Split OdP) */}
+                    {item.materiaPrimaParziale && item.fasePrecedenteCompletata && !macchinaQuestaFaseOccupata && !isInCorso && !isCompletata && (
+                      <div className="col-span-2 p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-amber-300 font-bold flex items-center gap-1.5">
+                            <Clock className="w-4 h-4 text-amber-400" />
+                            Giacenza parziale: {item.pezziFattibiliConGiacenza} su {odp.quantita_da_produrre} pz pronti
+                          </span>
+                          <span className="text-[10px] font-mono uppercase bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-black">
+                            Disponibile Subito
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-tight">
+                          Il materiale a magazzino non copre l&apos;intero ordine, ma puoi avviare subito la parte pronta ({item.pezziFattibiliConGiacenza} pz) sdoppiando l&apos;ordine.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDatiSplit({
+                              odp,
+                              fase,
+                              quantitaDisponibile: item.pezziFattibiliConGiacenza,
+                              quantitaDaSplittare: item.pezziFattibiliConGiacenza
+                            })
+                            setModaleSplitAperta(true)
+                          }}
+                          className="w-full py-2.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-md shadow-amber-600/30 transition-all cursor-pointer active:scale-95"
+                        >
+                          <Play className="w-4 h-4 fill-current" />
+                          <span>Avvia Lotto Parziale ({item.pezziFattibiliConGiacenza} pz)</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO O MATERIA PRIMA TOTALMENTE MANCANTE */}
+                    {isBloccata && !item.materiaPrimaParziale && (
                       <div className="col-span-2 py-3 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs flex items-center justify-between select-none">
                         <div className="flex items-center gap-2">
                           <Lock className="w-4 h-4 text-slate-500 shrink-0" />
@@ -1136,7 +1474,18 @@ export default function TerminaleOfficinaPage() {
                     {isInCorso && (
                       <>
                         <button
-                          onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'completata')}
+                          type="button"
+                          onClick={() => {
+                            setDatiCompleta({
+                              odp,
+                              fase,
+                              pezziBuoni: odp.quantita_da_produrre,
+                              pezziScarto: 0,
+                              opzioneResiduo: 'splitta_residuo',
+                              generaRipristinoScarto: true
+                            })
+                            setModaleCompletaAperta(true)
+                          }}
                           className="py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
                         >
                           <CheckCircle className="w-5 h-5" />
@@ -1235,7 +1584,8 @@ export default function TerminaleOfficinaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {fasiOrdinate.map(({ odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, nomeMateriaPrimaMancante }, index) => {
+                {fasiOrdinate.map((item, index) => {
+                  const { odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, materiaPrimaParziale, pezziFattibiliConGiacenza, nomeMateriaPrimaMancante } = item
                   const isCompletata = fase.stato === 'completata'
                   const isInCorso = fase.stato === 'in_corso'
                   const isAutorizzataAdAvviare = idsFasiAutorizzateDaAvviare.has(fase.id)
@@ -1337,30 +1687,48 @@ export default function TerminaleOfficinaPage() {
                         </td>
                       )}
 
-                      {/* Stato Flusso Monte / Materiali */}
-                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
-                        {isCompletata ? (
-                          <span className="text-slate-500 text-[10px] inline-flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-slate-500" />
-                            Conclusa
-                          </span>
-                        ) : materiaPrimaMancante ? (
-                          <span className="text-amber-400 font-bold text-[10px] inline-flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80" title={nomeMateriaPrimaMancante}>
-                            <AlertTriangle className="w-3 h-3 text-amber-400" />
-                            Manca Grezzo
-                          </span>
-                        ) : fasePrecedenteCompletata ? (
-                          <span className="text-emerald-400 font-bold text-[10px] inline-flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Pronto banco
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 font-semibold text-[10px] inline-flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            In attesa monte
-                          </span>
-                        )}
-                      </td>
+                          {/* Stato Flusso Monte / Materiali */}
+                          <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                            {isCompletata ? (
+                              <span className="text-slate-500 text-[10px] inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-slate-500" />
+                                Conclusa
+                              </span>
+                            ) : item.materiaPrimaParziale ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDatiSplit({
+                                    odp,
+                                    fase,
+                                    quantitaDisponibile: item.pezziFattibiliConGiacenza,
+                                    quantitaDaSplittare: item.pezziFattibiliConGiacenza
+                                  })
+                                  setModaleSplitAperta(true)
+                                }}
+                                className="text-amber-400 hover:text-amber-300 font-bold text-[10px] inline-flex items-center gap-1 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-600/80 cursor-pointer"
+                                title={`Disponibile per ${item.pezziFattibiliConGiacenza} pz su ${odp.quantita_da_produrre}. Clicca per sdoppiare il lotto.`}
+                              >
+                                <Clock className="w-3 h-3 text-amber-400" />
+                                Parziale ({item.pezziFattibiliConGiacenza}/{odp.quantita_da_produrre})
+                              </button>
+                            ) : materiaPrimaMancante ? (
+                              <span className="text-amber-400 font-bold text-[10px] inline-flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80" title={nomeMateriaPrimaMancante}>
+                                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                Manca Grezzo
+                              </span>
+                            ) : fasePrecedenteCompletata ? (
+                              <span className="text-emerald-400 font-bold text-[10px] inline-flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Pronto banco
+                              </span>
+                            ) : (
+                              <span className="text-amber-400 font-semibold text-[10px] inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                In attesa monte
+                              </span>
+                            )}
+                          </td>
 
                       {/* Badge Stato */}
                       <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
@@ -1401,7 +1769,18 @@ export default function TerminaleOfficinaPage() {
                           {isInCorso && (
                             <div className="flex items-center gap-1">
                               <button
-                                onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'completata')}
+                                type="button"
+                                onClick={() => {
+                                  setDatiCompleta({
+                                    odp,
+                                    fase,
+                                    pezziBuoni: odp.quantita_da_produrre,
+                                    pezziScarto: 0,
+                                    opzioneResiduo: 'splitta_residuo',
+                                    generaRipristinoScarto: true
+                                  })
+                                  setModaleCompletaAperta(true)
+                                }}
                                 className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95"
                               >
                                 <CheckCircle className="w-3 h-3" />
@@ -1695,6 +2074,331 @@ export default function TerminaleOfficinaPage() {
         )
       })()}
 
+      {/* =========================================================================
+          MODALE 1: SPLIT ODP (AVVIO PARZIALE PER MATERIALE LIMITATO)
+          ========================================================================= */}
+      {modaleSplitAperta && datiSplit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-amber-950/30">
+              <div className="flex items-center gap-2">
+                <Scissors className="w-5 h-5 text-amber-400" />
+                <h2 className="text-base font-bold text-white">
+                  Sdoppiamento Ordine (Split Parziale)
+                </h2>
+              </div>
+              <button
+                onClick={() => setModaleSplitAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="p-3 bg-amber-950/40 border border-amber-800/50 rounded-xl text-amber-200 leading-relaxed">
+                Stai per avviare subito la parte di ordine con materiale già disponibile a magazzino, senza bloccare la macchina.
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Ordine Originale:</span>
+                  <span className="font-mono font-bold text-orange-400">{datiSplit.odp.codice_odp}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Quantità Totale Prevista:</span>
+                  <span className="font-bold text-white">{datiSplit.odp.quantita_da_produrre} pz</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Copertura Attuale Materiale:</span>
+                  <span className="font-bold text-amber-400">{datiSplit.quantitaDisponibile} pz</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Quantità da Avviare Subito (Lotto A) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={datiSplit.odp.quantita_da_produrre - 1}
+                  value={datiSplit.quantitaDaSplittare}
+                  onChange={(e) =>
+                    setDatiSplit({
+                      ...datiSplit,
+                      quantitaDaSplittare: Math.min(
+                        Math.max(1, Number(e.target.value)),
+                        datiSplit.odp.quantita_da_produrre - 1
+                      )
+                    })
+                  }
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Il residuo di <strong>{datiSplit.odp.quantita_da_produrre - datiSplit.quantitaDaSplittare} pz</strong> rimarrà come lotto a saldo (/B) in attesa del resto del materiale.
+                </span>
+              </div>
+
+              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+                <button
+                  type="button"
+                  onClick={() => setModaleSplitAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEseguiSplitOdP}
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md shadow-amber-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Conferma e Avvia {datiSplit.quantitaDaSplittare} pz</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODALE 2: COMPLETAMENTO FASE CON QUANTITÀ REALE (GOOD PARTS / SCRAP)
+          ========================================================================= */}
+      {modaleCompletaAperta && datiCompleta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-emerald-950/30">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-base font-bold text-white">
+                  Registra Chiusura Lavorazione
+                </h2>
+              </div>
+              <button
+                onClick={() => setModaleCompletaAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Ordine / Fase:</span>
+                  <span className="font-mono font-bold text-white">
+                    {datiCompleta.odp.codice_odp} • Fase #{datiCompleta.fase.sequenza}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Lotto Teorico Previsto:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-orange-400">{datiCompleta.odp.quantita_da_produrre} pz</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDatiCompleta({
+                          ...datiCompleta,
+                          pezziBuoni: datiCompleta.odp.quantita_da_produrre,
+                          pezziScarto: 0
+                        })
+                      }
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold cursor-pointer transition-colors"
+                      title="Reimposta intero lotto con zero scarti"
+                    >
+                      Tutto il lotto
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-emerald-400 mb-1">
+                    Pezzi Buoni Conformi *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={datiCompleta.odp.quantita_da_produrre}
+                    value={datiCompleta.pezziBuoni}
+                    onChange={(e) => {
+                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
+                      const valBuoni = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il lotto totale, scala automaticamente gli scarti
+                      let nuovoScarto = datiCompleta.pezziScarto
+                      if (valBuoni + nuovoScarto > lottoTotale) {
+                        nuovoScarto = Math.max(0, lottoTotale - valBuoni)
+                      }
+                      setDatiCompleta({
+                        ...datiCompleta,
+                        pezziBuoni: valBuoni,
+                        pezziScarto: nuovoScarto
+                      })
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/50 text-sm font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Pezzi che avanzano alla fase successiva.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-rose-400 mb-1">
+                    Pezzi Scartati / Difettosi
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={datiCompleta.odp.quantita_da_produrre}
+                    value={datiCompleta.pezziScarto}
+                    onChange={(e) => {
+                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
+                      const valScarti = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il lotto totale, scala automaticamente i pezzi buoni
+                      let nuovoBuoni = datiCompleta.pezziBuoni
+                      if (nuovoBuoni + valScarti > lottoTotale) {
+                        nuovoBuoni = Math.max(0, lottoTotale - valScarti)
+                      }
+                      setDatiCompleta({
+                        ...datiCompleta,
+                        pezziScarto: valScarti,
+                        pezziBuoni: nuovoBuoni
+                      })
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-rose-400 focus:outline-none focus:border-rose-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Pezzi non conformi da rifare.
+                  </span>
+                </div>
+              </div>
+
+              {/* Box Riepilogo Matematico Dinamico */}
+              {(() => {
+                const totaleLavorati = datiCompleta.pezziBuoni + datiCompleta.pezziScarto
+                const residuoDaFare = Math.max(0, datiCompleta.odp.quantita_da_produrre - totaleLavorati)
+                return (
+                  <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs space-y-1.5">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Totale Pezzi Trattati sul Mandrino:</span>
+                      <strong className="text-white font-mono">{totaleLavorati} su {datiCompleta.odp.quantita_da_produrre} pz</strong>
+                    </div>
+                    {residuoDaFare > 0 ? (
+                      <div className="flex justify-between text-amber-400 font-semibold border-t border-slate-800/60 pt-1">
+                        <span>Pezzi Residui Ancora da Lavorare:</span>
+                        <span className="font-mono">{residuoDaFare} pz a saldo</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-emerald-400 font-semibold border-t border-slate-800/60 pt-1">
+                        <span>Copertura Lotto:</span>
+                        <span>100% lavorato ({datiCompleta.pezziBuoni} buoni, {datiCompleta.pezziScarto} scarti)</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* SEZIONE GESTIONE SCARTI (OPZIONE B: RIPRISTINO IMMEDIATO) */}
+              {datiCompleta.pezziScarto > 0 && (
+                <div className="p-3 bg-rose-950/40 rounded-xl border border-rose-800/60 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-rose-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      Rilevati {datiCompleta.pezziScarto} pezzi scartati / difettosi
+                    </span>
+                    <span className="text-[10px] font-mono uppercase bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded font-black">
+                      Scarto
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-tight">
+                    Per garantire che il cliente riceva il 100% dell&apos;ordine pattuito, il sistema può lanciare subito un lotto urgente di ripristino per i pezzi scartati.
+                  </p>
+
+                  <div className="pt-1">
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-rose-900/60 hover:border-rose-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={datiCompleta.generaRipristinoScarto}
+                        onChange={(e) =>
+                          setDatiCompleta({
+                            ...datiCompleta,
+                            generaRipristinoScarto: e.target.checked
+                          })
+                        }
+                        className="rounded text-rose-600 focus:ring-0"
+                      />
+                      <span className="text-[11px] text-slate-200">
+                        ⚡ <strong>Lancia subito OdP Urgente (/R)</strong> per rifare i {datiCompleta.pezziScarto} pz scartati
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Se rimangono pezzi ancora da fare (produzione parziale) */}
+              {datiCompleta.pezziBuoni + datiCompleta.pezziScarto < datiCompleta.odp.quantita_da_produrre && (
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                  <span className="font-semibold text-amber-400 block text-xs">
+                    ⚠️ Produzione Parziale ({datiCompleta.pezziBuoni + datiCompleta.pezziScarto} su {datiCompleta.odp.quantita_da_produrre} pz trattati)
+                  </span>
+                  <span className="text-[11px] text-slate-400 block">
+                    Cosa desideri fare con i <strong>{datiCompleta.odp.quantita_da_produrre - (datiCompleta.pezziBuoni + datiCompleta.pezziScarto)} pezzi ancora da lavorare</strong>?
+                  </span>
+
+                  <div className="space-y-1.5 pt-1">
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="opzioneResiduo"
+                        checked={datiCompleta.opzioneResiduo === 'splitta_residuo'}
+                        onChange={() => setDatiCompleta({ ...datiCompleta, opzioneResiduo: 'splitta_residuo' })}
+                        className="text-emerald-500"
+                      />
+                      <span className="text-[11px] text-slate-200">
+                        <strong>Invia {datiCompleta.pezziBuoni} pz buoni avanti</strong> e crea il lotto residuo per i rimanenti {datiCompleta.odp.quantita_da_produrre - (datiCompleta.pezziBuoni + datiCompleta.pezziScarto)} pz
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="opzioneResiduo"
+                        checked={datiCompleta.opzioneResiduo === 'sospendi'}
+                        onChange={() => setDatiCompleta({ ...datiCompleta, opzioneResiduo: 'sospendi' })}
+                        className="text-amber-500"
+                      />
+                      <span className="text-[11px] text-slate-200">
+                        <strong>Sospendi fase su questa macchina</strong> e riprendi dopo per completare l&apos;intero lotto
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+                <button
+                  type="button"
+                  onClick={() => setModaleCompletaAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfermaCompletaFase}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Conferma Chiusura</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODALE DI SBLOCCO CON PIN CAPO OFFICINA / RESPONSABILE */}
       {modalePinAperta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
@@ -1975,6 +2679,331 @@ export default function TerminaleOfficinaPage() {
           </div>
         )
       })()}
+
+      {/* =========================================================================
+          MODALE 1: SPLIT ODP (AVVIO PARZIALE PER MATERIALE LIMITATO)
+          ========================================================================= */}
+      {modaleSplitAperta && datiSplit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-amber-950/30">
+              <div className="flex items-center gap-2">
+                <Scissors className="w-5 h-5 text-amber-400" />
+                <h2 className="text-base font-bold text-white">
+                  Sdoppiamento Ordine (Split Parziale)
+                </h2>
+              </div>
+              <button
+                onClick={() => setModaleSplitAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="p-3 bg-amber-950/40 border border-amber-800/50 rounded-xl text-amber-200 leading-relaxed">
+                Stai per avviare subito la parte di ordine con materiale già disponibile a magazzino, senza bloccare la macchina.
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Ordine Originale:</span>
+                  <span className="font-mono font-bold text-orange-400">{datiSplit.odp.codice_odp}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Quantità Totale Prevista:</span>
+                  <span className="font-bold text-white">{datiSplit.odp.quantita_da_produrre} pz</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Copertura Attuale Materiale:</span>
+                  <span className="font-bold text-amber-400">{datiSplit.quantitaDisponibile} pz</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Quantità da Avviare Subito (Lotto A) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={datiSplit.odp.quantita_da_produrre - 1}
+                  value={datiSplit.quantitaDaSplittare}
+                  onChange={(e) =>
+                    setDatiSplit({
+                      ...datiSplit,
+                      quantitaDaSplittare: Math.min(
+                        Math.max(1, Number(e.target.value)),
+                        datiSplit.odp.quantita_da_produrre - 1
+                      )
+                    })
+                  }
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Il residuo di <strong>{datiSplit.odp.quantita_da_produrre - datiSplit.quantitaDaSplittare} pz</strong> rimarrà come lotto a saldo (/B) in attesa del resto del materiale.
+                </span>
+              </div>
+
+              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+                <button
+                  type="button"
+                  onClick={() => setModaleSplitAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEseguiSplitOdP}
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md shadow-amber-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Conferma e Avvia {datiSplit.quantitaDaSplittare} pz</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODALE 2: COMPLETAMENTO FASE CON QUANTITÀ REALE (GOOD PARTS / SCRAP)
+          ========================================================================= */}
+      {modaleCompletaAperta && datiCompleta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-emerald-950/30">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-base font-bold text-white">
+                  Registra Chiusura Lavorazione
+                </h2>
+              </div>
+              <button
+                onClick={() => setModaleCompletaAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Ordine / Fase:</span>
+                  <span className="font-mono font-bold text-white">
+                    {datiCompleta.odp.codice_odp} • Fase #{datiCompleta.fase.sequenza}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Lotto Teorico Previsto:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-orange-400">{datiCompleta.odp.quantita_da_produrre} pz</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDatiCompleta({
+                          ...datiCompleta,
+                          pezziBuoni: datiCompleta.odp.quantita_da_produrre,
+                          pezziScarto: 0
+                        })
+                      }
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold cursor-pointer transition-colors"
+                      title="Reimposta intero lotto con zero scarti"
+                    >
+                      Tutto il lotto
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-emerald-400 mb-1">
+                    Pezzi Buoni Conformi *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={datiCompleta.odp.quantita_da_produrre}
+                    value={datiCompleta.pezziBuoni}
+                    onChange={(e) => {
+                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
+                      const valBuoni = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il lotto totale, scala automaticamente gli scarti
+                      let nuovoScarto = datiCompleta.pezziScarto
+                      if (valBuoni + nuovoScarto > lottoTotale) {
+                        nuovoScarto = Math.max(0, lottoTotale - valBuoni)
+                      }
+                      setDatiCompleta({
+                        ...datiCompleta,
+                        pezziBuoni: valBuoni,
+                        pezziScarto: nuovoScarto
+                      })
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/50 text-sm font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Pezzi che avanzano alla fase successiva.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-rose-400 mb-1">
+                    Pezzi Scartati / Difettosi
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={datiCompleta.odp.quantita_da_produrre}
+                    value={datiCompleta.pezziScarto}
+                    onChange={(e) => {
+                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
+                      const valScarti = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il lotto totale, scala automaticamente i pezzi buoni
+                      let nuovoBuoni = datiCompleta.pezziBuoni
+                      if (nuovoBuoni + valScarti > lottoTotale) {
+                        nuovoBuoni = Math.max(0, lottoTotale - valScarti)
+                      }
+                      setDatiCompleta({
+                        ...datiCompleta,
+                        pezziScarto: valScarti,
+                        pezziBuoni: nuovoBuoni
+                      })
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-rose-400 focus:outline-none focus:border-rose-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Pezzi non conformi da rifare.
+                  </span>
+                </div>
+              </div>
+
+              {/* Box Riepilogo Matematico Dinamico */}
+              {(() => {
+                const totaleLavorati = datiCompleta.pezziBuoni + datiCompleta.pezziScarto
+                const residuoDaFare = Math.max(0, datiCompleta.odp.quantita_da_produrre - totaleLavorati)
+                return (
+                  <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs space-y-1.5">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Totale Pezzi Trattati sul Mandrino:</span>
+                      <strong className="text-white font-mono">{totaleLavorati} su {datiCompleta.odp.quantita_da_produrre} pz</strong>
+                    </div>
+                    {residuoDaFare > 0 ? (
+                      <div className="flex justify-between text-amber-400 font-semibold border-t border-slate-800/60 pt-1">
+                        <span>Pezzi Residui Ancora da Lavorare:</span>
+                        <span className="font-mono">{residuoDaFare} pz a saldo</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-emerald-400 font-semibold border-t border-slate-800/60 pt-1">
+                        <span>Copertura Lotto:</span>
+                        <span>100% lavorato ({datiCompleta.pezziBuoni} buoni, {datiCompleta.pezziScarto} scarti)</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* SEZIONE GESTIONE SCARTI (OPZIONE B: RIPRISTINO IMMEDIATO) */}
+              {datiCompleta.pezziScarto > 0 && (
+                <div className="p-3 bg-rose-950/40 rounded-xl border border-rose-800/60 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-rose-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      Rilevati {datiCompleta.pezziScarto} pezzi scartati / difettosi
+                    </span>
+                    <span className="text-[10px] font-mono uppercase bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded font-black">
+                      Scarto
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-tight">
+                    Per garantire che il cliente riceva il 100% dell&apos;ordine pattuito, il sistema può lanciare subito un lotto urgente di ripristino per i pezzi scartati.
+                  </p>
+
+                  <div className="pt-1">
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-rose-900/60 hover:border-rose-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={datiCompleta.generaRipristinoScarto}
+                        onChange={(e) =>
+                          setDatiCompleta({
+                            ...datiCompleta,
+                            generaRipristinoScarto: e.target.checked
+                          })
+                        }
+                        className="rounded text-rose-600 focus:ring-0"
+                      />
+                      <span className="text-[11px] text-slate-200">
+                        ⚡ <strong>Lancia subito OdP Urgente (/R)</strong> per rifare i {datiCompleta.pezziScarto} pz scartati
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Se rimangono pezzi ancora da fare (produzione parziale) */}
+              {datiCompleta.pezziBuoni + datiCompleta.pezziScarto < datiCompleta.odp.quantita_da_produrre && (
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                  <span className="font-semibold text-amber-400 block text-xs">
+                    ⚠️ Produzione Parziale ({datiCompleta.pezziBuoni + datiCompleta.pezziScarto} su {datiCompleta.odp.quantita_da_produrre} pz trattati)
+                  </span>
+                  <span className="text-[11px] text-slate-400 block">
+                    Cosa desideri fare con i <strong>{datiCompleta.odp.quantita_da_produrre - (datiCompleta.pezziBuoni + datiCompleta.pezziScarto)} pezzi ancora da lavorare</strong>?
+                  </span>
+
+                  <div className="space-y-1.5 pt-1">
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="opzioneResiduo"
+                        checked={datiCompleta.opzioneResiduo === 'splitta_residuo'}
+                        onChange={() => setDatiCompleta({ ...datiCompleta, opzioneResiduo: 'splitta_residuo' })}
+                        className="text-emerald-500"
+                      />
+                      <span className="text-[11px] text-slate-200">
+                        <strong>Invia {datiCompleta.pezziBuoni} pz buoni avanti</strong> e crea il lotto residuo per i rimanenti {datiCompleta.odp.quantita_da_produrre - (datiCompleta.pezziBuoni + datiCompleta.pezziScarto)} pz
+                      </span>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="opzioneResiduo"
+                        checked={datiCompleta.opzioneResiduo === 'sospendi'}
+                        onChange={() => setDatiCompleta({ ...datiCompleta, opzioneResiduo: 'sospendi' })}
+                        className="text-amber-500"
+                      />
+                      <span className="text-[11px] text-slate-200">
+                        <strong>Sospendi fase su questa macchina</strong> e riprendi dopo per completare l&apos;intero lotto
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+                <button
+                  type="button"
+                  onClick={() => setModaleCompletaAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfermaCompletaFase}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Conferma Chiusura</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

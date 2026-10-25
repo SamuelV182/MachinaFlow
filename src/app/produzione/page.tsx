@@ -60,10 +60,24 @@ export default function ProduzionePage() {
         }
       }
 
-      const arricchiti: OdPConFasi[] = odpCaricati.map((odp) => ({
-        ...odp,
-        articolo: articoliList.find((a) => a.id === odp.articolo_id)
-      }))
+      const arricchiti: OdPConFasi[] = odpCaricati.map((odp) => {
+        // Controllo automatico di coerenza: se tutte le fasi risultano completate, l'OdP è completato
+        const tutteCompletate = odp.fasi && odp.fasi.length > 0 && odp.fasi.every((f) => f.stato === 'completata')
+        const almenoUnaInCorso = odp.fasi && odp.fasi.some((f) => f.stato === 'in_corso')
+        const statoReale = tutteCompletate ? 'completato' : almenoUnaInCorso ? 'in_lavorazione' : odp.stato
+
+        // Se lo stato calcolato differisce da quello salvato nel DB, allinealo
+        if (statoReale !== odp.stato) {
+          syncService.aggiornaStatoOdP(odp.id, statoReale, tutteCompletate ? odp.quantita_da_produrre : odp.quantita_prodotta)
+        }
+
+        return {
+          ...odp,
+          stato: statoReale,
+          quantita_prodotta: tutteCompletate ? odp.quantita_da_produrre : odp.quantita_prodotta,
+          articolo: articoliList.find((a) => a.id === odp.articolo_id)
+        }
+      })
 
       setOdpList(arricchiti)
     }

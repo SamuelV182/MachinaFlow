@@ -95,11 +95,11 @@ export const syncService = {
         return locali
       }
 
-      // Se nel browser ci sono ordini non ancora presenti su Supabase, inviali in background
+      // Se nel browser ci sono ordini non ancora presenti su Supabase, inviali in background verificando sia id che codice_odp
       if (locali.length > 0) {
         for (const loc of locali) {
-          if (!odpCloud.some((c) => c.id === loc.id)) {
-            // Salva su cloud senza bloccare
+          const esisteSuCloud = odpCloud.some((c) => c.id === loc.id || c.codice_odp === loc.codice_odp)
+          if (!esisteSuCloud) {
             this.salvaOrdineProduzione(loc)
             odpCloud.push(loc)
           }
@@ -158,12 +158,18 @@ export const syncService = {
         qr_code_token: nuovoOdp.qr_code_token,
         note: nuovoOdp.note || null
       }
-      await supabase.from('ordini_produzione').upsert(datiOdpPuliti)
+      const { error: errOdp } = await supabase
+        .from('ordini_produzione')
+        .upsert(datiOdpPuliti, { onConflict: 'id' })
+      if (errOdp) {
+        console.error('Errore inserimento ordine_produzione:', JSON.stringify(errOdp, null, 2))
+        return
+      }
 
       if (nuovoOdp.fasi && nuovoOdp.fasi.length > 0) {
         const fasiPulite = nuovoOdp.fasi.map((f) => ({
           id: f.id,
-          odp_id: f.odp_id,
+          odp_id: nuovoOdp.id,
           sequenza: f.sequenza,
           nome_fase: f.nome_fase,
           tipo_processo_id: f.tipo_processo_id || null,
@@ -178,7 +184,7 @@ export const syncService = {
         }))
         const resFasi = await supabase.from('fasi_odp').upsert(fasiPulite)
         if (resFasi.error) {
-          console.error('Errore inserimento fasi_odp:', resFasi.error)
+          console.error('Errore inserimento fasi_odp:', JSON.stringify(resFasi.error, null, 2))
         }
       }
     } catch (e) {
@@ -223,6 +229,38 @@ export const syncService = {
       await supabase.from('fasi_odp').upsert(fasePulita)
     } catch (e) {
       console.error('Errore aggiornamento cloud fase:', e)
+    }
+  },
+
+  async aggiornaStatoOdP(odpId: string, nuovoStato: 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso', quantitaProdotta?: number) {
+    try {
+      // Aggiorna localStorage
+      const salvati = localStorage.getItem('machinaflow_odp')
+      if (salvati) {
+        const lista: (OrdineProduzione & { fasi: FaseOdP[] })[] = JSON.parse(salvati)
+        const odp = lista.find((o) => o.id === odpId)
+        if (odp) {
+          odp.stato = nuovoStato
+          if (quantitaProdotta !== undefined) {
+            odp.quantita_prodotta = quantitaProdotta
+          } else if (nuovoStato === 'completato') {
+            odp.quantita_prodotta = odp.quantita_da_produrre
+          }
+          localStorage.setItem('machinaflow_odp', JSON.stringify(lista))
+        }
+      }
+
+      // Aggiorna Cloud Supabase
+      const payload: any = { stato: nuovoStato }
+      if (quantitaProdotta !== undefined) {
+        payload.quantita_prodotta = quantitaProdotta
+      }
+      await supabase
+        .from('ordini_produzione')
+        .update(payload)
+        .eq('id', odpId)
+    } catch (e) {
+      console.error('Errore aggiornamento stato OdP su Supabase:', e)
     }
   },
 
