@@ -335,7 +335,7 @@ export default function SpedizioniDdtPage() {
   return (
     <div className="space-y-6">
       {/* Intestazione Sezione Ufficio */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="no-print flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
             <Truck className="w-8 h-8 text-pink-500" />
@@ -376,7 +376,7 @@ export default function SpedizioniDdtPage() {
       )}
 
       {/* Barra di Navigazione Tab */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+      <div className="no-print flex items-center gap-2 border-b border-slate-800 pb-2">
         <button
           type="button"
           onClick={() => setTabAttivo('ddt')}
@@ -407,7 +407,7 @@ export default function SpedizioniDdtPage() {
       {tabAttivo === 'ddt' ? (
         <>
           {/* KPI Cards Riepilogo Spedizioni */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="no-print grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
               <div>
                 <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">Totale DDT Emessi</div>
@@ -447,7 +447,7 @@ export default function SpedizioniDdtPage() {
           </div>
 
           {/* Barra Ricerca e Filtri */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3">
             <div className="relative w-full md:w-96">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -492,7 +492,7 @@ export default function SpedizioniDdtPage() {
           </div>
 
           {/* Tabella DDT Emessi per l'Ufficio */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
