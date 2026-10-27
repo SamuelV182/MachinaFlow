@@ -17,7 +17,9 @@ import {
   CheckCircle,
   TrendingDown,
   LayoutGrid,
-  List
+  List,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import { Articolo, TipoArticolo, ComponenteDistintaBase, FaseCicloStandard } from '@/types/database'
 import { SEED_ARTICOLI, SEED_DISTINTA_BASE, SEED_FASI_CICLO } from '@/lib/data-service'
@@ -31,6 +33,10 @@ export default function ArticoliPage() {
   const [filtroTipo, setFiltroTipo] = useState<string>('tutti')
   const [modalitaVista, setModalitaVista] = useState<'cards' | 'tabella'>('cards')
   const [termineRicerca, setTermineRicerca] = useState('')
+
+  // Paginazione a 25 articoli per pagina
+  const [paginaCorrente, setPaginaCorrente] = useState<number>(1)
+  const ELEMENTI_PER_PAGINA = 25
 
   // Modale Nuovo Articolo
   const [modaleAperta, setModaleAperta] = useState(false)
@@ -57,9 +63,32 @@ export default function ArticoliPage() {
       }
     }
 
-    setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
-    setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
-    setCicli(parseSicuro('machinaflow_cicli', SEED_FASI_CICLO))
+    // Carica articoli e se presenti nuovi articoli di seed uniscili a quelli salvati
+    const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
+    const mappaArticoli = new Map<string, Articolo>()
+    SEED_ARTICOLI.forEach((a) => mappaArticoli.set(a.id, a))
+    articoliSalvati.forEach((a) => mappaArticoli.set(a.id, a))
+    const listaUnitaArticoli = Array.from(mappaArticoli.values())
+    setArticoli(listaUnitaArticoli)
+    localStorage.setItem('machinaflow_articoli', JSON.stringify(listaUnitaArticoli))
+
+    // Unisci Distinte Base
+    const distinteSalvate = parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', [])
+    const mappaDistinte = new Map<string, ComponenteDistintaBase>()
+    SEED_DISTINTA_BASE.forEach((d) => mappaDistinte.set(d.id, d))
+    distinteSalvate.forEach((d) => mappaDistinte.set(d.id, d))
+    const listaUnitaDistinte = Array.from(mappaDistinte.values())
+    setDistinte(listaUnitaDistinte)
+    localStorage.setItem('machinaflow_distinte', JSON.stringify(listaUnitaDistinte))
+
+    // Unisci Cicli di Lavorazione
+    const cicliSalvati = parseSicuro<FaseCicloStandard[]>('machinaflow_cicli', [])
+    const mappaCicli = new Map<string, FaseCicloStandard>()
+    SEED_FASI_CICLO.forEach((c) => mappaCicli.set(c.id, c))
+    cicliSalvati.forEach((c) => mappaCicli.set(c.id, c))
+    const listaUnitaCicli = Array.from(mappaCicli.values())
+    setCicli(listaUnitaCicli)
+    localStorage.setItem('machinaflow_cicli', JSON.stringify(listaUnitaCicli))
   }, [])
 
   const handleSalvaArticolo = (e: React.FormEvent) => {
@@ -141,6 +170,11 @@ export default function ArticoliPage() {
     })
   }
 
+  // Reset pagina al cambio filtro tipo o ricerca
+  useEffect(() => {
+    setPaginaCorrente(1)
+  }, [filtroTipo, termineRicerca])
+
   // Filtro
   const articoliFiltrati = articoli.filter((a) => {
     const combaciaTipo = filtroTipo === 'tutti' || a.tipo === filtroTipo
@@ -149,6 +183,12 @@ export default function ArticoliPage() {
       a.descrizione.toLowerCase().includes(termineRicerca.toLowerCase())
     return combaciaTipo && combaciaTesto
   })
+
+  // Calcolo Paginazione a 25 elementi per pagina
+  const totaleElementi = articoliFiltrati.length
+  const totalePagine = Math.ceil(totaleElementi / ELEMENTI_PER_PAGINA) || 1
+  const inizioPaginazione = (paginaCorrente - 1) * ELEMENTI_PER_PAGINA
+  const articoliPaginati = articoliFiltrati.slice(inizioPaginazione, inizioPaginazione + ELEMENTI_PER_PAGINA)
 
   const getTipoEtichetta = (tipo: TipoArticolo) => {
     switch (tipo) {
@@ -254,8 +294,9 @@ export default function ArticoliPage() {
 
       {/* VISTA A SCHEDE (CARDS) */}
       {modalitaVista === 'cards' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {articoliFiltrati.map((art) => {
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {articoliPaginati.map((art) => {
             const tipoInfo = getTipoEtichetta(art.tipo)
             const numComponentiBOM = distinte.filter((d) => d.articolo_padre_id === art.id).length
             const numFasiCiclo = cicli.filter((c) => c.articolo_id === art.id).length
@@ -353,39 +394,77 @@ export default function ArticoliPage() {
             )
           })}
 
-          {articoliFiltrati.length === 0 && (
-            <div className="col-span-full p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800">
-              <Boxes className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-              <p className="text-slate-300 font-semibold">Nessun articolo trovato</p>
-              <p className="text-xs text-slate-500 mt-1">
-                Prova a cambiare il filtro o inserisci un nuovo articolo da anagrafica.
-              </p>
+            {articoliFiltrati.length === 0 && (
+              <div className="col-span-full p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800">
+                <Boxes className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                <p className="text-slate-300 font-semibold">Nessun articolo trovato</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Prova a cambiare il filtro o inserisci un nuovo articolo da anagrafica.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Paginazione Vista Schede */}
+          {totalePagine > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg">
+              <div className="text-xs text-slate-400 font-semibold">
+                Mostrati da <span className="text-white font-bold">{Math.min(inizioPaginazione + 1, totaleElementi)}</span> a{' '}
+                <span className="text-white font-bold">{Math.min(inizioPaginazione + ELEMENTI_PER_PAGINA, totaleElementi)}</span> di{' '}
+                <span className="text-orange-400 font-bold">{totaleElementi}</span> articoli
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaginaCorrente((prev) => Math.max(prev - 1, 1))}
+                  disabled={paginaCorrente === 1}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Precedenti</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-orange-400">
+                  Pagina {paginaCorrente} / {totalePagine}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPaginaCorrente((prev) => Math.min(prev + 1, totalePagine))}
+                  disabled={paginaCorrente === totalePagine}
+                  className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
+                >
+                  <span>Successivi 25</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* VISTA A LISTA DETTAGLIATA (TABELLA COMPATTA) */}
+      {/* VISTA A LISTA DETTAGLIATA (TABELLA COMPATTA ADATTIVA SENZA SCROLL) */}
       {modalitaVista === 'tabella' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+          <div className="w-full">
+            <table className="w-full text-left text-xs text-slate-300 border-collapse table-auto">
+              <thead className="bg-slate-950/90 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 <tr>
-                  <th className="py-3.5 px-4 whitespace-nowrap">Codice</th>
-                  <th className="py-3.5 px-4">Descrizione Articolo</th>
-                  <th className="py-3.5 px-4 whitespace-nowrap">Tipo</th>
-                  <th className="py-3.5 px-4 text-center whitespace-nowrap">Lead Time</th>
-                  <th className="py-3.5 px-4 text-center whitespace-nowrap">Giacenza</th>
-                  <th className="py-3.5 px-4 text-center whitespace-nowrap">Scorta Min.</th>
-                  <th className="py-3.5 px-4 text-right whitespace-nowrap">Prezzo Rif.</th>
-                  <th className="py-3.5 px-4 text-center whitespace-nowrap">Distinta (BOM)</th>
-                  <th className="py-3.5 px-4 text-center whitespace-nowrap">Ciclo (Fasi)</th>
-                  <th className="py-3.5 px-4 text-right whitespace-nowrap">Azioni</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">Codice</th>
+                  <th className="py-2.5 px-3">Descrizione Articolo</th>
+                  <th className="py-2.5 px-2.5 whitespace-nowrap">Tipo</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Lead Time</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Giacenza</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Scorta</th>
+                  <th className="py-2.5 px-2 text-right whitespace-nowrap">Prezzo</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">BOM</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Ciclo</th>
+                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Azioni</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {articoliFiltrati.map((art) => {
+                {articoliPaginati.map((art) => {
                   const tipoInfo = getTipoEtichetta(art.tipo)
                   const numComponentiBOM = distinte.filter((d) => d.articolo_padre_id === art.id).length
                   const numFasiCiclo = cicli.filter((c) => c.articolo_id === art.id).length
@@ -399,13 +478,13 @@ export default function ArticoliPage() {
                       }`}
                     >
                       {/* Codice Articolo */}
-                      <td className="py-3 px-4 font-mono font-bold text-orange-400 whitespace-nowrap">
+                      <td className="py-2.5 px-3 font-mono font-bold text-orange-400 whitespace-nowrap text-xs">
                         {art.codice_articolo}
                       </td>
 
                       {/* Descrizione */}
-                      <td className="py-3 px-4">
-                        <span className="font-semibold text-white block">
+                      <td className="py-2.5 px-3 min-w-0">
+                        <span className="font-semibold text-white block truncate max-w-[180px] xl:max-w-xs" title={art.descrizione}>
                           {art.descrizione}
                         </span>
                         {isSottoScorta && (
@@ -416,79 +495,79 @@ export default function ArticoliPage() {
                       </td>
 
                       {/* Tipo */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${tipoInfo.color}`}>
+                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                        <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${tipoInfo.color}`}>
                           {tipoInfo.label}
                         </span>
                       </td>
 
                       {/* Lead Time */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-2 text-center whitespace-nowrap">
                         {art.tipo !== 'prodotto_finito' ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 border border-slate-700 text-slate-300">
-                            <Clock className="w-3 h-3 text-cyan-400" />
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-300">
+                            <Clock className="w-2.5 h-2.5 text-cyan-400" />
                             {art.lead_time_giorni_fornitore !== undefined ? `${art.lead_time_giorni_fornitore} gg` : '3 gg'}
                           </span>
                         ) : (
-                          <span className="text-slate-500 text-[11px] italic">Produzione interna</span>
+                          <span className="text-slate-500 text-[10px] italic">Interna</span>
                         )}
                       </td>
 
                       {/* Giacenza */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-2 text-center whitespace-nowrap">
                         <span className={`font-bold ${isSottoScorta ? 'text-rose-400' : 'text-slate-100'}`}>
-                          {art.giacenza_attuale} {art.unita_misura}
+                          {art.giacenza_attuale} <span className="text-[10px] text-slate-400">{art.unita_misura}</span>
                         </span>
                       </td>
 
                       {/* Scorta Minima */}
-                      <td className="py-3 px-4 text-center text-slate-400 whitespace-nowrap font-mono">
+                      <td className="py-2.5 px-2 text-center text-slate-400 whitespace-nowrap font-mono text-[11px]">
                         {art.scorta_minima} {art.unita_misura}
                       </td>
 
                       {/* Prezzo */}
-                      <td className="py-3 px-4 text-right font-mono text-slate-200 whitespace-nowrap">
+                      <td className="py-2.5 px-2 text-right font-mono text-slate-200 whitespace-nowrap text-[11px]">
                         {art.prezzo_riferimento ? `€ ${art.prezzo_riferimento.toFixed(2)}` : '-'}
                       </td>
 
                       {/* Distinta BOM */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-2 text-center whitespace-nowrap">
                         {art.tipo !== 'materia_prima' ? (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold ${
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             numComponentiBOM > 0
                               ? 'bg-orange-950/60 text-orange-400 border border-orange-800/40'
                               : 'bg-slate-800/60 text-slate-500'
                           }`}>
-                            <Layers className="w-3 h-3" />
+                            <Layers className="w-2.5 h-2.5" />
                             {numComponentiBOM}
                           </span>
                         ) : (
-                          <span className="text-slate-600 text-[11px]">-</span>
+                          <span className="text-slate-600 text-[10px]">-</span>
                         )}
                       </td>
 
                       {/* Ciclo Fasi */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <td className="py-2.5 px-2 text-center whitespace-nowrap">
                         {art.tipo !== 'materia_prima' ? (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold ${
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             numFasiCiclo > 0
                               ? 'bg-blue-950/60 text-blue-400 border border-blue-800/40'
                               : 'bg-slate-800/60 text-slate-500'
                           }`}>
-                            <Clock className="w-3 h-3" />
+                            <Clock className="w-2.5 h-2.5" />
                             {numFasiCiclo}
                           </span>
                         ) : (
-                          <span className="text-slate-600 text-[11px]">-</span>
+                          <span className="text-slate-600 text-[10px]">-</span>
                         )}
                       </td>
 
                       {/* Azioni Identiche per tutti gli articoli */}
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => apriModifica(art)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer shrink-0"
+                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer shrink-0"
                             title="Modifica Anagrafica"
                           >
                             <Pencil className="w-3.5 h-3.5 text-orange-400" />
@@ -496,11 +575,11 @@ export default function ArticoliPage() {
 
                           <Link
                             href={`/articoli/${art.id}`}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 text-xs font-semibold border border-orange-500/30 transition-all shrink-0 whitespace-nowrap"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 text-[11px] font-semibold border border-orange-500/30 transition-all shrink-0 whitespace-nowrap"
                             title="Configura BOM & Ciclo di Lavorazione"
                           >
                             <span>BOM & Cicli</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
+                            <ArrowRight className="w-3 h-3" />
                           </Link>
                         </div>
                       </td>
@@ -510,7 +589,7 @@ export default function ArticoliPage() {
 
                 {articoliFiltrati.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="py-10 text-center text-slate-400">
+                    <td colSpan={10} className="py-10 text-center text-slate-400">
                       Nessun articolo trovato con i filtri attuali.
                     </td>
                   </tr>
@@ -518,6 +597,43 @@ export default function ArticoliPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Paginazione Vista Tabella */}
+          {totalePagine > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-950 border-t border-slate-800">
+              <div className="text-xs text-slate-400 font-semibold">
+                Mostrati da <span className="text-white font-bold">{Math.min(inizioPaginazione + 1, totaleElementi)}</span> a{' '}
+                <span className="text-white font-bold">{Math.min(inizioPaginazione + ELEMENTI_PER_PAGINA, totaleElementi)}</span> di{' '}
+                <span className="text-orange-400 font-bold">{totaleElementi}</span> articoli
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaginaCorrente((prev) => Math.max(prev - 1, 1))}
+                  disabled={paginaCorrente === 1}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Precedenti</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono font-bold text-orange-400">
+                  Pagina {paginaCorrente} / {totalePagine}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPaginaCorrente((prev) => Math.min(prev + 1, totalePagine))}
+                  disabled={paginaCorrente === totalePagine}
+                  className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
+                >
+                  <span>Successivi 25</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

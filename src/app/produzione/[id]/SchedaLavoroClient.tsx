@@ -310,18 +310,41 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
                       </td>
 
                       <td className="p-2.5 border-r border-black">
-                        <span className="font-semibold">{centro ? centro.nome : 'N/D'}</span>
-                        <span className="text-[10px] text-slate-500 print:text-black block">
-                          [{centro?.codice}] {centro?.reparto}
-                        </span>
-                        {fase.centri_lavoro_alternativi_ids && fase.centri_lavoro_alternativi_ids.length > 0 && (
-                          <div className="mt-1 text-[9px] text-slate-600 print:text-black font-medium border-t border-slate-200 print:border-black pt-0.5">
-                            <strong>Alt: </strong>
-                            {fase.centri_lavoro_alternativi_ids
-                              .map((id) => centriLavoro.find((c) => c.id === id)?.codice)
-                              .filter(Boolean)
-                              .join(', ')}
+                        {fase.is_esterna ? (
+                          <div>
+                            <span className="font-bold text-pink-700 block">
+                              EXT: {fase.fornitore_nome || 'Terzista Esterno'}
+                            </span>
+                            <span className="text-[10px] text-slate-600 print:text-black block">
+                              Lead Time: {fase.giorni_rientro_previsti || 5} gg lavorativi
+                            </span>
+                            {fase.ddt_uscita_numero && (
+                              <span className="text-[9px] font-mono text-slate-700 print:text-black block">
+                                Spedito con DDT: {fase.ddt_uscita_numero}
+                              </span>
+                            )}
+                            {fase.ddt_rientro_numero && (
+                              <span className="text-[9px] font-mono text-emerald-700 print:text-black block">
+                                Rientrato con DDT: {fase.ddt_rientro_numero}
+                              </span>
+                            )}
                           </div>
+                        ) : (
+                          <>
+                            <span className="font-semibold">{centro ? centro.nome : 'N/D'}</span>
+                            <span className="text-[10px] text-slate-500 print:text-black block">
+                              [{centro?.codice}] {centro?.reparto}
+                            </span>
+                            {fase.centri_lavoro_alternativi_ids && fase.centri_lavoro_alternativi_ids.length > 0 && (
+                              <div className="mt-1 text-[9px] text-slate-600 print:text-black font-medium border-t border-slate-200 print:border-black pt-0.5">
+                                <strong>Alt: </strong>
+                                {fase.centri_lavoro_alternativi_ids
+                                  .map((id) => centriLavoro.find((c) => c.id === id)?.codice)
+                                  .filter(Boolean)
+                                  .join(', ')}
+                              </div>
+                            )}
+                          </>
                         )}
                       </td>
 

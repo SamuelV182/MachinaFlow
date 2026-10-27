@@ -122,11 +122,31 @@ export const SEED_CENTRI_LAVORO: CentroLavoro[] = [
     costo_orario: 75,
     attivo: true,
     creato_il: new Date().toISOString()
+  },
+  {
+    id: 'mc-esterna-01',
+    codice: 'EXT-TERZISTI',
+    nome: 'Conto Terzi Esterno (Trattamenti / Verniciatura)',
+    reparto: 'Lavorazioni Esterne',
+    capacita_giornaliera_ore: 24,
+    costo_orario: 0,
+    attivo: true,
+    creato_il: new Date().toISOString()
   }
 ]
 
 // 2. Tipi di Processo Industriali
 export const SEED_TIPI_PROCESSO: TipoProcesso[] = [
+  {
+    id: 'proc-esterna',
+    codice: 'PROC-ESTERNA',
+    nome: 'Lavorazione Esterna / Trattamenti',
+    descrizione: 'Trattamenti termici, galvanici, zincatura o verniciatura presso fornitore terzista',
+    centro_lavoro_predefinito_id: 'mc-esterna-01',
+    colore_badge: '#ec4899', // Pink
+    attivo: true,
+    creato_il: new Date().toISOString()
+  },
   {
     id: 'proc-cam',
     codice: 'PROC-CAD-CAM',
@@ -529,6 +549,67 @@ export const SEED_ARTICOLI: Articolo[] = [
     giacenza_attuale: 4,
     scorta_minima: 2,
     prezzo_riferimento: 640.00,
+    creato_il: new Date().toISOString()
+  },
+  // --- NUOVI PRODOTTI FINITI CON FASE ESTERNA INTERMEDIA (FRESATURA & CARPENTERIA) ---
+  {
+    id: 'art-31',
+    codice_articolo: 'PIA-SUP-ZINC-31',
+    descrizione: 'Piastra di Scorrimento e Registro Guida Fresata con Zincatura Bianca',
+    tipo: 'prodotto_finito',
+    unita_misura: 'pz',
+    giacenza_attuale: 0,
+    scorta_minima: 2,
+    peso_kg_unitario: 5.20,
+    prezzo_riferimento: 340.00,
+    creato_il: new Date().toISOString()
+  },
+  {
+    id: 'art-32',
+    codice_articolo: 'SUP-MAN-ANOD-32',
+    descrizione: 'Corpo Supporto Mandrino Fresato a 5 Assi con Anodizzazione Nera',
+    tipo: 'prodotto_finito',
+    unita_misura: 'pz',
+    giacenza_attuale: 0,
+    scorta_minima: 2,
+    superficie_m2_unitaria: 0.38,
+    prezzo_riferimento: 520.00,
+    creato_il: new Date().toISOString()
+  },
+  {
+    id: 'art-33',
+    codice_articolo: 'TRA-TUB-VERN-33',
+    descrizione: 'Telaio Portagruppo Elettrosaldato e Fresato con Verniciatura a Polvere',
+    tipo: 'prodotto_finito',
+    unita_misura: 'pz',
+    giacenza_attuale: 0,
+    scorta_minima: 1,
+    superficie_m2_unitaria: 1.25,
+    prezzo_riferimento: 1480.00,
+    creato_il: new Date().toISOString()
+  },
+  {
+    id: 'art-34',
+    codice_articolo: 'BLC-CUN-TEMP-34',
+    descrizione: 'Cuneo Inclinato Fresato 4 Assi con Tempra a Induzione Anti-Usura',
+    tipo: 'prodotto_finito',
+    unita_misura: 'pz',
+    giacenza_attuale: 0,
+    scorta_minima: 3,
+    peso_kg_unitario: 3.10,
+    prezzo_riferimento: 410.00,
+    creato_il: new Date().toISOString()
+  },
+  {
+    id: 'art-35',
+    codice_articolo: 'PIA-REG-BRUN-35',
+    descrizione: 'Staffa a Squadra di Posizionamento Fresata con Brunizione a Caldo',
+    tipo: 'prodotto_finito',
+    unita_misura: 'pz',
+    giacenza_attuale: 0,
+    scorta_minima: 4,
+    peso_kg_unitario: 1.80,
+    prezzo_riferimento: 215.00,
     creato_il: new Date().toISOString()
   },
 
@@ -1406,6 +1487,86 @@ export const SEED_DISTINTA_BASE: ComponenteDistintaBase[] = [
     articolo_componente_id: 'mat-24', // VIT-TCEI-M8X25
     quantita_necessaria: 6,
     note: 'Viti inox di fissaggio carter'
+  },
+
+  // 31. PIA-SUP-ZINC-31: Piastra Scorrimento con Zincatura Bianca
+  {
+    id: 'bom-31-1',
+    articolo_padre_id: 'art-31',
+    articolo_componente_id: 'mat-09', // LAM-TRA-200X20
+    quantita_necessaria: 0.55,
+    note: '550mm di piatto trafilato C45 200x20mm'
+  },
+  {
+    id: 'bom-31-2',
+    articolo_padre_id: 'art-31',
+    articolo_componente_id: 'mat-22', // VIT-TCEI-M10X40
+    quantita_necessaria: 8,
+    note: 'Viti fissaggio M10'
+  },
+
+  // 32. SUP-MAN-ANOD-32: Corpo Supporto Mandrino 5 Assi con Anodizzazione
+  {
+    id: 'bom-32-1',
+    articolo_padre_id: 'art-32',
+    articolo_componente_id: 'mat-18', // MAS-ALU-7075
+    quantita_necessaria: 1,
+    note: 'Massello Ergal 7075 L=160mm'
+  },
+  {
+    id: 'bom-32-2',
+    articolo_padre_id: 'art-32',
+    articolo_componente_id: 'mat-26', // SPI-CIT-12X50
+    quantita_necessaria: 2,
+    note: 'Spine calibrate centraggi'
+  },
+
+  // 33. TRA-TUB-VERN-33: Telaio Portagruppo Elettrosaldato con Verniciatura Polvere
+  {
+    id: 'bom-33-1',
+    articolo_padre_id: 'art-33',
+    articolo_componente_id: 'mat-15', // TUB-STR-100X100
+    quantita_necessaria: 1.8,
+    note: '1800mm scatolato strutturale 100x100x6mm'
+  },
+  {
+    id: 'bom-33-2',
+    articolo_padre_id: 'art-33',
+    articolo_componente_id: 'mat-03', // SAG-S355-25
+    quantita_necessaria: 2,
+    note: 'Piastre di testata saldate'
+  },
+  {
+    id: 'bom-33-3',
+    articolo_padre_id: 'art-33',
+    articolo_componente_id: 'mat-28', // FIL-SAL-SG2
+    quantita_necessaria: 0.2,
+    note: 'Filo saldatura strutturale MIG/MAG'
+  },
+
+  // 34. BLC-CUN-TEMP-34: Cuneo Inclinato 4 Assi con Tempra a Induzione
+  {
+    id: 'bom-34-1',
+    articolo_padre_id: 'art-34',
+    articolo_componente_id: 'mat-02', // SAG-S355-50
+    quantita_necessaria: 1,
+    note: 'Sagoma ossitaglio sp.50mm'
+  },
+
+  // 35. PIA-REG-BRUN-35: Staffa a Squadra con Brunizione a Caldo
+  {
+    id: 'bom-35-1',
+    articolo_padre_id: 'art-35',
+    articolo_componente_id: 'mat-09', // LAM-TRA-200X20
+    quantita_necessaria: 0.3,
+    note: '300mm piatto C45 trafilato per taglio angolare'
+  },
+  {
+    id: 'bom-35-2',
+    articolo_padre_id: 'art-35',
+    articolo_componente_id: 'mat-25', // SPI-CIT-10X40
+    quantita_necessaria: 2,
+    note: 'Spine di posizionamento'
   }
 ]
 
@@ -2755,6 +2916,324 @@ export const SEED_FASI_CICLO: FaseCicloStandard[] = [
     tempo_attrezzaggio_min: 10,
     tempo_ciclo_pezzo_min: 5,
     note_operative: 'Verifica dimensioni di montaggio'
+  },
+
+  // --- ARTICOLO 31: PIA-SUP-ZINC-31 (Piastra Scorrimento con Zincatura Bianca) ---
+  {
+    id: 'ciclo-31-1',
+    articolo_id: 'art-31',
+    sequenza: 10,
+    nome_fase: 'Programmazione CAD/CAM & Setup Utensili',
+    tipo_processo_id: 'proc-cam',
+    centro_lavoro_id: 'mc-cam-01',
+    tempo_attrezzaggio_min: 30,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Importazione 3D e percorsi cave a T per guida scorrimento'
+  },
+  {
+    id: 'ciclo-31-2',
+    articolo_id: 'art-31',
+    sequenza: 20,
+    nome_fase: 'Taglio a Nastro da Trafilato L=550mm',
+    tipo_processo_id: 'proc-taglio',
+    centro_lavoro_id: 'mc-seg-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 3,
+    note_operative: 'Taglio perpendicolare su segatrice KASTO'
+  },
+  {
+    id: 'ciclo-31-3',
+    articolo_id: 'art-31',
+    sequenza: 30,
+    nome_fase: 'Fresatura Verticale CNC Spianatura & Cave a T',
+    tipo_processo_id: 'proc-fresatura-3x',
+    centro_lavoro_id: 'mc-cnc-01',
+    centri_lavoro_alternativi_ids: ['mc-cnc-02'],
+    tempo_attrezzaggio_min: 20,
+    tempo_ciclo_pezzo_min: 18,
+    note_operative: 'Spianatura facce e fresatura cave a T con fresa apposita'
+  },
+  {
+    id: 'ciclo-31-4',
+    articolo_id: 'art-31',
+    sequenza: 40,
+    nome_fase: 'Zincatura Bianca Trivalente Esterna 12µm',
+    tipo_processo_id: 'proc-esterna',
+    centro_lavoro_id: 'mc-esterna-01',
+    tempo_attrezzaggio_min: 0,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Spedizione a Zincatura Veneta Srl per trattamento galvanico protettivo',
+    is_esterna: true,
+    fornitore_nome: 'Zincatura Veneta Srl',
+    giorni_rientro_previsti: 5,
+    modello_tariffa: 'peso_kg',
+    costo_tariffa_valore: 0.90,
+    costo_minimo_fornitura: 35.00
+  },
+  {
+    id: 'ciclo-31-5',
+    articolo_id: 'art-31',
+    sequenza: 50,
+    nome_fase: 'Ripresa Filetti M10 & Collaudo 3D',
+    tipo_processo_id: 'proc-collaudo-3d',
+    centro_lavoro_id: 'mc-cmm-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 6,
+    note_operative: 'Passaggio maschio manuale nei fori M10 e report CMM'
+  },
+
+  // --- ARTICOLO 32: SUP-MAN-ANOD-32 (Corpo Supporto 5 Assi con Anodizzazione) ---
+  {
+    id: 'ciclo-32-1',
+    articolo_id: 'art-32',
+    sequenza: 10,
+    nome_fase: 'Programmazione CAD/CAM 5 Assi HyperMill',
+    tipo_processo_id: 'proc-cam',
+    centro_lavoro_id: 'mc-cam-01',
+    tempo_attrezzaggio_min: 45,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Percorsi 5 assi per superfici complesse e tasche inclinate'
+  },
+  {
+    id: 'ciclo-32-2',
+    articolo_id: 'art-32',
+    sequenza: 20,
+    nome_fase: 'Taglio a Nastro Spezzone Ergal L=160mm',
+    tipo_processo_id: 'proc-taglio',
+    centro_lavoro_id: 'mc-seg-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 2,
+    note_operative: 'Taglio con avanzamento controllato per alluminio'
+  },
+  {
+    id: 'ciclo-32-3',
+    articolo_id: 'art-32',
+    sequenza: 30,
+    nome_fase: 'Fresatura 5 Assi Continuo Sgrossatura & Sedi H7',
+    tipo_processo_id: 'proc-fresatura-5x',
+    centro_lavoro_id: 'mc-cnc-05',
+    centri_lavoro_alternativi_ids: ['mc-cnc-06'],
+    tempo_attrezzaggio_min: 30,
+    tempo_ciclo_pezzo_min: 28,
+    note_operative: 'Staffaggio in morsa 5 assi, sgrossatura e finitura sedi cuscinetto'
+  },
+  {
+    id: 'ciclo-32-4',
+    articolo_id: 'art-32',
+    sequenza: 40,
+    nome_fase: 'Anodizzazione Dura Nera 40µm Esterna',
+    tipo_processo_id: 'proc-esterna',
+    centro_lavoro_id: 'mc-esterna-01',
+    tempo_attrezzaggio_min: 0,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Trattamento chimico anodico duro presso Ossidazione Anodica Modenese',
+    is_esterna: true,
+    fornitore_nome: 'Ossidazione Anodica Modenese Srl',
+    giorni_rientro_previsti: 4,
+    modello_tariffa: 'superficie_dm2',
+    costo_tariffa_valore: 0.22,
+    costo_minimo_fornitura: 40.00
+  },
+  {
+    id: 'ciclo-32-5',
+    articolo_id: 'art-32',
+    sequenza: 50,
+    nome_fase: 'Barenatura Finale Precisione & Collaudo 3D Zeiss',
+    tipo_processo_id: 'proc-collaudo-3d',
+    centro_lavoro_id: 'mc-cmm-01',
+    tempo_attrezzaggio_min: 15,
+    tempo_ciclo_pezzo_min: 8,
+    note_operative: 'Controllo coassialità e rugosità Ra 0.8'
+  },
+
+  // --- ARTICOLO 33: TRA-TUB-VERN-33 (Telaio Elettrosaldato con Verniciatura) ---
+  {
+    id: 'ciclo-33-1',
+    articolo_id: 'art-33',
+    sequenza: 10,
+    nome_fase: 'Programmazione CAD/CAM & Setup Utensili',
+    tipo_processo_id: 'proc-cam',
+    centro_lavoro_id: 'mc-cam-01',
+    tempo_attrezzaggio_min: 40,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Preparazione programma spianatura trave su Mazak HCN-5000'
+  },
+  {
+    id: 'ciclo-33-2',
+    articolo_id: 'art-33',
+    sequenza: 20,
+    nome_fase: 'Taglio a Nastro Tubolare L=1800mm',
+    tipo_processo_id: 'proc-taglio',
+    centro_lavoro_id: 'mc-seg-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 4,
+    note_operative: 'Intestatura e sfacciatura tubo quadro 100x100x6'
+  },
+  {
+    id: 'ciclo-33-3',
+    articolo_id: 'art-33',
+    sequenza: 30,
+    nome_fase: 'Saldatura MIG/MAG Piastre di Testata',
+    tipo_processo_id: 'proc-saldatura',
+    centro_lavoro_id: 'mc-sal-01',
+    tempo_attrezzaggio_min: 25,
+    tempo_ciclo_pezzo_min: 35,
+    note_operative: 'Puntatura a dima e saldatura a piena penetrazione'
+  },
+  {
+    id: 'ciclo-33-4',
+    articolo_id: 'art-33',
+    sequenza: 40,
+    nome_fase: 'Fresatura 4 Assi Orizzontale Piani d\'Appoggio',
+    tipo_processo_id: 'proc-fresatura-4x',
+    centro_lavoro_id: 'mc-cnc-04',
+    centri_lavoro_alternativi_ids: ['mc-cnc-03'],
+    tempo_attrezzaggio_min: 30,
+    tempo_ciclo_pezzo_min: 32,
+    note_operative: 'Spianatura piani di riferimento e forature interasse L=1750'
+  },
+  {
+    id: 'ciclo-33-5',
+    articolo_id: 'art-33',
+    sequenza: 50,
+    nome_fase: 'Verniciatura a Polvere Epossidica RAL 7016',
+    tipo_processo_id: 'proc-esterna',
+    centro_lavoro_id: 'mc-esterna-01',
+    tempo_attrezzaggio_min: 0,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Sabbiatura SA 2.5 e verniciatura bucciata grigio antracite',
+    is_esterna: true,
+    fornitore_nome: 'Verniciatura Industriale Nord-Est Spa',
+    giorni_rientro_previsti: 6,
+    modello_tariffa: 'superficie_m2',
+    costo_tariffa_valore: 15.50,
+    costo_minimo_fornitura: 60.00
+  },
+  {
+    id: 'ciclo-33-6',
+    articolo_id: 'art-33',
+    sequenza: 60,
+    nome_fase: 'Pulizia Filettature & Controllo Qualità Finale',
+    tipo_processo_id: 'proc-collaudo-3d',
+    centro_lavoro_id: 'mc-cmm-01',
+    tempo_attrezzaggio_min: 15,
+    tempo_ciclo_pezzo_min: 10,
+    note_operative: 'Controllo planarità e assenza sbavature vernice nelle sedi'
+  },
+
+  // --- ARTICOLO 34: BLC-CUN-TEMP-34 (Cuneo 4 Assi con Tempra a Induzione) ---
+  {
+    id: 'ciclo-34-1',
+    articolo_id: 'art-34',
+    sequenza: 10,
+    nome_fase: 'Programmazione CAD/CAM Superfici 3D',
+    tipo_processo_id: 'proc-cam',
+    centro_lavoro_id: 'mc-cam-01',
+    tempo_attrezzaggio_min: 35,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Elaborazione percorsi inclinati 15° con frese toriche'
+  },
+  {
+    id: 'ciclo-34-2',
+    articolo_id: 'art-34',
+    sequenza: 20,
+    nome_fase: 'Fresatura 4 Assi Sgrossatura Piani Inclinati & Forature',
+    tipo_processo_id: 'proc-fresatura-4x',
+    centro_lavoro_id: 'mc-cnc-03',
+    centri_lavoro_alternativi_ids: ['mc-cnc-04'],
+    tempo_attrezzaggio_min: 25,
+    tempo_ciclo_pezzo_min: 24,
+    note_operative: 'Lavorazione su quarto asse con sovrametallo 0.3mm per tempra'
+  },
+  {
+    id: 'ciclo-34-3',
+    articolo_id: 'art-34',
+    sequenza: 30,
+    nome_fase: 'Tempra Superficiale a Induzione 58-60 HRC',
+    tipo_processo_id: 'proc-esterna',
+    centro_lavoro_id: 'mc-esterna-01',
+    tempo_attrezzaggio_min: 0,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Trattamento termico di indurimento pista di scorrimento cuneo',
+    is_esterna: true,
+    fornitore_nome: 'Trattamenti Termici Friulani Srl',
+    giorni_rientro_previsti: 4,
+    modello_tariffa: 'pezzo_fisso',
+    costo_tariffa_valore: 6.50
+  },
+  {
+    id: 'ciclo-34-4',
+    articolo_id: 'art-34',
+    sequenza: 40,
+    nome_fase: 'Sbavatura Spigoli & Controllo Durezza Rockwell / CMM',
+    tipo_processo_id: 'proc-collaudo-3d',
+    centro_lavoro_id: 'mc-cmm-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 6,
+    note_operative: 'Verifica durezza superficiale min. 58 HRC e planarità'
+  },
+
+  // --- ARTICOLO 35: PIA-REG-BRUN-35 (Staffa Squadra con Brunizione a Caldo) ---
+  {
+    id: 'ciclo-35-1',
+    articolo_id: 'art-35',
+    sequenza: 10,
+    nome_fase: 'Programmazione CAD/CAM & Setup Utensili',
+    tipo_processo_id: 'proc-cam',
+    centro_lavoro_id: 'mc-cam-01',
+    tempo_attrezzaggio_min: 20,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Piazzamento doppio pezzo in morsa'
+  },
+  {
+    id: 'ciclo-35-2',
+    articolo_id: 'art-35',
+    sequenza: 20,
+    nome_fase: 'Taglio a Nastro Angolare 45° su Kasto',
+    tipo_processo_id: 'proc-taglio',
+    centro_lavoro_id: 'mc-seg-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 2,
+    note_operative: 'Taglio obliquo da trafilato C45'
+  },
+  {
+    id: 'ciclo-35-3',
+    articolo_id: 'art-35',
+    sequenza: 30,
+    nome_fase: 'Fresatura Verticale CNC Asolature & Smussatura',
+    tipo_processo_id: 'proc-fresatura-3x',
+    centro_lavoro_id: 'mc-cnc-02',
+    centri_lavoro_alternativi_ids: ['mc-cnc-01'],
+    tempo_attrezzaggio_min: 15,
+    tempo_ciclo_pezzo_min: 14,
+    note_operative: 'Esecuzione asole di registro e smussi 2x45° su tutti i lati'
+  },
+  {
+    id: 'ciclo-35-4',
+    articolo_id: 'art-35',
+    sequenza: 40,
+    nome_fase: 'Brunizione Chimica a Caldo & Oliatura Dewatering',
+    tipo_processo_id: 'proc-esterna',
+    centro_lavoro_id: 'mc-esterna-01',
+    tempo_attrezzaggio_min: 0,
+    tempo_ciclo_pezzo_min: 0,
+    note_operative: 'Brunitura a caldo anti-corrosione a lotto fisso',
+    is_esterna: true,
+    fornitore_nome: 'Trattamenti Termici & Bruniti Srl',
+    giorni_rientro_previsti: 3,
+    modello_tariffa: 'lotto_forfettario',
+    costo_tariffa_valore: 55.00
+  },
+  {
+    id: 'ciclo-35-5',
+    articolo_id: 'art-35',
+    sequenza: 50,
+    nome_fase: 'Verifica Ortogonalità & Collaudo 3D',
+    tipo_processo_id: 'proc-collaudo-3d',
+    centro_lavoro_id: 'mc-cmm-01',
+    tempo_attrezzaggio_min: 10,
+    tempo_ciclo_pezzo_min: 4,
+    note_operative: 'Controllo ortogonalità entro 0.015mm e marcatura lotti'
   }
 ]
 
@@ -3128,6 +3607,53 @@ export const SEED_ORDINI_CLIENTI: (OrdineCliente & { cliente?: Cliente; righe: (
         articolo_id: 'art-29', // TAP-CHI-29 - Tappo Chiusura Cuscinetto Cilindro
         quantita: 8,
         prezzo_unitario: 180
+      }
+    ]
+  },
+  {
+    id: 'ord-11',
+    numero_ordine: 'ORD-VAL-2026-088',
+    cliente_id: 'cli-01', // Valmet Tissue Converting S.p.A.
+    data_ordine: '2026-10-26T08:00:00Z',
+    data_consegna_concordata: '2026-11-18T17:00:00Z', // Scadenza 18/11/2026
+    stato: 'confermato',
+    note: 'Commessa urgente gruppo ribobinatrice con trattamenti esterni intermediari (Zincatura, Anodizzazione, Verniciatura, Tempra, Brunizione).',
+    creato_il: '2026-10-26T08:00:00Z',
+    righe: [
+      {
+        id: 'riga-11-1',
+        ordine_cliente_id: 'ord-11',
+        articolo_id: 'art-31', // PIA-SUP-ZINC-31
+        quantita: 20,
+        prezzo_unitario: 340.00
+      },
+      {
+        id: 'riga-11-2',
+        ordine_cliente_id: 'ord-11',
+        articolo_id: 'art-32', // SUP-MAN-ANOD-32
+        quantita: 15,
+        prezzo_unitario: 520.00
+      },
+      {
+        id: 'riga-11-3',
+        ordine_cliente_id: 'ord-11',
+        articolo_id: 'art-33', // TRA-TUB-VERN-33
+        quantita: 8,
+        prezzo_unitario: 1480.00
+      },
+      {
+        id: 'riga-11-4',
+        ordine_cliente_id: 'ord-11',
+        articolo_id: 'art-34', // BLC-CUN-TEMP-34
+        quantita: 25,
+        prezzo_unitario: 410.00
+      },
+      {
+        id: 'riga-11-5',
+        ordine_cliente_id: 'ord-11',
+        articolo_id: 'art-35', // PIA-REG-BRUN-35
+        quantita: 30,
+        prezzo_unitario: 215.00
       }
     ]
   }

@@ -63,6 +63,8 @@ export interface TipoProcesso {
   creato_il: string
 }
 
+export type ModelloTariffaEsterna = 'peso_kg' | 'superficie_dm2' | 'superficie_m2' | 'pezzo_fisso' | 'lotto_forfettario'
+
 export interface Articolo {
   id: string
   codice_articolo: string
@@ -73,6 +75,8 @@ export interface Articolo {
   scorta_minima: number
   lead_time_giorni_fornitore?: number
   prezzo_riferimento?: number
+  peso_kg_unitario?: number
+  superficie_m2_unitaria?: number
   creato_il: string
 }
 
@@ -108,6 +112,13 @@ export interface FaseCicloStandard {
   tempo_attrezzaggio_min: number
   tempo_ciclo_pezzo_min: number
   note_operative?: string
+  // Campi dedicati per Lavorazione Esterna / Conto Terzi (es. Zincatura, Trattamenti termici, Verniciatura)
+  is_esterna?: boolean
+  fornitore_nome?: string
+  giorni_rientro_previsti?: number
+  modello_tariffa?: ModelloTariffaEsterna
+  costo_tariffa_valore?: number // es. 1.50 per 1.50 €/kg o 12.00 per €/m²
+  costo_minimo_fornitura?: number // es. minimo fatturabile 60€
   centro_lavoro?: CentroLavoro
   tipo_processo?: TipoProcesso
 }
@@ -178,6 +189,20 @@ export interface FaseOdP {
   data_inizio_reale?: string
   data_fine_reale?: string
   note_officina?: string
+  // Campi dedicati per Lavorazione Esterna / Conto Terzi
+  is_esterna?: boolean
+  fornitore_nome?: string
+  giorni_rientro_previsti?: number
+  modello_tariffa?: ModelloTariffaEsterna
+  costo_tariffa_valore?: number
+  costo_minimo_fornitura?: number
+  costo_totale_previsto?: number
+  costo_totale_effettivo?: number
+  stato_esterna?: 'in_attesa_uscita' | 'inviato_al_terzista' | 'rientrato'
+  ddt_uscita_numero?: string
+  data_uscita_terzista?: string
+  data_rientro_terzista?: string
+  ddt_rientro_numero?: string
   centro_lavoro?: CentroLavoro
   tipo_processo?: TipoProcesso
   operatore?: ProfiloUtente

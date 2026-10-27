@@ -74,7 +74,8 @@ export const syncService = {
   },
 
   // 1. ORDINI DI PRODUZIONE (OdP)
-  async getOrdiniProduzione(): Promise<(OrdineProduzione & { fasi: FaseOdP[] })[]> {
+  // opzioni.soloAttivi = true: per postazioni a bordo macchina che necessitano solo di ordini attivi o completati di recente
+  async getOrdiniProduzione(opzioni?: { soloAttivi?: boolean }): Promise<(OrdineProduzione & { fasi: FaseOdP[] })[]> {
     try {
       // Recupera ordini salvati localmente nel browser
       let locali: (OrdineProduzione & { fasi: FaseOdP[] })[] = []
@@ -83,7 +84,7 @@ export const syncService = {
         if (salvati) locali = JSON.parse(salvati)
       } catch {}
 
-      const { data: odpCloud, error } = await supabase
+      let query = supabase
         .from('ordini_produzione')
         .select(`
           *,
@@ -91,8 +92,16 @@ export const syncService = {
         `)
         .order('creato_il', { ascending: false })
 
+      // Se richiesto solo il carico attivo (es. tablet officina), escludiamo gli ordini completati
+      // mantenendo gli ordini pianificati, in_corso o sospesi
+      if (opzioni?.soloAttivi) {
+        query = query.neq('stato', 'completato')
+      }
+
+      const { data: odpCloud, error } = await query
+
       if (error || !odpCloud) {
-        return locali
+        return opzioni?.soloAttivi ? locali.filter((o) => o.stato !== 'completato') : locali
       }
 
       // Se nel browser ci sono ordini non ancora presenti su Supabase, inviali in background verificando sia id che codice_odp
@@ -112,16 +121,19 @@ export const syncService = {
         fasi: (o.fasi || []).sort((a: FaseOdP, b: FaseOdP) => a.sequenza - b.sequenza)
       }))
 
-      // Aggiorna cache locale per massima reattività
-      try {
-        localStorage.setItem('machinaflow_odp', JSON.stringify(formattati))
-      } catch {}
+      // Aggiorna cache locale (se non è un filtro parziale)
+      if (!opzioni?.soloAttivi) {
+        try {
+          localStorage.setItem('machinaflow_odp', JSON.stringify(formattati))
+        } catch {}
+      }
 
       return formattati
     } catch {
       try {
         const salvati = localStorage.getItem('machinaflow_odp')
-        return salvati ? JSON.parse(salvati) : []
+        const lista = salvati ? JSON.parse(salvati) : []
+        return opzioni?.soloAttivi ? lista.filter((o: OrdineProduzione) => o.stato !== 'completato') : lista
       } catch {
         return []
       }
@@ -335,6 +347,33 @@ export const syncService = {
       await supabase.from('tipi_processo').upsert(processo)
     } catch (e) {
       console.error('Errore salvataggio tipo processo su Supabase:', e)
+    }
+  },
+
+  // 6. REAL-TIME SUBSCRIPTIONS
+  // Permette ai terminali a bordo macchina e al pannello supervisore di ricevere aggiornamenti
+  // in tempo reale istantanei (sub-secondo) quando un'altra postazione cambia o completa una fase
+  sottoscriviAvanzamentoProduzione(suAggiornamento: () => void) {
+    const channel = supabase
+      .channel('officina-realtime-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fasi_odp' },
+        () => {
+          suAggiornamento()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ordini_produzione' },
+        () => {
+          suAggiornamento()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
     }
   }
 }

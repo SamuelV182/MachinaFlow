@@ -31,7 +31,13 @@ import {
   Calendar,
   Hourglass,
   Printer,
-  Scissors
+  Scissors,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Truck,
+  ExternalLink
 } from 'lucide-react'
 import {
   CentroLavoro,
@@ -58,6 +64,11 @@ export default function TerminaleOfficinaPage() {
   const [modalitaVista, setModalitaVista] = useState<'cards' | 'tabella'>('cards')
   const [ricercaQr, setRicercaQr] = useState<string>('')
   const [notifica, setNotifica] = useState<string | null>(null)
+
+  // Paginazione e Gestione Fasi Completate per Bordo Macchina Ultra-Reattivo
+  const [paginaCorrente, setPaginaCorrente] = useState<number>(1)
+  const [mostraCompletati, setMostraCompletati] = useState<boolean>(false)
+  const ELEMENTI_PER_PAGINA = 10
 
   // Gestione Login Postazione Kiosk
   // Valori possibili: null (non loggato / mostra login), 'supervisore' (vista globale capo officina), oppure id della specifica macchina
@@ -98,6 +109,18 @@ export default function TerminaleOfficinaPage() {
     pezziScarto: number
     opzioneResiduo: 'sospendi' | 'splitta_residuo'
     generaRipristinoScarto: boolean
+    limiteMassimoConsentito: number
+    nomeMateriaPrimaLimite?: string
+  } | null>(null)
+
+  // Gestione Lavorazioni Esterne Conto Terzi
+  const [modaleEsternaAperta, setModaleEsternaAperta] = useState(false)
+  const [datiEsterna, setDatiEsterna] = useState<{
+    odp: OrdineProduzione & { fasi: FaseOdP[] }
+    fase: FaseOdP
+    tipoAzione: 'spedizione' | 'rientro'
+    ddtNumero: string
+    note: string
   } | null>(null)
 
   useEffect(() => {
@@ -112,13 +135,37 @@ export default function TerminaleOfficinaPage() {
         }
       }
 
-      setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
+      const centriSalvati = parseSicuro<CentroLavoro[]>('machinaflow_centri_lavoro', [])
+      const mappaCentri = new Map<string, CentroLavoro>()
+      SEED_CENTRI_LAVORO.forEach((c) => mappaCentri.set(c.id, c))
+      centriSalvati.forEach((c) => mappaCentri.set(c.id, c))
+      const centriCompleti = Array.from(mappaCentri.values())
+      setCentriLavoro(centriCompleti)
+
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
       setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
 
-      // Carica OdP sincronizzati dal Cloud Supabase
-      const odpSincronizzati = await syncService.getOrdiniProduzione()
-      setOdpList(odpSincronizzati)
+      // Carica OdP sincronizzati dal Cloud Supabase (ottimizzato per tablet: solo ordini attivi)
+      const odpSincronizzati = await syncService.getOrdiniProduzione({ soloAttivi: true })
+      // Allineamento configurazione: se una fase ha is_esterna: true, assicura centro e stato coerenti
+      const odpNormalizzati = odpSincronizzati.map((o) => ({
+        ...o,
+        fasi: o.fasi.map((f) => {
+          // La lavorazione esterna è determinata TASSATIVAMENTE dalla configurazione del ciclo (is_esterna === true oppure centro_lavoro_id === 'mc-esterna-01')
+          const isConfigurataEsterna = Boolean(f.is_esterna || f.centro_lavoro_id === 'mc-esterna-01' || f.tipo_processo_id === 'proc-esterna')
+
+          if (isConfigurataEsterna) {
+            return {
+              ...f,
+              is_esterna: true,
+              centro_lavoro_id: 'mc-esterna-01',
+              stato_esterna: f.stato_esterna || (f.stato === 'in_corso' ? 'inviato_al_terzista' : f.stato === 'completata' ? 'rientrato' : 'in_attesa_uscita')
+            }
+          }
+          return f
+        })
+      }))
+      setOdpList(odpNormalizzati)
 
       // Recupera la postazione salvata nel tablet
       const salvata = localStorage.getItem('machinaflow_postazione_corrente_id')
@@ -130,7 +177,40 @@ export default function TerminaleOfficinaPage() {
     }
 
     caricaDati()
+
+    // Sottoscrizione Real-Time nativa Supabase:
+    // Quando qualsiasi postazione in officina o ufficio completa/avvia una fase o aggiorna un OdP,
+    // questo terminale aggiorna la sua coda di lavoro istantaneamente e silenziosamente
+    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(async () => {
+      const aggiornati = await syncService.getOrdiniProduzione({ soloAttivi: true })
+      const normalizzati = aggiornati.map((o) => ({
+        ...o,
+        fasi: o.fasi.map((f) => {
+          const isConfigurataEsterna = Boolean(f.is_esterna || f.centro_lavoro_id === 'mc-esterna-01' || f.tipo_processo_id === 'proc-esterna')
+
+          if (isConfigurataEsterna) {
+            return {
+              ...f,
+              is_esterna: true,
+              centro_lavoro_id: 'mc-esterna-01',
+              stato_esterna: f.stato_esterna || (f.stato === 'in_corso' ? 'inviato_al_terzista' : f.stato === 'completata' ? 'rientrato' : 'in_attesa_uscita')
+            }
+          }
+          return f
+        })
+      }))
+      setOdpList(normalizzati)
+    })
+
+    return () => {
+      disiscrivi()
+    }
   }, [])
+
+  // Reset pagina alla variazione di macchina selezionata, ricerca o toggle completati
+  useEffect(() => {
+    setPaginaCorrente(1)
+  }, [macchinaSelezionataId, ricercaQr, mostraCompletati])
 
   // Apertura modale richiesta PIN
   const richiediPinPerLogin = (idPostazione: string) => {
@@ -309,6 +389,24 @@ export default function TerminaleOfficinaPage() {
     const listaAggiornata = odpList.map((o) => (o.id === odp.id ? odpLottoA : o))
     listaAggiornata.unshift(odpLottoB)
 
+    // 4. Scarico Reale Materia Prima a Magazzino per il Lotto A avviato
+    const componentiBom = distinte.filter((d) => d.articolo_padre_id === odp.articolo_id)
+    if (componentiBom.length > 0) {
+      const articoliAggiornati = articoli.map((a) => {
+        const comp = componentiBom.find((c) => c.articolo_componente_id === a.id)
+        if (comp) {
+          const consumo = comp.quantita_necessaria * quantitaDaSplittare
+          const nuovaGiacenza = Math.max(0, a.giacenza_attuale - consumo)
+          const articoloScaricato = { ...a, giacenza_attuale: nuovaGiacenza }
+          syncService.salvaArticolo(articoloScaricato)
+          return articoloScaricato
+        }
+        return a
+      })
+      setArticoli(articoliAggiornati)
+      localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
+    }
+
     setOdpList(listaAggiornata)
     localStorage.setItem('machinaflow_odp', JSON.stringify(listaAggiornata))
 
@@ -485,6 +583,24 @@ export default function TerminaleOfficinaPage() {
       })
     }
 
+    // Scarico Reale Materia Prima a Magazzino per i pezzi buoni completati
+    const componentiBom = distinte.filter((d) => d.articolo_padre_id === odp.articolo_id)
+    if (componentiBom.length > 0 && pezziBuoni > 0) {
+      const articoliAggiornati = articoli.map((a) => {
+        const comp = componentiBom.find((c) => c.articolo_componente_id === a.id)
+        if (comp) {
+          const consumo = comp.quantita_necessaria * pezziBuoni
+          const nuovaGiacenza = Math.max(0, a.giacenza_attuale - consumo)
+          const articoloScaricato = { ...a, giacenza_attuale: nuovaGiacenza }
+          syncService.salvaArticolo(articoloScaricato)
+          return articoloScaricato
+        }
+        return a
+      })
+      setArticoli(articoliAggiornati)
+      localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
+    }
+
     const listaAggiornata = odpList.map((o) => (o.id === odp.id ? odpFatti : o))
     listaAggiornata.unshift(odpResiduo)
 
@@ -503,6 +619,82 @@ export default function TerminaleOfficinaPage() {
     setDatiCompleta(null)
     const msgRipristino = nuovoOdpRipristino ? ` Generato inoltre OdP urgente ${nuovoOdpRipristino.codice_odp} (${pezziScarto} pz)!` : ''
     setNotifica(`✓ Inviati ${pezziBuoni} pz alle fasi successive (${codiceFatti}). Creato lotto residuo ${codiceResiduo} per i ${quantitaResidua} pz rimanenti.${msgRipristino}`)
+    setTimeout(() => setNotifica(null), 5000)
+  }
+
+  // Conferma Spedizione o Rientro Conto Terzi Esterno
+  const handleConfermaEsterna = async () => {
+    if (!datiEsterna) return
+    const { odp, fase, tipoAzione, ddtNumero, note } = datiEsterna
+
+    const oggiIso = new Date().toISOString()
+    const aggiornati = odpList.map((o) => {
+      if (o.id === odp.id) {
+        const fasiAggiornate = o.fasi.map((f) => {
+          if (f.id === fase.id) {
+            if (tipoAzione === 'spedizione') {
+              return {
+                ...f,
+                stato: 'in_corso' as const,
+                stato_esterna: 'inviato_al_terzista' as const,
+                data_uscita_terzista: oggiIso,
+                ddt_uscita_numero: ddtNumero.trim() || undefined,
+                note_officina: note.trim()
+                  ? `${f.note_officina ? f.note_officina + ' | ' : ''}Spedito a ${f.fornitore_nome || 'terzista'} con DDT ${ddtNumero}: ${note.trim()}`
+                  : f.note_officina
+              }
+            } else {
+              // Rientro da terzista -> fase completata
+              return {
+                ...f,
+                stato: 'completata' as const,
+                stato_esterna: 'rientrato' as const,
+                data_rientro_terzista: oggiIso,
+                ddt_rientro_numero: ddtNumero.trim() || undefined,
+                data_fine_reale: oggiIso,
+                note_officina: note.trim()
+                  ? `${f.note_officina ? f.note_officina + ' | ' : ''}Rientrato con DDT ${ddtNumero}: ${note.trim()}`
+                  : f.note_officina
+              }
+            }
+          }
+          return f
+        })
+
+        const tutteChiuse = fasiAggiornate.every((f) => f.stato === 'completata')
+        const almenoUnaAvviata = fasiAggiornate.some((f) => f.stato === 'in_corso')
+        const nuovoStatoOdp = tutteChiuse ? ('completato' as const) : almenoUnaAvviata ? ('in_lavorazione' as const) : o.stato
+
+        return {
+          ...o,
+          fasi: fasiAggiornate,
+          stato: nuovoStatoOdp,
+          quantita_prodotta: tutteChiuse ? o.quantita_da_produrre : o.quantita_prodotta
+        }
+      }
+      return o
+    })
+
+    setOdpList(aggiornati)
+    localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    const odpModificato = aggiornati.find((o) => o.id === odp.id)
+    const faseModificata = odpModificato?.fasi.find((f) => f.id === fase.id)
+    if (faseModificata) {
+      await syncService.aggiornaFaseOdP(faseModificata)
+    }
+    if (odpModificato) {
+      await syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
+    }
+
+    setModaleEsternaAperta(false)
+    setDatiEsterna(null)
+
+    if (tipoAzione === 'spedizione') {
+      setNotifica(`📦 Lavorazione inviata al terzista ${fase.fornitore_nome || ''}! (DDT: ${ddtNumero || 'N/D'})`)
+    } else {
+      setNotifica(`✓ Pezzi rientrati con successo dal terzista! Sbloccata la fase successiva.`)
+    }
     setTimeout(() => setNotifica(null), 5000)
   }
 
@@ -577,6 +769,21 @@ export default function TerminaleOfficinaPage() {
 
   // Estrai tutte le fasi da eseguire o in corso con metadati avanzati di sequenza e disponibilità materiale
   const fasiInOfficina = useMemo(() => {
+    // 1. Calcola il materiale già impegnato / prelevato dagli OdP in lavorazione attiva
+    const materialeGiaImpegnatoPerArticolo = new Map<string, number>()
+    odpList.forEach((o) => {
+      // Se un OdP è già in corso (ha almeno una fase avviata o completata)
+      const haFasiAvviateOCompletate = o.fasi.some((f) => f.stato === 'in_corso' || f.stato === 'completata')
+      if (haFasiAvviateOCompletate && o.stato !== 'completato') {
+        const componenti = distinte.filter((d) => d.articolo_padre_id === o.articolo_id)
+        componenti.forEach((comp) => {
+          const consumo = comp.quantita_necessaria * o.quantita_da_produrre
+          const att = materialeGiaImpegnatoPerArticolo.get(comp.articolo_componente_id) || 0
+          materialeGiaImpegnatoPerArticolo.set(comp.articolo_componente_id, att + consumo)
+        })
+      }
+    })
+
     const lista: {
       odp: OrdineProduzione & { fasi: FaseOdP[] }
       fase: FaseOdP
@@ -587,6 +794,7 @@ export default function TerminaleOfficinaPage() {
       materiaPrimaParziale: boolean
       pezziFattibiliConGiacenza: number
       nomeMateriaPrimaMancante?: string
+      avvisoMaterialeInformativo?: string
     }[] = []
 
     odpList.forEach((odp) => {
@@ -603,9 +811,16 @@ export default function TerminaleOfficinaPage() {
         const mat = articoli.find((a) => a.id === comp.articolo_componente_id)
         if (mat) {
           const fabbisognoTotale = comp.quantita_necessaria * odp.quantita_da_produrre
-          if (mat.giacenza_attuale < fabbisognoTotale) {
-            // Calcola quanti pezzi completi si possono fare con la giacenza attuale
-            const fattibili = comp.quantita_necessaria > 0 ? Math.floor(mat.giacenza_attuale / comp.quantita_necessaria) : 0
+
+          // Se l'OdP attuale NON ha ancora preso il materiale sul mandrino,
+          // sottrai il materiale già impegnato dagli altri lotti in corso
+          const haGiaPresoMateriale = odp.fasi.some((f) => f.stato === 'in_corso' || f.stato === 'completata')
+          const impegnatoDaAltri = haGiaPresoMateriale ? 0 : (materialeGiaImpegnatoPerArticolo.get(mat.id) || 0)
+          const giacenzaDisponibileReale = Math.max(0, mat.giacenza_attuale - impegnatoDaAltri)
+
+          if (giacenzaDisponibileReale < fabbisognoTotale) {
+            // Calcola quanti pezzi completi si possono fare con la giacenza realmente libera
+            const fattibili = comp.quantita_necessaria > 0 ? Math.floor(giacenzaDisponibileReale / comp.quantita_necessaria) : 0
             if (fattibili < pezziFattibili) {
               pezziFattibili = fattibili
             }
@@ -616,7 +831,7 @@ export default function TerminaleOfficinaPage() {
               materiaPrimaMancante = true
             }
 
-            nomeMateriaPrimaMancante = `${mat.codice_articolo} (Giacenza: ${mat.giacenza_attuale} ${mat.unita_misura}, serve: ${fabbisognoTotale})`
+            nomeMateriaPrimaMancante = `${mat.codice_articolo} (Disponibile libera: ${giacenzaDisponibileReale} ${mat.unita_misura}, serve: ${fabbisognoTotale})`
           }
         }
       }
@@ -630,10 +845,19 @@ export default function TerminaleOfficinaPage() {
       odp.fasi.forEach((fase) => {
         const centro = centriLavoro.find((c) => c.id === fase.centro_lavoro_id)
         const fasePrecedenteCompletata = checkFasiPrecedentiCompletate(odp, fase.sequenza)
-        // La mancanza di materia prima impatta le fasi di prima lavorazione (es. Taglio, CAD o prima operazione meccanica)
-        const isFaseIniziale = fase.sequenza <= 20
-        const matMancanteSuQuestaFase = isFaseIniziale && materiaPrimaMancante
-        const matParzialeSuQuestaFase = isFaseIniziale && materiaPrimaParziale && !materiaPrimaMancante
+        // La mancanza di materia prima fisica NON deve bloccare l'ufficio tecnico (CAD/CAM a video),
+        // ma impatta operativamente il Taglio e la lavorazione meccanica (Fresatura/Tornitura).
+        // Per il CAD/CAM creiamo un avviso informativo trasparente che avvisa l'operatore senza impedirgli di programmare.
+        const isCadCam = fase.centro_lavoro_id === 'mc-cam-01' || fase.nome_fase.toLowerCase().includes('cam')
+        const matMancanteSuQuestaFase = !isCadCam && materiaPrimaMancante
+        const matParzialeSuQuestaFase = !isCadCam && materiaPrimaParziale && !materiaPrimaMancante
+
+        let avvisoMaterialeInformativo: string | undefined = undefined
+        if (isCadCam && (materiaPrimaMancante || materiaPrimaParziale)) {
+          avvisoMaterialeInformativo = materiaPrimaMancante
+            ? `⚠️ Info stock: Materiale non ancora disponibile a magazzino (${nomeMateriaPrimaMancante || 'da ordinare'}). Puoi comunque anticipare la programmazione CAM a computer.`
+            : `ℹ️ Info stock: Materiale parziale a magazzino (${pezziFattibili}/${odp.quantita_da_produrre} pz pronti). Puoi completare la programmazione CAM dell'intero ordine.`
+        }
 
         lista.push({
           odp,
@@ -644,7 +868,8 @@ export default function TerminaleOfficinaPage() {
           materiaPrimaMancante: matMancanteSuQuestaFase,
           materiaPrimaParziale: matParzialeSuQuestaFase,
           pezziFattibiliConGiacenza: pezziFattibili,
-          nomeMateriaPrimaMancante
+          nomeMateriaPrimaMancante,
+          avvisoMaterialeInformativo
         })
       })
     })
@@ -728,9 +953,15 @@ export default function TerminaleOfficinaPage() {
 
       // Tra quelle da avviare, se una ha il materiale già pronto al banco precede quella in attesa
       if (a.fase.stato !== 'completata' && b.fase.stato !== 'completata') {
-        // Se a una manca la materia prima, scivola dopo quelle che hanno il materiale a stock
-        if (!a.materiaPrimaMancante && b.materiaPrimaMancante) return -1
-        if (a.materiaPrimaMancante && !b.materiaPrimaMancante) return 1
+        // Ordini con materiale 100% pronto precedono quelli parziali o totalmente mancanti
+        const matProntoA = !a.materiaPrimaMancante && !a.materiaPrimaParziale
+        const matProntoB = !b.materiaPrimaMancante && !b.materiaPrimaParziale
+        if (matProntoA && !matProntoB) return -1
+        if (!matProntoA && matProntoB) return 1
+
+        // Tra quelli non completi, quelli parziali precedono quelli a secco (100% mancante)
+        if (a.materiaPrimaParziale && b.materiaPrimaMancante) return -1
+        if (a.materiaPrimaMancante && b.materiaPrimaParziale) return 1
 
         if (a.fasePrecedenteCompletata && !b.fasePrecedenteCompletata) return -1
         if (!a.fasePrecedenteCompletata && b.fasePrecedenteCompletata) return 1
@@ -750,6 +981,24 @@ export default function TerminaleOfficinaPage() {
     })
   }, [fasiFiltrateRaw])
 
+  // Esclusione Ordini Completati dalla coda operativa standard (attivabile su richiesta)
+  const fasiDaVisualizzare = useMemo(() => {
+    if (mostraCompletati) {
+      return fasiOrdinate
+    }
+    return fasiOrdinate.filter((item) => item.fase.stato !== 'completata')
+  }, [fasiOrdinate, mostraCompletati])
+
+  // Conteggio Totale e Pagine
+  const totaleElementi = fasiDaVisualizzare.length
+  const totalePagine = Math.ceil(totaleElementi / ELEMENTI_PER_PAGINA) || 1
+
+  // Fetta di 10 lavori per la pagina corrente
+  const fasiPaginate = useMemo(() => {
+    const inizio = (paginaCorrente - 1) * ELEMENTI_PER_PAGINA
+    return fasiDaVisualizzare.slice(inizio, inizio + ELEMENTI_PER_PAGINA)
+  }, [fasiDaVisualizzare, paginaCorrente])
+
   // Identifica per CIASCUNA macchina la prima fase autorizzata ad essere avviata
   // Una macchina può avviare un pezzo solo se attualmente non ne ha già un altro "in_corso"
   const idsFasiAutorizzateDaAvviare = useMemo(() => {
@@ -759,19 +1008,35 @@ export default function TerminaleOfficinaPage() {
     const centriIds = new Set(fasiOrdinate.map((item) => item.fase.centro_lavoro_id))
 
     centriIds.forEach((centroId) => {
+      // Per le lavorazioni esterne conto terzi non c'è vincolo di macchina interna occupata:
+      // ogni fase esterna con fase precedente completata e materiale disponibile può essere spedita!
+      if (centroId === 'mc-esterna-01') {
+        fasiOrdinate
+          .filter(
+            (item) =>
+              item.fase.centro_lavoro_id === 'mc-esterna-01' &&
+              item.fase.stato !== 'completata' &&
+              item.fasePrecedenteCompletata &&
+              !item.materiaPrimaMancante
+          )
+          .forEach((item) => autorizzate.add(item.fase.id))
+        return
+      }
+
       // Controlla se QUESTA specifica macchina ha già una lavorazione attiva sul mandrino
       const macchinaOccupata = fasiOrdinate.some(
         (item) => item.fase.centro_lavoro_id === centroId && item.fase.stato === 'in_corso'
       )
 
-      // Se la macchina è libera, la sua prima fase con materiale disponibile e fasi precedenti completate è autorizzata
+      // Se la macchina è libera, la sua prima fase con materiale completo (100%) e fasi precedenti completate è autorizzata
       if (!macchinaOccupata) {
         const primaPronta = fasiOrdinate.find(
           (item) =>
             item.fase.centro_lavoro_id === centroId &&
             item.fase.stato !== 'completata' &&
             item.fasePrecedenteCompletata &&
-            !item.materiaPrimaMancante
+            !item.materiaPrimaMancante &&
+            !item.materiaPrimaParziale
         )
         if (primaPronta) {
           autorizzate.add(primaPronta.fase.id)
@@ -1144,20 +1409,28 @@ export default function TerminaleOfficinaPage() {
                 const countFasi = fasiInOfficina.filter(
                   (f) => f.fase.centro_lavoro_id === centro.id && f.fase.stato !== 'completata'
                 ).length
+                const isEsterna = centro.id === 'mc-esterna-01'
+
                 return (
                   <button
                     key={centro.id}
                     onClick={() => setMacchinaSelezionataId(centro.id)}
                     className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
                       macchinaSelezionataId === centro.id
-                        ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
+                        ? isEsterna
+                          ? 'bg-pink-600 text-white shadow-md shadow-pink-600/30'
+                          : 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
+                        : isEsterna
+                        ? 'bg-pink-950/40 text-pink-300 border border-pink-800/60 hover:bg-pink-900/40'
                         : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
                     }`}
                   >
-                    <Cpu className="w-3.5 h-3.5" />
+                    {isEsterna ? <Truck className="w-3.5 h-3.5" /> : <Cpu className="w-3.5 h-3.5" />}
                     <span>{centro.codice}</span>
                     {countFasi > 0 && (
-                      <span className="w-5 h-5 rounded-full bg-slate-950 text-orange-400 text-[10px] flex items-center justify-center font-bold">
+                      <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold ${
+                        isEsterna ? 'bg-pink-900 text-pink-200' : 'bg-slate-950 text-orange-400'
+                      }`}>
                         {countFasi}
                       </span>
                     )}
@@ -1176,39 +1449,58 @@ export default function TerminaleOfficinaPage() {
           </div>
         )}
 
-        {/* Switch Vista Cards / Tabella */}
-        <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-xl shrink-0 self-start md:self-end">
+        {/* Controlli Vista e Opzioni */}
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-end">
+          {/* Toggle Mostra/Nascondi Ordini Completati */}
           <button
             type="button"
-            onClick={() => setModalitaVista('cards')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              modalitaVista === 'cards'
-                ? 'bg-orange-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
+            onClick={() => setMostraCompletati(!mostraCompletati)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              mostraCompletati
+                ? 'bg-slate-800 text-orange-400 border-orange-500/50 shadow-sm'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
             }`}
+            title="Mostra o nascondi le lavorazioni già completate"
           >
-            <LayoutGrid className="w-4 h-4" />
-            <span>Schede</span>
+            {mostraCompletati ? <Eye className="w-3.5 h-3.5 text-orange-400" /> : <EyeOff className="w-3.5 h-3.5" />}
+            <span>{mostraCompletati ? 'Nascondi Finiti' : 'Mostra Finiti'}</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setModalitaVista('tabella')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              modalitaVista === 'tabella'
-                ? 'bg-orange-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <List className="w-4 h-4" />
-            <span>Lista Dettagliata</span>
-          </button>
+
+          {/* Switch Vista Cards / Tabella */}
+          <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-xl shrink-0">
+            <button
+              type="button"
+              onClick={() => setModalitaVista('cards')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                modalitaVista === 'cards'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+              <span>Schede</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalitaVista('tabella')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                modalitaVista === 'tabella'
+                  ? 'bg-orange-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <List className="w-4 h-4" />
+              <span>Lista Dettagliata</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* VISTA A SCHEDE (CARDS TOUCH) */}
       {modalitaVista === 'cards' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {fasiOrdinate.map((item) => {
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {fasiPaginate.map((item) => {
             const { odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, materiaPrimaParziale, pezziFattibiliConGiacenza, nomeMateriaPrimaMancante } = item
             const isCompletata = fase.stato === 'completata'
             const isInCorso = fase.stato === 'in_corso'
@@ -1219,7 +1511,8 @@ export default function TerminaleOfficinaPage() {
             )
 
             // Controllo autorizzazione di avvio per centro di lavoro
-            const isAutorizzataAdAvviare = idsFasiAutorizzateDaAvviare.has(fase.id)
+            // Se la fase è già IN CORSO o COMPLETATA, non può essere conteggiata come "da avviare"
+            const isAutorizzataAdAvviare = !isInCorso && !isCompletata && !item.materiaPrimaParziale && idsFasiAutorizzateDaAvviare.has(fase.id)
             const isBloccata = !isInCorso && !isCompletata && !isAutorizzataAdAvviare
 
             // Configurazione badge Priorità OdP
@@ -1254,9 +1547,11 @@ export default function TerminaleOfficinaPage() {
                 )}
 
                 {isInCorso && (
-                  <div className="absolute -top-3 left-6 px-3 py-1 bg-blue-500 text-white text-[11px] font-black tracking-wider uppercase rounded-full shadow-lg flex items-center gap-1.5 animate-pulse">
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    ⚡ IN LAVORAZIONE ATTIVA
+                  <div className={`absolute -top-3 left-6 px-3 py-1 text-white text-[11px] font-black tracking-wider uppercase rounded-full shadow-lg flex items-center gap-1.5 animate-pulse ${
+                    fase.is_esterna ? 'bg-pink-600' : 'bg-blue-500'
+                  }`}>
+                    {fase.is_esterna ? <Truck className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                    {fase.is_esterna ? '🚚 SPEDITO AL TERZISTA (FUORI SEDE)' : '⚡ IN LAVORAZIONE ATTIVA'}
                   </div>
                 )}
 
@@ -1288,7 +1583,9 @@ export default function TerminaleOfficinaPage() {
                     <span
                       className={`text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full whitespace-nowrap ${
                         isInCorso
-                          ? 'bg-blue-600 text-white animate-pulse'
+                          ? fase.is_esterna
+                            ? 'bg-pink-950 text-pink-300 border border-pink-700 animate-pulse'
+                            : 'bg-blue-600 text-white animate-pulse'
                           : isCompletata
                           ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                           : isAutorizzataAdAvviare
@@ -1297,7 +1594,9 @@ export default function TerminaleOfficinaPage() {
                       }`}
                     >
                       {isInCorso
-                        ? 'IN MACCHINA'
+                        ? fase.is_esterna
+                          ? 'FUORI SEDE'
+                          : 'IN MACCHINA'
                         : isCompletata
                         ? 'COMPLETATA'
                         : isAutorizzataAdAvviare
@@ -1324,15 +1623,83 @@ export default function TerminaleOfficinaPage() {
 
                     <div className="flex justify-between">
                       <span className="text-slate-400">Centro / Macchina:</span>
-                      <span className="font-semibold text-slate-200">
-                        {centro ? `${centro.codice} - ${centro.nome}` : 'N/D'}
-                      </span>
+                      {fase.is_esterna ? (
+                        <span className="font-bold text-pink-400 flex items-center gap-1">
+                          <Truck className="w-3.5 h-3.5" />
+                          EXT: {fase.fornitore_nome || 'Terzista Esterno'}
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-slate-200">
+                          {centro ? `${centro.codice} - ${centro.nome}` : 'N/D'}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Tempo Previsto:</span>
-                      <span className="font-bold text-slate-200">{fase.tempo_stimato_totale_min} minuti</span>
+                      <span className="text-slate-400">Tempo / Lead Time:</span>
+                      {fase.is_esterna ? (
+                        <span className="font-bold text-pink-300">
+                          {fase.giorni_rientro_previsti || 5} gg rientro previsti
+                        </span>
+                      ) : (
+                        <span className="font-bold text-slate-200">{fase.tempo_stimato_totale_min} minuti</span>
+                      )}
                     </div>
+
+                    {/* Dettagli specifici Conto Terzi: DDT, Stato Uscita/Rientro e Tariffa */}
+                    {fase.is_esterna && (
+                      <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-slate-400">Stato Esterno:</span>
+                          <span className={`font-bold px-2 py-0.5 rounded ${
+                            fase.stato_esterna === 'rientrato'
+                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                              : fase.stato_esterna === 'inviato_al_terzista'
+                              ? 'bg-blue-950 text-blue-300 border border-blue-800 animate-pulse'
+                              : 'bg-amber-950 text-amber-300 border border-amber-800'
+                          }`}>
+                            {fase.stato_esterna === 'rientrato'
+                              ? '✓ RIENTRATO IN OFFICINA'
+                              : fase.stato_esterna === 'inviato_al_terzista'
+                              ? '🚚 INVIATO AL TERZISTA'
+                              : '⏳ IN ATTESA DI SPEDIZIONE'}
+                          </span>
+                        </div>
+
+                        {fase.ddt_uscita_numero && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400">DDT Uscita:</span>
+                            <span className="font-mono text-white font-semibold">
+                              {fase.ddt_uscita_numero} ({fase.data_uscita_terzista ? new Date(fase.data_uscita_terzista).toLocaleDateString('it-IT') : ''})
+                            </span>
+                          </div>
+                        )}
+
+                        {fase.ddt_rientro_numero && (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400">DDT Rientro:</span>
+                            <span className="font-mono text-emerald-400 font-semibold">
+                              {fase.ddt_rientro_numero} ({fase.data_rientro_terzista ? new Date(fase.data_rientro_terzista).toLocaleDateString('it-IT') : ''})
+                            </span>
+                          </div>
+                        )}
+
+                        {fase.costo_tariffa_valore ? (
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400">Costo concordato:</span>
+                            <span className="font-mono text-emerald-400">
+                              € {fase.costo_tariffa_valore.toFixed(2)} / {
+                                fase.modello_tariffa === 'peso_kg' ? 'kg' :
+                                fase.modello_tariffa === 'superficie_m2' ? 'm²' :
+                                fase.modello_tariffa === 'superficie_dm2' ? 'dm²' :
+                                fase.modello_tariffa === 'lotto_forfettario' ? 'lotto fisso' : 'pz'
+                              }
+                              {fase.costo_minimo_fornitura ? ` (min. € ${fase.costo_minimo_fornitura.toFixed(2)})` : ''}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
 
                     {/* Scadenza & Ritardo: VISIBILE ESCLUSIVAMENTE AL SUPERVISORE / CAPO OFFICINA */}
                     {isSupervisore && odp.data_fine_pianificata && (() => {
@@ -1376,6 +1743,13 @@ export default function TerminaleOfficinaPage() {
                       </div>
                     )}
 
+                    {/* Avviso Informativo Materiale per Ufficio Tecnico (CAD/CAM) */}
+                    {item.avvisoMaterialeInformativo && !isCompletata && (
+                      <div className="pt-2 border-t border-slate-800 text-[11px] text-amber-300/90 bg-amber-950/20 p-2.5 rounded-lg border border-amber-500/20 leading-relaxed">
+                        {item.avvisoMaterialeInformativo}
+                      </div>
+                    )}
+
                     {/* Avviso compatibilità alternativa */}
                     {macchinaSelezionataId !== 'tutte' && fase.centro_lavoro_id !== macchinaSelezionataId && (
                       <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs bg-blue-950/40 p-2 rounded-lg border border-blue-800/40">
@@ -1397,125 +1771,211 @@ export default function TerminaleOfficinaPage() {
                 {/* PULSANTI DI AZIONE TOUCH PER L'OPERATORE CON BLOCCO PRIORITÀ */}
                 <div className="mt-6 pt-4 border-t border-slate-800/80 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
-                    {/* CASO 1: FASE AUTORIZZATA AD ESSERE AVVIATA (Priorità N. 1) */}
-                    {isAutorizzataAdAvviare && (
-                      <button
-                        onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
-                        className="col-span-2 py-4 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/40 transition-all cursor-pointer active:scale-95"
-                      >
-                        <Play className="w-5 h-5 fill-current" />
-                        AVVIA LAVORAZIONE (PRIORITÀ N. 1)
-                      </button>
-                    )}
-
-                    {/* CASO SPECIFICO: DISPONIBILITÀ PARZIALE DI MATERIA PRIMA (Sdoppiamento Lotto / Split OdP) */}
-                    {item.materiaPrimaParziale && item.fasePrecedenteCompletata && !macchinaQuestaFaseOccupata && !isInCorso && !isCompletata && (
-                      <div className="col-span-2 p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-amber-300 font-bold flex items-center gap-1.5">
-                            <Clock className="w-4 h-4 text-amber-400" />
-                            Giacenza parziale: {item.pezziFattibiliConGiacenza} su {odp.quantita_da_produrre} pz pronti
-                          </span>
-                          <span className="text-[10px] font-mono uppercase bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-black">
-                            Disponibile Subito
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 leading-tight">
-                          Il materiale a magazzino non copre l&apos;intero ordine, ma puoi avviare subito la parte pronta ({item.pezziFattibiliConGiacenza} pz) sdoppiando l&apos;ordine.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDatiSplit({
-                              odp,
-                              fase,
-                              quantitaDisponibile: item.pezziFattibiliConGiacenza,
-                              quantitaDaSplittare: item.pezziFattibiliConGiacenza
-                            })
-                            setModaleSplitAperta(true)
-                          }}
-                          className="w-full py-2.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-md shadow-amber-600/30 transition-all cursor-pointer active:scale-95"
-                        >
-                          <Play className="w-4 h-4 fill-current" />
-                          <span>Avvia Lotto Parziale ({item.pezziFattibiliConGiacenza} pz)</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO O MATERIA PRIMA TOTALMENTE MANCANTE */}
-                    {isBloccata && !item.materiaPrimaParziale && (
-                      <div className="col-span-2 py-3 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs flex items-center justify-between select-none">
-                        <div className="flex items-center gap-2">
-                          <Lock className="w-4 h-4 text-slate-500 shrink-0" />
-                          <div>
-                            <p className={`font-bold ${materiaPrimaMancante ? 'text-amber-400' : 'text-slate-400'}`}>
-                              {materiaPrimaMancante
-                                ? '⚠️ In attesa materia prima da fornitore (Stock insufficiente)'
-                                : macchinaQuestaFaseOccupata
-                                ? 'Macchina occupata: lavorazione già in corso'
-                                : !fasePrecedenteCompletata
-                                ? 'Fase bloccata: attesa completamento fase precedente'
-                                : 'In attesa del tuo turno (segui la priorità di coda)'}
-                            </p>
-                            <p className="text-[10px] text-slate-500">
-                              {materiaPrimaMancante && nomeMateriaPrimaMancante
-                                ? `Materiale: ${nomeMateriaPrimaMancante} - La macchina esegue intanto il pezzo successivo disponibile.`
-                                : 'L’operatore non può avviare questo ordine prima degli ordini prioritari pronti.'}
-                            </p>
-                          </div>
-                        </div>
-                        <span className={`font-mono font-black text-sm shrink-0 ${materiaPrimaMancante ? 'text-amber-500' : 'text-slate-600'}`}>
-                          {materiaPrimaMancante ? '⚠️ MATERIA PRIMA' : '🔒 BLOCCO'}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* CASO 3: FASE GIÀ IN CORSO */}
-                    {isInCorso && (
+                    {/* CASO SPECIALE: LAVORAZIONE ESTERNA CONTO TERZI */}
+                    {fase.is_esterna ? (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDatiCompleta({
-                              odp,
-                              fase,
-                              pezziBuoni: odp.quantita_da_produrre,
-                              pezziScarto: 0,
-                              opzioneResiduo: 'splitta_residuo',
-                              generaRipristinoScarto: true
-                            })
-                            setModaleCompletaAperta(true)
-                          }}
-                          className="py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
-                        >
-                          <CheckCircle className="w-5 h-5" />
-                          COMPLETA FASE
-                        </button>
+                        {/* Se non ancora spedita: visibile SOLO se la fase a monte è stata completata e il pezzo è fisicamente pronto */}
+                        {(!fase.stato_esterna || fase.stato_esterna === 'in_attesa_uscita') && !isCompletata && (
+                          fasePrecedenteCompletata ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDatiEsterna({
+                                  odp,
+                                  fase,
+                                  tipoAzione: 'spedizione',
+                                  ddtNumero: `DDT-EXT-${Date.now().toString().slice(-4)}`,
+                                  note: ''
+                                })
+                                setModaleEsternaAperta(true)
+                              }}
+                              className="col-span-2 py-4 px-4 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-pink-600/40 transition-all cursor-pointer active:scale-95"
+                            >
+                              <Truck className="w-5 h-5" />
+                              REGISTRA SPEDIZIONE AL TERZISTA ({fase.fornitore_nome || 'Esterno'})
+                            </button>
+                          ) : (
+                            <div className="col-span-2 py-3 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs flex items-center justify-between select-none">
+                              <div className="flex items-center gap-2">
+                                <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                                <div>
+                                  <p className="font-bold text-slate-400">
+                                    Spedizione bloccata: pezzo non ancora pronto a monte
+                                  </p>
+                                  <p className="text-[10px] text-slate-500">
+                                    I pezzi devono prima essere finiti sulle macchine interne prima di poter generare il DDT di uscita.
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="font-mono font-black text-xs text-slate-600 shrink-0">
+                                🔒 IN CODA
+                              </span>
+                            </div>
+                          )
+                        )}
 
-                        <button
-                          onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'non_iniziata')}
-                          className="py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <Pause className="w-4 h-4" />
-                          Sospendi
-                        </button>
+                        {/* Se già spedita e fuori sede */}
+                        {fase.stato_esterna === 'inviato_al_terzista' && !isCompletata && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDatiEsterna({
+                                odp,
+                                fase,
+                                tipoAzione: 'rientro',
+                                ddtNumero: '',
+                                note: ''
+                              })
+                              setModaleEsternaAperta(true)
+                            }}
+                            className="col-span-2 py-4 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/40 transition-all cursor-pointer active:scale-95 animate-pulse"
+                          >
+                            <CheckCircle2 className="w-5 h-5" />
+                            REGISTRA RIENTRO DA TERZISTA (COMPLETA FASE)
+                          </button>
+                        )}
+
+                        {/* Se completata/rientrata */}
+                        {isCompletata && (
+                          <div className="col-span-2 py-2 px-3 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-400 text-xs font-semibold flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                              <CheckCircle2 className="w-4 h-4" />
+                              Lavorazione esterna rientrata e verificata
+                            </span>
+                          </div>
+                        )}
                       </>
-                    )}
+                    ) : (
+                      <>
+                        {/* CASO 1: FASE AUTORIZZATA AD ESSERE AVVIATA (Priorità N. 1) */}
+                        {isAutorizzataAdAvviare && (
+                          <button
+                            onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
+                            className="col-span-2 py-4 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/40 transition-all cursor-pointer active:scale-95"
+                          >
+                            <Play className="w-5 h-5 fill-current" />
+                            AVVIA LAVORAZIONE (PRIORITÀ N. 1)
+                          </button>
+                        )}
 
-                    {/* CASO 4: FASE COMPLETATA */}
-                    {isCompletata && (
-                      <div className="col-span-2 py-2 px-3 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-400 text-xs font-semibold flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 text-emerald-400">
-                          <CheckCircle2 className="w-4 h-4" />
-                          Fase conclusa alle {fase.data_fine_reale ? new Date(fase.data_fine_reale).toLocaleTimeString('it-IT') : '-'}
-                        </span>
-                        <button
-                          onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
-                          className="text-[10px] text-slate-500 hover:text-white underline cursor-pointer"
-                        >
-                          Riapri
-                        </button>
-                      </div>
+                        {/* CASO SPECIFICO: DISPONIBILITÀ PARZIALE DI MATERIA PRIMA (Sdoppiamento Lotto / Split OdP) */}
+                        {item.materiaPrimaParziale && item.fasePrecedenteCompletata && !isInCorso && !isCompletata && (
+                          <div className="col-span-2 p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-amber-300 font-bold flex items-center gap-1.5">
+                                <Clock className="w-4 h-4 text-amber-400" />
+                                Giacenza parziale: {item.pezziFattibiliConGiacenza} su {odp.quantita_da_produrre} pz pronti
+                              </span>
+                              <span className="text-[10px] font-mono uppercase bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-black">
+                                Disponibile Subito
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 leading-tight">
+                              Il materiale a magazzino non copre l&apos;intero ordine, ma puoi avviare subito la parte pronta ({item.pezziFattibiliConGiacenza} pz) sdoppiando l&apos;ordine.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDatiSplit({
+                                  odp,
+                                  fase,
+                                  quantitaDisponibile: item.pezziFattibiliConGiacenza,
+                                  quantitaDaSplittare: item.pezziFattibiliConGiacenza
+                                })
+                                setModaleSplitAperta(true)
+                              }}
+                              className="w-full py-2.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase flex items-center justify-center gap-2 shadow-md shadow-amber-600/30 transition-all cursor-pointer active:scale-95"
+                            >
+                              <Play className="w-4 h-4 fill-current" />
+                              <span>Avvia Lotto Parziale ({item.pezziFattibiliConGiacenza} pz)</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO O MATERIA PRIMA TOTALMENTE MANCANTE */}
+                        {isBloccata && !item.materiaPrimaParziale && (
+                          <div className="col-span-2 py-3 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs flex items-center justify-between select-none">
+                            <div className="flex items-center gap-2">
+                              <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                              <div>
+                                <p className={`font-bold ${materiaPrimaMancante ? 'text-amber-400' : 'text-slate-400'}`}>
+                                  {materiaPrimaMancante
+                                    ? '⚠️ In attesa materia prima da fornitore (Stock insufficiente)'
+                                    : macchinaQuestaFaseOccupata
+                                    ? 'Macchina occupata: lavorazione già in corso'
+                                    : !fasePrecedenteCompletata
+                                    ? 'Fase bloccata: attesa completamento fase precedente'
+                                    : 'In attesa del tuo turno (segui la priorità di coda)'}
+                                </p>
+                                <p className="text-[10px] text-slate-500">
+                                  {materiaPrimaMancante && nomeMateriaPrimaMancante
+                                    ? `Materiale: ${nomeMateriaPrimaMancante} - La macchina esegue intanto il pezzo successivo disponibile.`
+                                    : 'L’operatore non può avviare questo ordine prima degli ordini prioritari pronti.'}
+                                </p>
+                              </div>
+                            </div>
+                            <span className={`font-mono font-black text-sm shrink-0 ${materiaPrimaMancante ? 'text-amber-500' : 'text-slate-600'}`}>
+                              {materiaPrimaMancante ? '⚠️ MATERIA PRIMA' : '🔒 BLOCCO'}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* CASO 3: FASE GIÀ IN CORSO */}
+                        {isInCorso && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const isCadCam = fase.centro_lavoro_id === 'mc-cam-01' || fase.nome_fase.toLowerCase().includes('cam')
+                                // Se la fase lavora il grezzo fisico ed esiste un vincolo di magazzino, il limite massimo è la giacenza reale
+                                const limiteReale = !isCadCam && item.materiaPrimaParziale
+                                  ? item.pezziFattibiliConGiacenza
+                                  : odp.quantita_da_produrre
+
+                                setDatiCompleta({
+                                  odp,
+                                  fase,
+                                  pezziBuoni: limiteReale,
+                                  pezziScarto: 0,
+                                  opzioneResiduo: 'splitta_residuo',
+                                  generaRipristinoScarto: true,
+                                  limiteMassimoConsentito: limiteReale,
+                                  nomeMateriaPrimaLimite: item.nomeMateriaPrimaMancante
+                                })
+                                setModaleCompletaAperta(true)
+                              }}
+                              className="py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
+                            >
+                              <CheckCircle className="w-5 h-5" />
+                              COMPLETA FASE
+                            </button>
+
+                            <button
+                              onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'non_iniziata')}
+                              className="py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <Pause className="w-4 h-4" />
+                              Sospendi
+                            </button>
+                          </>
+                        )}
+
+                        {/* CASO 4: FASE COMPLETATA */}
+                        {isCompletata && (
+                          <div className="col-span-2 py-2 px-3 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-400 text-xs font-semibold flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 text-emerald-400">
+                              <CheckCircle2 className="w-4 h-4" />
+                              Fase conclusa alle {fase.data_fine_reale ? new Date(fase.data_fine_reale).toLocaleTimeString('it-IT') : '-'}
+                            </span>
+                            <button
+                              onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
+                              className="text-[10px] text-slate-500 hover:text-white underline cursor-pointer"
+                            >
+                              Riapri
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -1550,16 +2010,56 @@ export default function TerminaleOfficinaPage() {
             )
           })}
 
-          {fasiOrdinate.length === 0 && (
+          {fasiDaVisualizzare.length === 0 && (
             <div className="col-span-full p-12 text-center bg-slate-900/40 rounded-2xl border border-slate-800">
               <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
               <p className="text-slate-200 font-bold text-base">Nessuna lavorazione in coda per i criteri selezionati</p>
               <p className="text-xs text-slate-400 mt-1">
-                Tutte le fasi risultano completate o non ci sono ordini assegnati a questa macchina.
+                {mostraCompletati
+                  ? 'Non ci sono ordini o lavorazioni registrate per questa selezione.'
+                  : 'Tutte le fasi risultano completate o non ci sono ordini assegnati a questa macchina.'}
               </p>
             </div>
           )}
         </div>
+
+        {/* Paginazione Touch per Vista a Schede */}
+        {totalePagine > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
+            <div className="text-xs text-slate-400 font-semibold">
+              Mostrati da <span className="text-white font-bold">{Math.min((paginaCorrente - 1) * ELEMENTI_PER_PAGINA + 1, totaleElementi)}</span> a{' '}
+              <span className="text-white font-bold">{Math.min(paginaCorrente * ELEMENTI_PER_PAGINA, totaleElementi)}</span> di{' '}
+              <span className="text-orange-400 font-bold">{totaleElementi}</span> lavorazioni in coda
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPaginaCorrente((prev) => Math.max(prev - 1, 1))}
+                disabled={paginaCorrente === 1}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Precedenti</span>
+              </button>
+
+              <div className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-orange-400">
+                Pagina {paginaCorrente} / {totalePagine}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPaginaCorrente((prev) => Math.min(prev + 1, totalePagine))}
+                disabled={paginaCorrente === totalePagine}
+                className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
+              >
+                <span>Successivi 10</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       )}
 
       {/* VISTA A LISTA DETTAGLIATA (TABELLA COMPATTA ULTRA-RESPONSIVA) */}
@@ -1572,9 +2072,11 @@ export default function TerminaleOfficinaPage() {
                   <th className="py-2.5 px-3 whitespace-nowrap"># / Priorità</th>
                   <th className="py-2.5 px-3 whitespace-nowrap">OdP / Particolare</th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Fase Operativa</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Centro / Macchina</th>
+                  {macchinaSelezionataId === 'tutte' && (
+                    <th className="py-2.5 px-3 whitespace-nowrap">Centro / Macchina</th>
+                  )}
                   <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Q.tà</th>
-                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Previsto</th>
+                  <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Tempo Ciclo</th>
                   {isSupervisore && <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Scadenza</th>}
                   <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Stato Monte</th>
                   <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Stato Fase</th>
@@ -1584,11 +2086,12 @@ export default function TerminaleOfficinaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {fasiOrdinate.map((item, index) => {
+                {fasiPaginate.map((item, index) => {
+                  const numeroPosizioneAssoluta = (paginaCorrente - 1) * ELEMENTI_PER_PAGINA + index + 1
                   const { odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, materiaPrimaParziale, pezziFattibiliConGiacenza, nomeMateriaPrimaMancante } = item
                   const isCompletata = fase.stato === 'completata'
                   const isInCorso = fase.stato === 'in_corso'
-                  const isAutorizzataAdAvviare = idsFasiAutorizzateDaAvviare.has(fase.id)
+                  const isAutorizzataAdAvviare = !isInCorso && !isCompletata && !item.materiaPrimaParziale && idsFasiAutorizzateDaAvviare.has(fase.id)
                   const isBloccata = !isInCorso && !isCompletata && !isAutorizzataAdAvviare
 
                   const prioritaMappa: Record<number, { label: string; bg: string; icon: typeof Flame }> = {
@@ -1625,7 +2128,7 @@ export default function TerminaleOfficinaPage() {
                                 : 'bg-slate-800 text-slate-400'
                             }`}
                           >
-                            #{index + 1}
+                            #{numeroPosizioneAssoluta}
                           </span>
                           <span
                             className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 ${prioritaConfig.bg}`}
@@ -1637,30 +2140,32 @@ export default function TerminaleOfficinaPage() {
                       </td>
 
                       {/* OdP & Articolo */}
-                      <td className="py-2.5 px-3">
-                        <div className="font-mono font-bold text-orange-400 text-xs">
+                      <td className="py-2.5 px-3 min-w-[140px] max-w-[200px]">
+                        <div className="font-mono font-bold text-orange-400 text-xs truncate">
                           {odp.codice_odp}
                         </div>
-                        <div className="text-slate-300 text-[11px] truncate max-w-[170px]" title={articolo?.descrizione}>
+                        <div className="text-slate-300 text-[11px] truncate" title={`${articolo?.codice_articolo} • ${articolo?.descrizione}`}>
                           {articolo?.codice_articolo} &bull; {articolo?.descrizione}
                         </div>
                       </td>
 
                       {/* Fase */}
-                      <td className="py-2.5 px-3">
+                      <td className="py-2.5 px-3 min-w-[140px] max-w-[220px]">
                         <span className="text-[10px] text-slate-400 block font-mono">Fase #{fase.sequenza}</span>
-                        <span className="font-bold text-slate-100 text-xs">{fase.nome_fase}</span>
+                        <span className="font-bold text-slate-100 text-xs truncate block" title={fase.nome_fase}>{fase.nome_fase}</span>
                       </td>
 
-                      {/* Macchina */}
-                      <td className="py-2.5 px-3">
-                        <div className="text-slate-200 font-medium text-xs truncate max-w-[160px]" title={centro?.nome}>
-                          {centro ? centro.nome : 'N/D'}
-                        </div>
-                        {macchinaSelezionataId !== 'tutte' && fase.centro_lavoro_id !== macchinaSelezionataId && (
-                          <span className="text-[9px] text-blue-400 font-bold block">⚡ Macchina Alternativa</span>
-                        )}
-                      </td>
+                      {/* Macchina: VISIBILE SOLO SE VISTA GLOBALE 'TUTTE' */}
+                      {macchinaSelezionataId === 'tutte' && (
+                        <td className="py-2.5 px-3 min-w-[130px] max-w-[180px]">
+                          <div className="text-slate-200 font-medium text-xs truncate" title={centro?.nome}>
+                            {centro ? centro.nome : 'N/D'}
+                          </div>
+                          {fase.centro_lavoro_id !== macchinaSelezionataId && (
+                            <span className="text-[9px] text-blue-400 font-bold block">⚡ Macchina Alternativa</span>
+                          )}
+                        </td>
+                      )}
 
                       {/* Quantità */}
                       <td className="py-2.5 px-2.5 font-bold text-white text-center whitespace-nowrap text-xs">
@@ -1756,54 +2261,147 @@ export default function TerminaleOfficinaPage() {
                       {/* Azioni con Sicurezza e Blocco (Sticky colonna a destra) */}
                       <td className="py-2.5 px-3 text-right whitespace-nowrap sticky right-0 bg-slate-900/95 group-hover:bg-slate-800/95 shadow-l">
                         <div className="flex items-center justify-end gap-1.5">
-                          {isAutorizzataAdAvviare && (
-                            <button
-                              onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] uppercase tracking-wide flex items-center gap-1 shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95"
-                            >
-                              <Play className="w-3 h-3 fill-current" />
-                              Avvia
-                            </button>
-                          )}
+                          {/* Lavorazione Esterna C/Terzi */}
+                          {fase.is_esterna ? (
+                            <>
+                              {(!fase.stato_esterna || fase.stato_esterna === 'in_attesa_uscita') && !isCompletata && (
+                                fasePrecedenteCompletata ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDatiEsterna({
+                                        odp,
+                                        fase,
+                                        tipoAzione: 'spedizione',
+                                        ddtNumero: `DDT-EXT-${Date.now().toString().slice(-4)}`,
+                                        note: ''
+                                      })
+                                      setModaleEsternaAperta(true)
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-pink-600 hover:bg-pink-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95"
+                                    title="Spedisci al terzista"
+                                  >
+                                    <Truck className="w-3 h-3" />
+                                    Spedisci
+                                  </button>
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-bold select-none"
+                                    title="Spedizione non ancora possibile: i pezzi sono ancora in lavorazione sulle macchine interne a monte."
+                                  >
+                                    <Lock className="w-2.5 h-2.5 text-slate-500" />
+                                    In lavoraz. monte
+                                  </span>
+                                )
+                              )}
 
-                          {isInCorso && (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDatiCompleta({
-                                    odp,
-                                    fase,
-                                    pezziBuoni: odp.quantita_da_produrre,
-                                    pezziScarto: 0,
-                                    opzioneResiduo: 'splitta_residuo',
-                                    generaRipristinoScarto: true
-                                  })
-                                  setModaleCompletaAperta(true)
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95"
-                              >
-                                <CheckCircle className="w-3 h-3" />
-                                Fatta
-                              </button>
-                              <button
-                                onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'non_iniziata')}
-                                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
-                                title="Sospendi"
-                              >
-                                <Pause className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )}
+                              {fase.stato_esterna === 'inviato_al_terzista' && !isCompletata && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDatiEsterna({
+                                      odp,
+                                      fase,
+                                      tipoAzione: 'rientro',
+                                      ddtNumero: '',
+                                      note: ''
+                                    })
+                                    setModaleEsternaAperta(true)
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95 animate-pulse"
+                                  title="Registra rientro terzista"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Rientrato
+                                </button>
+                              )}
 
-                          {isBloccata && (
-                            <span
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-bold select-none"
-                              title="L'operatore deve prima eseguire l'ordine prioritario o attendere che il materiale sia pronto."
-                            >
-                              <Lock className="w-2.5 h-2.5 text-slate-500" />
-                              Bloccato
-                            </span>
+                              {isCompletata && (
+                                <span className="text-emerald-400 font-bold text-[10px] inline-flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Rientrato
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {isAutorizzataAdAvviare && (
+                                <button
+                                  onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'in_corso')}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] uppercase tracking-wide flex items-center gap-1 shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95"
+                                >
+                                  <Play className="w-3 h-3 fill-current" />
+                                  Avvia
+                                </button>
+                              )}
+
+                              {isInCorso && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const isCadCam = fase.centro_lavoro_id === 'mc-cam-01' || fase.nome_fase.toLowerCase().includes('cam')
+                                      const limiteReale = !isCadCam && item.materiaPrimaParziale
+                                        ? item.pezziFattibiliConGiacenza
+                                        : odp.quantita_da_produrre
+
+                                      setDatiCompleta({
+                                        odp,
+                                        fase,
+                                        pezziBuoni: limiteReale,
+                                        pezziScarto: 0,
+                                        opzioneResiduo: 'splitta_residuo',
+                                        generaRipristinoScarto: true,
+                                        limiteMassimoConsentito: limiteReale,
+                                        nomeMateriaPrimaLimite: item.nomeMateriaPrimaMancante
+                                      })
+                                      setModaleCompletaAperta(true)
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95"
+                                  >
+                                    <CheckCircle className="w-3 h-3" />
+                                    Fatta
+                                  </button>
+                                  <button
+                                    onClick={() => handleCambiaStatoFase(odp.id, fase.id, 'non_iniziata')}
+                                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                                    title="Sospendi"
+                                  >
+                                    <Pause className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+
+                              {isBloccata && !item.materiaPrimaParziale && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-bold select-none"
+                                  title="L'operatore deve prima eseguire l'ordine prioritario o attendere che il materiale sia pronto."
+                                >
+                                  <Lock className="w-2.5 h-2.5 text-slate-500" />
+                                  Bloccato
+                                </span>
+                              )}
+
+                              {item.materiaPrimaParziale && item.fasePrecedenteCompletata && !isInCorso && !isCompletata && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDatiSplit({
+                                      odp,
+                                      fase,
+                                      quantitaDisponibile: item.pezziFattibiliConGiacenza,
+                                      quantitaDaSplittare: item.pezziFattibiliConGiacenza
+                                    })
+                                    setModaleSplitAperta(true)
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] uppercase flex items-center gap-1 cursor-pointer active:scale-95 shadow-md shadow-amber-600/30"
+                                  title={`Avvia solo i ${item.pezziFattibiliConGiacenza} pz disponibili sdoppiando l'ordine`}
+                                >
+                                  <Play className="w-3 h-3 fill-current" />
+                                  Split ({item.pezziFattibiliConGiacenza} pz)
+                                </button>
+                              )}
+                            </>
                           )}
 
                           {isCompletata && (
@@ -1848,7 +2446,7 @@ export default function TerminaleOfficinaPage() {
                   )
                 })}
 
-                {fasiOrdinate.length === 0 && (
+                {fasiDaVisualizzare.length === 0 && (
                   <tr>
                     <td colSpan={9} className="py-8 text-center text-slate-400">
                       Nessuna lavorazione in coda per i criteri selezionati.
@@ -1858,6 +2456,43 @@ export default function TerminaleOfficinaPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Paginazione Touch per Vista a Tabella Compatta */}
+          {totalePagine > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-950 border-t border-slate-800">
+              <div className="text-xs text-slate-400 font-semibold">
+                Mostrati da <span className="text-white font-bold">{Math.min((paginaCorrente - 1) * ELEMENTI_PER_PAGINA + 1, totaleElementi)}</span> a{' '}
+                <span className="text-white font-bold">{Math.min(paginaCorrente * ELEMENTI_PER_PAGINA, totaleElementi)}</span> di{' '}
+                <span className="text-orange-400 font-bold">{totaleElementi}</span> lavorazioni in coda
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaginaCorrente((prev) => Math.max(prev - 1, 1))}
+                  disabled={paginaCorrente === 1}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Precedenti</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono font-bold text-orange-400">
+                  Pagina {paginaCorrente} / {totalePagine}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPaginaCorrente((prev) => Math.min(prev + 1, totalePagine))}
+                  disabled={paginaCorrente === totalePagine}
+                  className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
+                >
+                  <span>Successivi 10</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1909,6 +2544,123 @@ export default function TerminaleOfficinaPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE GESTIONE SPEDIZIONE / RIENTRO CONTO TERZI ESTERNO */}
+      {modaleEsternaAperta && datiEsterna && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl ${datiEsterna.tipoAzione === 'spedizione' ? 'bg-pink-600/20 text-pink-400' : 'bg-emerald-600/20 text-emerald-400'}`}>
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">
+                    {datiEsterna.tipoAzione === 'spedizione'
+                      ? 'Registra Spedizione al Terzista'
+                      : 'Registra Rientro Lavorazione Esterna'}
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    {datiEsterna.odp.codice_odp} • Fase #{datiEsterna.fase.sequenza} ({datiEsterna.fase.nome_fase})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModaleEsternaAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Terzista incaricato:</span>
+                  <strong className="text-pink-400 font-bold">{datiEsterna.fase.fornitore_nome || 'Esterno non specificato'}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Quantità Pezzi da inviare/ricevere:</span>
+                  <strong className="text-orange-400 font-bold">{datiEsterna.odp.quantita_da_produrre} pz</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Lead time previsto:</span>
+                  <span className="text-slate-200 font-semibold">{datiEsterna.fase.giorni_rientro_previsti || 5} giorni lavorativi</span>
+                </div>
+                {datiEsterna.fase.costo_tariffa_valore ? (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Tariffa applicata:</span>
+                    <span className="text-emerald-400 font-mono font-semibold">
+                      € {datiEsterna.fase.costo_tariffa_valore.toFixed(2)} / {
+                        datiEsterna.fase.modello_tariffa === 'peso_kg' ? 'kg' :
+                        datiEsterna.fase.modello_tariffa === 'superficie_m2' ? 'm²' :
+                        datiEsterna.fase.modello_tariffa === 'superficie_dm2' ? 'dm²' :
+                        datiEsterna.fase.modello_tariffa === 'lotto_forfettario' ? 'lotto fisso' : 'pz'
+                      }
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  {datiEsterna.tipoAzione === 'spedizione'
+                    ? 'Numero Documento di Trasporto (DDT di Uscita) *'
+                    : 'Numero Documento di Rientro (DDT Fornitore) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={datiEsterna.tipoAzione === 'spedizione' ? 'es: DDT-2026/045' : 'es: DDT-FORN-9843'}
+                  value={datiEsterna.ddtNumero}
+                  onChange={(e) => setDatiEsterna({ ...datiEsterna, ddtNumero: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono font-bold text-slate-100 focus:outline-none focus:border-pink-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Note Operative, Spedizioniere o Controllo Qualità Rientro:
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder={
+                    datiEsterna.tipoAzione === 'spedizione'
+                      ? 'es: Spedito con corriere Arcese. Imballati su bancale 80x120 con reggette.'
+                      : 'es: Verificato spessore zincatura (12 micron ok). Nessun difetto visivo.'
+                  }
+                  value={datiEsterna.note}
+                  onChange={(e) => setDatiEsterna({ ...datiEsterna, note: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setModaleEsternaAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfermaEsterna}
+                  className={`px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-lg transition-all cursor-pointer active:scale-95 ${
+                    datiEsterna.tipoAzione === 'spedizione'
+                      ? 'bg-pink-600 hover:bg-pink-500 shadow-pink-600/30'
+                      : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
+                  }`}
+                >
+                  {datiEsterna.tipoAzione === 'spedizione'
+                    ? 'Conferma Spedizione Esterna'
+                    : 'Conferma Rientro Pezzi in Officina'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -2014,6 +2766,76 @@ export default function TerminaleOfficinaPage() {
                 </div>
               )}
 
+              {/* Materia Prima & Distinta Base (BOM) */}
+              {(() => {
+                const componenti = distinte.filter((d) => d.articolo_padre_id === odpDettaglio.articolo_id)
+                return (
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <Boxes className="w-4 h-4 text-orange-600" />
+                      Materia Prima di Partenza & Distinta Base (BOM)
+                    </h3>
+                    {componenti.length > 0 ? (
+                      <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold">
+                            <tr>
+                              <th className="py-2.5 px-3">Codice Grezzo / Componente</th>
+                              <th className="py-2.5 px-3">Descrizione Tecnica</th>
+                              <th className="py-2.5 px-3 text-center">Fabbisogno Unit.</th>
+                              <th className="py-2.5 px-3 text-center">Fabbisogno Lotto ({odpDettaglio.quantita_da_produrre} pz)</th>
+                              <th className="py-2.5 px-3 text-center">Giacenza Stock</th>
+                              <th className="py-2.5 px-3">Note Taglio / Preparazione</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {componenti.map((comp) => {
+                              const mat = articoli.find((a) => a.id === comp.articolo_componente_id)
+                              const fabbisognoTotale = comp.quantita_necessaria * odpDettaglio.quantita_da_produrre
+                              const haGiacenza = (mat?.giacenza_attuale || 0) >= fabbisognoTotale
+
+                              return (
+                                <tr key={comp.id} className="hover:bg-slate-50/80">
+                                  <td className="py-2.5 px-3 font-mono font-bold text-orange-600">
+                                    {mat?.codice_articolo || 'N/D'}
+                                  </td>
+                                  <td className="py-2.5 px-3 font-semibold text-slate-900">
+                                    {mat?.descrizione || 'Materia Prima'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center font-mono text-slate-700">
+                                    {comp.quantita_necessaria} {mat?.unita_misura}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-900">
+                                    {fabbisognoTotale} {mat?.unita_misura}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                                      haGiacenza
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-rose-100 text-rose-800 font-black'
+                                    }`}>
+                                      {mat?.giacenza_attuale ?? 0} {mat?.unita_misura}
+                                      {!haGiacenza && ' ⚠️ SOTTO SCORTA'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-500 italic text-[11px]">
+                                    {comp.note || '-'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500 italic">
+                        Nessun componente o materia prima associata in distinta base.
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
               {/* Sequenza Ciclo di Lavorazione */}
               <div>
                 <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
@@ -2037,9 +2859,27 @@ export default function TerminaleOfficinaPage() {
                         return (
                           <tr key={f.id} className={f.stato === 'completata' ? 'bg-emerald-50/50' : f.stato === 'in_corso' ? 'bg-blue-50/50 font-bold' : ''}>
                             <td className="py-2.5 px-3 font-mono font-bold text-slate-500">#{f.sequenza}</td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-900">{f.nome_fase}</td>
-                            <td className="py-2.5 px-3 text-slate-700">{centro?.nome || centro?.codice || f.centro_lavoro_id}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-700">{f.tempo_stimato_totale_min} min</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">
+                              {f.nome_fase}
+                              {f.is_esterna && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] bg-pink-100 text-pink-700 font-bold border border-pink-300">
+                                  CONTO TERZI
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-700">
+                              {f.is_esterna ? (
+                                <span className="text-pink-700 font-semibold flex items-center gap-1">
+                                  <Truck className="w-3.5 h-3.5" />
+                                  {f.fornitore_nome || 'Terzista Esterno'}
+                                </span>
+                              ) : (
+                                centro?.nome || centro?.codice || f.centro_lavoro_id
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                              {f.is_esterna ? `${f.giorni_rientro_previsti || 5} gg rientro` : `${f.tempo_stimato_totale_min} min`}
+                            </td>
                             <td className="py-2.5 px-3 text-center">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                 f.stato === 'completata'
@@ -2048,7 +2888,9 @@ export default function TerminaleOfficinaPage() {
                                   ? 'bg-blue-100 text-blue-800'
                                   : 'bg-slate-100 text-slate-600'
                               }`}>
-                                {f.stato === 'in_corso' ? 'In Macchina' : f.stato === 'completata' ? 'Completata' : 'In Coda'}
+                                {f.is_esterna
+                                  ? (f.stato_esterna === 'rientrato' ? 'Rientrato' : f.stato_esterna === 'inviato_al_terzista' ? 'Fuori Sede' : 'In Attesa Invio')
+                                  : (f.stato === 'in_corso' ? 'In Macchina' : f.stato === 'completata' ? 'Completata' : 'In Coda')}
                               </span>
                             </td>
                           </tr>
@@ -2195,41 +3037,57 @@ export default function TerminaleOfficinaPage() {
                   <span className="text-slate-400">Lotto Teorico Previsto:</span>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-orange-400">{datiCompleta.odp.quantita_da_produrre} pz</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDatiCompleta({
-                          ...datiCompleta,
-                          pezziBuoni: datiCompleta.odp.quantita_da_produrre,
-                          pezziScarto: 0
-                        })
-                      }
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold cursor-pointer transition-colors"
-                      title="Reimposta intero lotto con zero scarti"
-                    >
-                      Tutto il lotto
-                    </button>
+                    {datiCompleta.limiteMassimoConsentito >= datiCompleta.odp.quantita_da_produrre && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDatiCompleta({
+                            ...datiCompleta,
+                            pezziBuoni: datiCompleta.odp.quantita_da_produrre,
+                            pezziScarto: 0
+                          })
+                        }
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold cursor-pointer transition-colors"
+                        title="Reimposta intero lotto con zero scarti"
+                      >
+                        Tutto il lotto
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* Box Vincolo Giacenza Grezzo (Poka-Yoke Industriale) */}
+                {datiCompleta.limiteMassimoConsentito < datiCompleta.odp.quantita_da_produrre && (
+                  <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-[11px] text-amber-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Blocco di Sicurezza: Giacenza Grezzo Limitata a {datiCompleta.limiteMassimoConsentito} pz</span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 leading-tight">
+                      A magazzino è presente materiale sufficiente per soli <strong>{datiCompleta.limiteMassimoConsentito} pezzi</strong> su {datiCompleta.odp.quantita_da_produrre}.
+                      Non è possibile dichiarare una quantità superiore. I <strong>{datiCompleta.odp.quantita_da_produrre - datiCompleta.limiteMassimoConsentito} pezzi rimanenti</strong> verranno automaticamente sdoppiati in un lotto residuo a saldo in attesa della fornitura.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-emerald-400 mb-1">
-                    Pezzi Buoni Conformi *
+                    Pezzi Buoni Conformi * (Max {datiCompleta.limiteMassimoConsentito})
                   </label>
                   <input
                     type="number"
                     min="0"
-                    max={datiCompleta.odp.quantita_da_produrre}
+                    max={datiCompleta.limiteMassimoConsentito}
                     value={datiCompleta.pezziBuoni}
                     onChange={(e) => {
-                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
-                      const valBuoni = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
-                      // Se la somma supera il lotto totale, scala automaticamente gli scarti
+                      const tettoConsentito = datiCompleta.limiteMassimoConsentito
+                      const valBuoni = Math.min(tettoConsentito, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il tetto consentito dal grezzo, scala automaticamente gli scarti
                       let nuovoScarto = datiCompleta.pezziScarto
-                      if (valBuoni + nuovoScarto > lottoTotale) {
-                        nuovoScarto = Math.max(0, lottoTotale - valBuoni)
+                      if (valBuoni + nuovoScarto > tettoConsentito) {
+                        nuovoScarto = Math.max(0, tettoConsentito - valBuoni)
                       }
                       setDatiCompleta({
                         ...datiCompleta,
@@ -2251,15 +3109,15 @@ export default function TerminaleOfficinaPage() {
                   <input
                     type="number"
                     min="0"
-                    max={datiCompleta.odp.quantita_da_produrre}
+                    max={datiCompleta.limiteMassimoConsentito}
                     value={datiCompleta.pezziScarto}
                     onChange={(e) => {
-                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
-                      const valScarti = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
-                      // Se la somma supera il lotto totale, scala automaticamente i pezzi buoni
+                      const tettoConsentito = datiCompleta.limiteMassimoConsentito
+                      const valScarti = Math.min(tettoConsentito, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il tetto consentito dal grezzo, scala automaticamente i pezzi buoni
                       let nuovoBuoni = datiCompleta.pezziBuoni
-                      if (nuovoBuoni + valScarti > lottoTotale) {
-                        nuovoBuoni = Math.max(0, lottoTotale - valScarti)
+                      if (nuovoBuoni + valScarti > tettoConsentito) {
+                        nuovoBuoni = Math.max(0, tettoConsentito - valScarti)
                       }
                       setDatiCompleta({
                         ...datiCompleta,
@@ -2620,6 +3478,76 @@ export default function TerminaleOfficinaPage() {
                 </div>
               )}
 
+              {/* Materia Prima & Distinta Base (BOM) */}
+              {(() => {
+                const componenti = distinte.filter((d) => d.articolo_padre_id === odpDettaglio.articolo_id)
+                return (
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <Boxes className="w-4 h-4 text-orange-600" />
+                      Materia Prima di Partenza & Distinta Base (BOM)
+                    </h3>
+                    {componenti.length > 0 ? (
+                      <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[10px] font-bold">
+                            <tr>
+                              <th className="py-2.5 px-3">Codice Grezzo / Componente</th>
+                              <th className="py-2.5 px-3">Descrizione Tecnica</th>
+                              <th className="py-2.5 px-3 text-center">Fabbisogno Unit.</th>
+                              <th className="py-2.5 px-3 text-center">Fabbisogno Lotto ({odpDettaglio.quantita_da_produrre} pz)</th>
+                              <th className="py-2.5 px-3 text-center">Giacenza Stock</th>
+                              <th className="py-2.5 px-3">Note Taglio / Preparazione</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {componenti.map((comp) => {
+                              const mat = articoli.find((a) => a.id === comp.articolo_componente_id)
+                              const fabbisognoTotale = comp.quantita_necessaria * odpDettaglio.quantita_da_produrre
+                              const haGiacenza = (mat?.giacenza_attuale || 0) >= fabbisognoTotale
+
+                              return (
+                                <tr key={comp.id} className="hover:bg-slate-50/80">
+                                  <td className="py-2.5 px-3 font-mono font-bold text-orange-600">
+                                    {mat?.codice_articolo || 'N/D'}
+                                  </td>
+                                  <td className="py-2.5 px-3 font-semibold text-slate-900">
+                                    {mat?.descrizione || 'Materia Prima'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center font-mono text-slate-700">
+                                    {comp.quantita_necessaria} {mat?.unita_misura}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-900">
+                                    {fabbisognoTotale} {mat?.unita_misura}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                                      haGiacenza
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-rose-100 text-rose-800 font-black'
+                                    }`}>
+                                      {mat?.giacenza_attuale ?? 0} {mat?.unita_misura}
+                                      {!haGiacenza && ' ⚠️ SOTTO SCORTA'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-500 italic text-[11px]">
+                                    {comp.note || '-'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500 italic">
+                        Nessun componente o materia prima associata in distinta base.
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
               {/* Sequenza Ciclo di Lavorazione */}
               <div>
                 <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
@@ -2643,9 +3571,27 @@ export default function TerminaleOfficinaPage() {
                         return (
                           <tr key={f.id} className={f.stato === 'completata' ? 'bg-emerald-50/50' : f.stato === 'in_corso' ? 'bg-blue-50/50 font-bold' : ''}>
                             <td className="py-2.5 px-3 font-mono font-bold text-slate-500">#{f.sequenza}</td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-900">{f.nome_fase}</td>
-                            <td className="py-2.5 px-3 text-slate-700">{centro?.nome || centro?.codice || f.centro_lavoro_id}</td>
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-700">{f.tempo_stimato_totale_min} min</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-900">
+                              {f.nome_fase}
+                              {f.is_esterna && (
+                                <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] bg-pink-100 text-pink-700 font-bold border border-pink-300">
+                                  CONTO TERZI
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-700">
+                              {f.is_esterna ? (
+                                <span className="text-pink-700 font-semibold flex items-center gap-1">
+                                  <Truck className="w-3.5 h-3.5" />
+                                  {f.fornitore_nome || 'Terzista Esterno'}
+                                </span>
+                              ) : (
+                                centro?.nome || centro?.codice || f.centro_lavoro_id
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                              {f.is_esterna ? `${f.giorni_rientro_previsti || 5} gg rientro` : `${f.tempo_stimato_totale_min} min`}
+                            </td>
                             <td className="py-2.5 px-3 text-center">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                                 f.stato === 'completata'
@@ -2654,7 +3600,9 @@ export default function TerminaleOfficinaPage() {
                                   ? 'bg-blue-100 text-blue-800'
                                   : 'bg-slate-100 text-slate-600'
                               }`}>
-                                {f.stato === 'in_corso' ? 'In Macchina' : f.stato === 'completata' ? 'Completata' : 'In Coda'}
+                                {f.is_esterna
+                                  ? (f.stato_esterna === 'rientrato' ? 'Rientrato' : f.stato_esterna === 'inviato_al_terzista' ? 'Fuori Sede' : 'In Attesa Invio')
+                                  : (f.stato === 'in_corso' ? 'In Macchina' : f.stato === 'completata' ? 'Completata' : 'In Coda')}
                               </span>
                             </td>
                           </tr>
@@ -2801,41 +3749,57 @@ export default function TerminaleOfficinaPage() {
                   <span className="text-slate-400">Lotto Teorico Previsto:</span>
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-orange-400">{datiCompleta.odp.quantita_da_produrre} pz</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDatiCompleta({
-                          ...datiCompleta,
-                          pezziBuoni: datiCompleta.odp.quantita_da_produrre,
-                          pezziScarto: 0
-                        })
-                      }
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold cursor-pointer transition-colors"
-                      title="Reimposta intero lotto con zero scarti"
-                    >
-                      Tutto il lotto
-                    </button>
+                    {datiCompleta.limiteMassimoConsentito >= datiCompleta.odp.quantita_da_produrre && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDatiCompleta({
+                            ...datiCompleta,
+                            pezziBuoni: datiCompleta.odp.quantita_da_produrre,
+                            pezziScarto: 0
+                          })
+                        }
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold cursor-pointer transition-colors"
+                        title="Reimposta intero lotto con zero scarti"
+                      >
+                        Tutto il lotto
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* Box Vincolo Giacenza Grezzo (Poka-Yoke Industriale) */}
+                {datiCompleta.limiteMassimoConsentito < datiCompleta.odp.quantita_da_produrre && (
+                  <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-500/40 text-[11px] text-amber-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Blocco di Sicurezza: Giacenza Grezzo Limitata a {datiCompleta.limiteMassimoConsentito} pz</span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 leading-tight">
+                      A magazzino è presente materiale sufficiente per soli <strong>{datiCompleta.limiteMassimoConsentito} pezzi</strong> su {datiCompleta.odp.quantita_da_produrre}.
+                      Non è possibile dichiarare una quantità superiore. I <strong>{datiCompleta.odp.quantita_da_produrre - datiCompleta.limiteMassimoConsentito} pezzi rimanenti</strong> verranno automaticamente sdoppiati in un lotto residuo a saldo in attesa della fornitura.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-emerald-400 mb-1">
-                    Pezzi Buoni Conformi *
+                    Pezzi Buoni Conformi * (Max {datiCompleta.limiteMassimoConsentito})
                   </label>
                   <input
                     type="number"
                     min="0"
-                    max={datiCompleta.odp.quantita_da_produrre}
+                    max={datiCompleta.limiteMassimoConsentito}
                     value={datiCompleta.pezziBuoni}
                     onChange={(e) => {
-                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
-                      const valBuoni = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
-                      // Se la somma supera il lotto totale, scala automaticamente gli scarti
+                      const tettoConsentito = datiCompleta.limiteMassimoConsentito
+                      const valBuoni = Math.min(tettoConsentito, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il tetto consentito dal grezzo, scala automaticamente gli scarti
                       let nuovoScarto = datiCompleta.pezziScarto
-                      if (valBuoni + nuovoScarto > lottoTotale) {
-                        nuovoScarto = Math.max(0, lottoTotale - valBuoni)
+                      if (valBuoni + nuovoScarto > tettoConsentito) {
+                        nuovoScarto = Math.max(0, tettoConsentito - valBuoni)
                       }
                       setDatiCompleta({
                         ...datiCompleta,
@@ -2857,15 +3821,15 @@ export default function TerminaleOfficinaPage() {
                   <input
                     type="number"
                     min="0"
-                    max={datiCompleta.odp.quantita_da_produrre}
+                    max={datiCompleta.limiteMassimoConsentito}
                     value={datiCompleta.pezziScarto}
                     onChange={(e) => {
-                      const lottoTotale = datiCompleta.odp.quantita_da_produrre
-                      const valScarti = Math.min(lottoTotale, Math.max(0, Number(e.target.value)))
-                      // Se la somma supera il lotto totale, scala automaticamente i pezzi buoni
+                      const tettoConsentito = datiCompleta.limiteMassimoConsentito
+                      const valScarti = Math.min(tettoConsentito, Math.max(0, Number(e.target.value)))
+                      // Se la somma supera il tetto consentito dal grezzo, scala automaticamente i pezzi buoni
                       let nuovoBuoni = datiCompleta.pezziBuoni
-                      if (nuovoBuoni + valScarti > lottoTotale) {
-                        nuovoBuoni = Math.max(0, lottoTotale - valScarti)
+                      if (nuovoBuoni + valScarti > tettoConsentito) {
+                        nuovoBuoni = Math.max(0, tettoConsentito - valScarti)
                       }
                       setDatiCompleta({
                         ...datiCompleta,

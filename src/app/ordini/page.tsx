@@ -16,7 +16,11 @@ import {
   Sparkles,
   FileText,
   LayoutGrid,
-  List
+  List,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 import {
   Cliente,
@@ -70,6 +74,21 @@ export default function OrdiniPage() {
   const [filtroStato, setFiltroStato] = useState<string>('tutti')
   const [modalitaVista, setModalitaVista] = useState<'cards' | 'tabella'>('cards')
 
+  // Paginazione per Schede (Ordini) e per Tabella (Righe Articolo)
+  const [paginaCards, setPaginaCards] = useState<number>(1)
+  const [paginaTabella, setPaginaTabella] = useState<number>(1)
+  const ORDINI_PER_PAGINA_CARDS = 10
+  const RIGHE_PER_PAGINA_TABELLA = 25
+
+  // Stato espansione ordini multi-riga (fisarmonica/accordion per ordini con più di 3 righe)
+  const [ordiniEspansiIds, setOrdiniEspansiIds] = useState<Record<string, boolean>>({})
+  const toggleEspandiOrdine = (ordineId: string) => {
+    setOrdiniEspansiIds((prev) => ({
+      ...prev,
+      [ordineId]: !prev[ordineId]
+    }))
+  }
+
   // Selezione per lancio batch OdP (array di ID righe ordine)
   const [righeSelezionate, setRigheSelezionate] = useState<string[]>([])
 
@@ -108,13 +127,28 @@ export default function OrdiniPage() {
       const clientiList = parseSicuro('machinaflow_clienti', SEED_CLIENTI)
       setClienti(clientiList)
 
-      const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
+      // Unisci articoli salvati con seed
+      const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
+      const mappaArticoli = new Map<string, Articolo>()
+      SEED_ARTICOLI.forEach((a) => mappaArticoli.set(a.id, a))
+      articoliSalvati.forEach((a) => mappaArticoli.set(a.id, a))
+      const articoliList = Array.from(mappaArticoli.values())
       setArticoli(articoliList)
 
-      const cicliList = parseSicuro('machinaflow_fasi_ciclo', SEED_FASI_CICLO)
+      // Unisci cicli salvati con seed
+      const cicliSalvati = parseSicuro<FaseCicloStandard[]>('machinaflow_cicli', [])
+      const mappaCicli = new Map<string, FaseCicloStandard>()
+      SEED_FASI_CICLO.forEach((c) => mappaCicli.set(c.id, c))
+      cicliSalvati.forEach((c) => mappaCicli.set(c.id, c))
+      const cicliList = Array.from(mappaCicli.values())
       setCicli(cicliList)
 
-      const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
+      // Unisci distinte salvate con seed
+      const distinteSalvate = parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', [])
+      const mappaDistinte = new Map<string, ComponenteDistintaBase>()
+      SEED_DISTINTA_BASE.forEach((d) => mappaDistinte.set(d.id, d))
+      distinteSalvate.forEach((d) => mappaDistinte.set(d.id, d))
+      const distinteList = Array.from(mappaDistinte.values())
       setDistinte(distinteList)
 
       const centriList = parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
@@ -124,7 +158,12 @@ export default function OrdiniPage() {
       const odpCaricati = await syncService.getOrdiniProduzione()
       setOdpList(odpCaricati)
 
-      const ordiniCaricati = parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+      // Unisci ordini salvati con seed (garantisce la presenza di ord-11)
+      const ordiniSalvati = parseSicuro<(OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })[]>('machinaflow_ordini_clienti', [])
+      const mappaOrdini = new Map<string, (OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })>()
+      SEED_ORDINI_CLIENTI.forEach((o) => mappaOrdini.set(o.id, o))
+      ordiniSalvati.forEach((o) => mappaOrdini.set(o.id, o))
+      const ordiniCaricati = Array.from(mappaOrdini.values())
 
       // Arricchisci con oggetti collegati e determina lo stato reale in base agli OdP esistenti
       const arricchiti: OrdineCompleto[] = ordiniCaricati.map((ord) => {
@@ -392,7 +431,10 @@ export default function OrdiniPage() {
         const codiceOdp = `ODP-2026-${String(tempOdpList.length + 1).padStart(3, '0')}`
 
         const fasiEsecutive: FaseOdP[] = fasiArticolo.map((faseStd, index) => {
-          const tempoStimatoTotale = faseStd.tempo_attrezzaggio_min + (faseStd.tempo_ciclo_pezzo_min * riga.quantita)
+          const tempoStimatoTotale = faseStd.is_esterna
+            ? (faseStd.giorni_rientro_previsti || 5) * 8 * 60 // stima indicativa 8h lavorative per giorno di rientro
+            : faseStd.tempo_attrezzaggio_min + (faseStd.tempo_ciclo_pezzo_min * riga.quantita)
+
           return {
             id: `fase-odp-${Date.now()}-${rigaIdx}-${index}`,
             odp_id: nuovoOdpId,
@@ -404,7 +446,15 @@ export default function OrdiniPage() {
             tempo_stimato_totale_min: tempoStimatoTotale,
             tempo_effettivo_min: 0,
             stato: 'non_iniziata',
-            note_officina: faseStd.note_operative
+            note_officina: faseStd.note_operative,
+            // Campi lavorazione esterna c/terzi
+            is_esterna: faseStd.is_esterna,
+            fornitore_nome: faseStd.fornitore_nome,
+            giorni_rientro_previsti: faseStd.giorni_rientro_previsti,
+            modello_tariffa: faseStd.modello_tariffa,
+            costo_tariffa_valore: faseStd.costo_tariffa_valore,
+            costo_minimo_fornitura: faseStd.costo_minimo_fornitura,
+            stato_esterna: faseStd.is_esterna ? 'in_attesa_uscita' : undefined
           }
         })
 
@@ -472,7 +522,10 @@ export default function OrdiniPage() {
       const codiceOdp = `ODP-2026-${String(tempOdpList.length + 1).padStart(3, '0')}`
 
       const fasiEsecutive: FaseOdP[] = fasiArticolo.map((faseStd, index) => {
-        const tempoStimatoTotale = faseStd.tempo_attrezzaggio_min + (faseStd.tempo_ciclo_pezzo_min * riga.quantita)
+        const tempoStimatoTotale = faseStd.is_esterna
+          ? (faseStd.giorni_rientro_previsti || 5) * 8 * 60
+          : faseStd.tempo_attrezzaggio_min + (faseStd.tempo_ciclo_pezzo_min * riga.quantita)
+
         return {
           id: `fase-odp-${Date.now()}-${rigaIdx}-${index}`,
           odp_id: nuovoOdpId,
@@ -484,7 +537,15 @@ export default function OrdiniPage() {
           tempo_stimato_totale_min: tempoStimatoTotale,
           tempo_effettivo_min: 0,
           stato: 'non_iniziata',
-          note_officina: faseStd.note_operative
+          note_officina: faseStd.note_operative,
+          // Campi lavorazione esterna c/terzi
+          is_esterna: faseStd.is_esterna,
+          fornitore_nome: faseStd.fornitore_nome,
+          giorni_rientro_previsti: faseStd.giorni_rientro_previsti,
+          modello_tariffa: faseStd.modello_tariffa,
+          costo_tariffa_valore: faseStd.costo_tariffa_valore,
+          costo_minimo_fornitura: faseStd.costo_minimo_fornitura,
+          stato_esterna: faseStd.is_esterna ? 'in_attesa_uscita' : undefined
         }
       })
 
@@ -551,7 +612,9 @@ export default function OrdiniPage() {
 
     // 2. Crea le fasi OdP moltiplicando i tempi ciclo per la quantità
     const fasiEsecutive: FaseOdP[] = fasiArticolo.map((faseStd, index) => {
-      const tempoStimatoTotale = faseStd.tempo_attrezzaggio_min + (faseStd.tempo_ciclo_pezzo_min * riga.quantita)
+      const tempoStimatoTotale = faseStd.is_esterna
+        ? (faseStd.giorni_rientro_previsti || 5) * 8 * 60
+        : faseStd.tempo_attrezzaggio_min + (faseStd.tempo_ciclo_pezzo_min * riga.quantita)
 
       return {
         id: `fase-odp-${Date.now()}-${index}`,
@@ -564,7 +627,15 @@ export default function OrdiniPage() {
         tempo_stimato_totale_min: tempoStimatoTotale,
         tempo_effettivo_min: 0,
         stato: 'non_iniziata',
-        note_officina: faseStd.note_operative
+        note_officina: faseStd.note_operative,
+        // Campi lavorazione esterna c/terzi
+        is_esterna: faseStd.is_esterna,
+        fornitore_nome: faseStd.fornitore_nome,
+        giorni_rientro_previsti: faseStd.giorni_rientro_previsti,
+        modello_tariffa: faseStd.modello_tariffa,
+        costo_tariffa_valore: faseStd.costo_tariffa_valore,
+        costo_minimo_fornitura: faseStd.costo_minimo_fornitura,
+        stato_esterna: faseStd.is_esterna ? 'in_attesa_uscita' : undefined
       }
     })
 
@@ -605,6 +676,12 @@ export default function OrdiniPage() {
     setTimeout(() => setNotifica(null), 5000)
   }
 
+  // Reset pagina al cambio filtro o ricerca
+  useEffect(() => {
+    setPaginaCards(1)
+    setPaginaTabella(1)
+  }, [filtroStato, termineRicerca])
+
   // Filtro
   const ordiniFiltrati = ordini.filter((o) => {
     const combaciaStato = filtroStato === 'tutti' || o.stato === filtroStato
@@ -621,6 +698,27 @@ export default function OrdiniPage() {
 
     return combaciaStato && (matchNumeroOCliente || matchArticolo)
   })
+
+  // 1. Paginazione per VISTA SCHEDE (Cards = Ordini Completi)
+  const totaleOrdiniCards = ordiniFiltrati.length
+  const totalePagineCards = Math.ceil(totaleOrdiniCards / ORDINI_PER_PAGINA_CARDS) || 1
+  const inizioCards = (paginaCards - 1) * ORDINI_PER_PAGINA_CARDS
+  const ordiniPaginatiCards = ordiniFiltrati.slice(inizioCards, inizioCards + ORDINI_PER_PAGINA_CARDS)
+
+  // 2. Paginazione per VISTA TABELLA (Tabella = Righe Articolo Flattened)
+  // Trasforma tutti gli ordini filtrati in un elenco lineare di righe articolo
+  const tutteLeRigheFiltrate = ordiniFiltrati.flatMap((ordine) =>
+    ordine.righe.map((riga, indexInOrdine) => ({
+      ordine,
+      riga,
+      indexInOrdine,
+      totaleRigheInOrdine: ordine.righe.length
+    }))
+  )
+  const totaleRigheTabella = tutteLeRigheFiltrate.length
+  const totalePagineTabella = Math.ceil(totaleRigheTabella / RIGHE_PER_PAGINA_TABELLA) || 1
+  const inizioTabella = (paginaTabella - 1) * RIGHE_PER_PAGINA_TABELLA
+  const righePaginateTabella = tutteLeRigheFiltrate.slice(inizioTabella, inizioTabella + RIGHE_PER_PAGINA_TABELLA)
 
   return (
     <div className="space-y-6">
@@ -763,10 +861,10 @@ export default function OrdiniPage() {
         </div>
       </div>
 
-      {/* Elenco Ordini Clienti - Vista a Schede (Cards) */}
+      {/* Elenco Ordini Clienti - Vista a Schede (Cards) con Fisarmonica e Paginazione */}
       {modalitaVista === 'cards' && (
         <div className="space-y-6">
-          {ordiniFiltrati.map((ordine) => {
+          {ordiniPaginatiCards.map((ordine) => {
             const totaleCommessa = ordine.righe.reduce(
               (acc, r) => acc + r.quantita * (r.prezzo_unitario || 0),
               0
@@ -774,6 +872,10 @@ export default function OrdiniPage() {
             const righeSenzaOdP = ordine.righe.filter(
               (r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id)
             )
+
+            const haMolteRighe = ordine.righe.length > 3
+            const isEspanso = ordiniEspansiIds[ordine.id] ?? false
+            const righeDaVisualizzare = haMolteRighe && !isEspanso ? ordine.righe.slice(0, 3) : ordine.righe
 
             return (
               <div
@@ -871,7 +973,7 @@ export default function OrdiniPage() {
                   </div>
 
                   <div className="divide-y divide-slate-800/50">
-                    {ordine.righe.map((riga) => {
+                    {righeDaVisualizzare.map((riga) => {
                       const odpEsistente = odpList.find((o) => o.riga_ordine_cliente_id === riga.id)
                       const importoRiga = (riga.quantita || 0) * (riga.prezzo_unitario || 0)
                       const isSelected = righeSelezionate.includes(riga.id)
@@ -944,6 +1046,29 @@ export default function OrdiniPage() {
                       )
                     })}
                   </div>
+
+                  {/* Pulsante Espansione / Chiusura Fisarmonica per ordini con molti articoli */}
+                  {haMolteRighe && (
+                    <div className="p-2.5 bg-slate-950/90 text-center border-t border-slate-800/80">
+                      <button
+                        type="button"
+                        onClick={() => toggleEspandiOrdine(ordine.id)}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition-colors cursor-pointer py-1 px-3 rounded-lg hover:bg-slate-900"
+                      >
+                        {isEspanso ? (
+                          <>
+                            <ChevronUp className="w-4 h-4" />
+                            <span>Comprimi elenco (mostra solo i primi 3)</span>
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-4 h-4" />
+                            <span>Mostra tutti gli altri {ordine.righe.length - 3} articoli della commessa ▾</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )
@@ -958,45 +1083,82 @@ export default function OrdiniPage() {
               </p>
             </div>
           )}
+
+          {/* Paginazione Vista Schede (a 10 ordini per pagina) */}
+          {totalePagineCards > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg">
+              <div className="text-xs text-slate-400 font-semibold">
+                Mostrati da <span className="text-white font-bold">{Math.min(inizioCards + 1, totaleOrdiniCards)}</span> a{' '}
+                <span className="text-white font-bold">{Math.min(inizioCards + ORDINI_PER_PAGINA_CARDS, totaleOrdiniCards)}</span> di{' '}
+                <span className="text-orange-400 font-bold">{totaleOrdiniCards}</span> commesse clienti
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaginaCards((prev) => Math.max(prev - 1, 1))}
+                  disabled={paginaCards === 1}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Precedenti</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-orange-400">
+                  Pagina {paginaCards} / {totalePagineCards}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPaginaCards((prev) => Math.min(prev + 1, totalePagineCards))}
+                  disabled={paginaCards === totalePagineCards}
+                  className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
+                >
+                  <span>Successivi 10</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Elenco Ordini Clienti - Vista a Lista (Tabella con Checkbox e Righe Dettaglio) */}
+      {/* Elenco Ordini Clienti - Vista a Lista (Tabella Paginata per Righe Articolo) */}
       {modalitaVista === 'tabella' && (
-        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 uppercase tracking-wider font-semibold">
-                  <th className="py-3 px-3 w-10 text-center">
-                    <input
-                      type="checkbox"
-                      onChange={toggleSelezionaTuttiVisibili}
-                      checked={
-                        ordiniFiltrati.flatMap((o) => o.righe).filter((r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id)).length > 0 &&
-                        ordiniFiltrati.flatMap((o) => o.righe).filter((r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id)).every((r) => righeSelezionate.includes(r.id))
-                      }
-                      className="w-4 h-4 rounded text-orange-600 bg-slate-900 border-slate-700 focus:ring-orange-500 cursor-pointer"
-                      title="Seleziona/Deseleziona tutti gli articoli visibili pronti al lancio"
-                    />
-                  </th>
-                  <th className="py-3 px-4">N. Ordine</th>
-                  <th className="py-3 px-4">Cliente</th>
-                  <th className="py-3 px-4">Codice & Articolo</th>
-                  <th className="py-3 px-4 text-center">Quantità</th>
-                  <th className="py-3 px-4 text-right">Prezzo Unit.</th>
-                  <th className="py-3 px-4 text-right">Totale Riga</th>
-                  <th className="py-3 px-4">Consegna</th>
-                  <th className="py-3 px-4 text-center">Stato</th>
-                  <th className="py-3 px-4 text-right">Azione OdP</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {ordiniFiltrati.map((ordine) => {
-                  return ordine.righe.map((riga, rigaIndex) => {
+        <div className="space-y-4">
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 uppercase tracking-wider font-semibold">
+                    <th className="py-3 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        onChange={toggleSelezionaTuttiVisibili}
+                        checked={
+                          righePaginateTabella.filter(({ riga }) => !odpList.some((o) => o.riga_ordine_cliente_id === riga.id)).length > 0 &&
+                          righePaginateTabella.filter(({ riga }) => !odpList.some((o) => o.riga_ordine_cliente_id === riga.id)).every(({ riga }) => righeSelezionate.includes(riga.id))
+                        }
+                        className="w-4 h-4 rounded text-orange-600 bg-slate-900 border-slate-700 focus:ring-orange-500 cursor-pointer"
+                        title="Seleziona/Deseleziona tutti gli articoli visibili in questa pagina pronti al lancio"
+                      />
+                    </th>
+                    <th className="py-3 px-3">N. Ordine</th>
+                    <th className="py-3 px-3">Cliente</th>
+                    <th className="py-3 px-3">Codice & Articolo</th>
+                    <th className="py-3 px-2.5 text-center">Quantità</th>
+                    <th className="py-3 px-2.5 text-right">Prezzo Unit.</th>
+                    <th className="py-3 px-2.5 text-right">Totale Riga</th>
+                    <th className="py-3 px-3 text-center">Consegna</th>
+                    <th className="py-3 px-2.5 text-center">Stato</th>
+                    <th className="py-3 px-3 text-center">Azione OdP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {righePaginateTabella.map(({ ordine, riga, indexInOrdine }) => {
                     const odpEsistente = odpList.find((o) => o.riga_ordine_cliente_id === riga.id)
                     const totaleImportoRiga = (riga.quantita || 0) * (riga.prezzo_unitario || 0)
-                    const isFirstRowOfOrder = rigaIndex === 0
+                    const isFirstRowOfOrder = indexInOrdine === 0
                     const isSelected = righeSelezionate.includes(riga.id)
 
                     return (
@@ -1009,7 +1171,7 @@ export default function OrdiniPage() {
                         } ${isFirstRowOfOrder ? 'border-t-2 border-slate-800' : ''}`}
                       >
                         {/* Checkbox */}
-                        <td className="py-3 px-3 text-center">
+                        <td className="py-2.5 px-3 text-center">
                           {!odpEsistente ? (
                             <input
                               type="checkbox"
@@ -1018,12 +1180,12 @@ export default function OrdiniPage() {
                               className="w-4 h-4 rounded text-orange-600 bg-slate-900 border-slate-700 focus:ring-orange-500 cursor-pointer"
                             />
                           ) : (
-                            <span className="text-[10px] text-slate-600" title="OdP già lanciato">✓</span>
+                            <span className="text-[10px] text-slate-600 font-bold" title="OdP già lanciato">✓</span>
                           )}
                         </td>
 
                         {/* Numero Ordine */}
-                        <td className="py-3 px-4 font-mono font-bold text-orange-400 whitespace-nowrap">
+                        <td className="py-2.5 px-3 font-mono font-bold text-orange-400 whitespace-nowrap">
                           {isFirstRowOfOrder ? (
                             <div>
                               <span>{ordine.numero_ordine}</span>
@@ -1037,7 +1199,7 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Cliente */}
-                        <td className="py-3 px-4 font-medium text-white max-w-[180px]">
+                        <td className="py-2.5 px-3 font-medium text-white max-w-[170px]">
                           {isFirstRowOfOrder ? (
                             <div className="flex items-center gap-1.5 truncate">
                               <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -1051,13 +1213,13 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Articolo */}
-                        <td className="py-3 px-4">
+                        <td className="py-2.5 px-3">
                           {riga.articolo ? (
                             <div className="space-y-0.5">
                               <span className="font-mono font-semibold text-white block">
                                 {riga.articolo.codice_articolo}
                               </span>
-                              <span className="text-[11px] text-slate-400 line-clamp-1">
+                              <span className="text-[11px] text-slate-400 line-clamp-1" title={riga.articolo.descrizione}>
                                 {riga.articolo.descrizione}
                               </span>
                             </div>
@@ -1067,26 +1229,26 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Quantità */}
-                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                           <span className="font-bold text-orange-400 bg-orange-950/60 px-2 py-0.5 rounded border border-orange-800/40">
                             {riga.quantita} {riga.articolo?.unita_misura || 'pz'}
                           </span>
                         </td>
 
                         {/* Prezzo Unitario */}
-                        <td className="py-3 px-4 text-right font-mono text-slate-300 whitespace-nowrap">
+                        <td className="py-2.5 px-2.5 text-right font-mono text-slate-300 whitespace-nowrap">
                           € {riga.prezzo_unitario?.toFixed(2) || '0.00'}
                         </td>
 
                         {/* Totale Riga */}
-                        <td className="py-3 px-4 text-right font-mono font-semibold text-slate-200 whitespace-nowrap">
+                        <td className="py-2.5 px-2.5 text-right font-mono font-semibold text-slate-200 whitespace-nowrap">
                           € {totaleImportoRiga.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
 
                         {/* Scadenza */}
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           {isFirstRowOfOrder ? (
-                            <div className="flex items-center gap-1 text-slate-300 font-medium">
+                            <div className="inline-flex items-center gap-1 text-slate-300 font-medium">
                               <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                               <span>
                                 {new Date(ordine.data_consegna_concordata).toLocaleDateString('it-IT', {
@@ -1102,7 +1264,7 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Stato */}
-                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                           {isFirstRowOfOrder ? (
                             <span
                               className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
@@ -1121,7 +1283,7 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Azione OdP */}
-                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           {odpEsistente ? (
                             <Link
                               href={`/produzione/${odpEsistente.id}`}
@@ -1143,19 +1305,56 @@ export default function OrdiniPage() {
                         </td>
                       </tr>
                     )
-                  })
-                })}
+                  })}
 
-                {ordiniFiltrati.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
-                      Nessun ordine cliente trovato corrispondente ai filtri.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  {totaleRigheTabella === 0 && (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-slate-500">
+                        Nessun articolo o ordine cliente trovato corrispondente ai filtri.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {/* Paginazione Vista Tabella (a 25 righe articolo per pagina) */}
+          {totalePagineTabella > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg">
+              <div className="text-xs text-slate-400 font-semibold">
+                Mostrati da <span className="text-white font-bold">{Math.min(inizioTabella + 1, totaleRigheTabella)}</span> a{' '}
+                <span className="text-white font-bold">{Math.min(inizioTabella + RIGHE_PER_PAGINA_TABELLA, totaleRigheTabella)}</span> di{' '}
+                <span className="text-orange-400 font-bold">{totaleRigheTabella}</span> articoli in commessa
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaginaTabella((prev) => Math.max(prev - 1, 1))}
+                  disabled={paginaTabella === 1}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Precedenti</span>
+                </button>
+
+                <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-orange-400">
+                  Pagina {paginaTabella} / {totalePagineTabella}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPaginaTabella((prev) => Math.min(prev + 1, totalePagineTabella))}
+                  disabled={paginaTabella === totalePagineTabella}
+                  className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
+                >
+                  <span>Successivi 25</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -13,7 +13,10 @@ import {
   AlertCircle,
   CheckCircle2,
   Search,
-  X
+  X,
+  Truck,
+  Scale,
+  Maximize2
 } from 'lucide-react'
 import {
   Articolo,
@@ -21,7 +24,8 @@ import {
   FaseCicloStandard,
   CentroLavoro,
   TipoProcesso,
-  TipoArticolo
+  TipoArticolo,
+  ModelloTariffaEsterna
 } from '@/types/database'
 import {
   SEED_ARTICOLI,
@@ -79,7 +83,14 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     centri_lavoro_alternativi_ids: [] as string[],
     tempo_attrezzaggio_min: '15',
     tempo_ciclo_pezzo_min: '5',
-    note_operative: ''
+    note_operative: '',
+    // Gestione Lavorazione Esterna / Conto Terzi
+    is_esterna: false,
+    fornitore_nome: '',
+    giorni_rientro_previsti: 5,
+    modello_tariffa: 'pezzo_fisso' as ModelloTariffaEsterna,
+    costo_tariffa_valore: 0,
+    costo_minimo_fornitura: 0
   })
 
   // Funzione con calcolo automatico sequenza (10 -> 20 -> 30...)
@@ -95,7 +106,13 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       centri_lavoro_alternativi_ids: [],
       tempo_attrezzaggio_min: '15',
       tempo_ciclo_pezzo_min: '5',
-      note_operative: ''
+      note_operative: '',
+      is_esterna: false,
+      fornitore_nome: '',
+      giorni_rientro_previsti: 5,
+      modello_tariffa: 'pezzo_fisso',
+      costo_tariffa_valore: 0,
+      costo_minimo_fornitura: 0
     })
     setFiltroProcessoTesto('')
     setFiltroMacchinaTesto('')
@@ -230,11 +247,17 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       sequenza: Number(formCiclo.sequenza),
       nome_fase: formCiclo.nome_fase.trim(),
       tipo_processo_id: formCiclo.tipo_processo_id || undefined,
-      centro_lavoro_id: formCiclo.centro_lavoro_id,
-      centri_lavoro_alternativi_ids: formCiclo.centri_lavoro_alternativi_ids || [],
-      tempo_attrezzaggio_min: setupMin,
-      tempo_ciclo_pezzo_min: cicloPzMin,
-      note_operative: formCiclo.note_operative
+      centro_lavoro_id: formCiclo.is_esterna ? 'mc-esterna-01' : formCiclo.centro_lavoro_id,
+      centri_lavoro_alternativi_ids: formCiclo.is_esterna ? [] : formCiclo.centri_lavoro_alternativi_ids || [],
+      tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
+      tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
+      note_operative: formCiclo.note_operative,
+      is_esterna: formCiclo.is_esterna,
+      fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
+      giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
+      modello_tariffa: formCiclo.is_esterna ? formCiclo.modello_tariffa : undefined,
+      costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
+      costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
     }
 
     const aggiornato = [...fasiCiclo, nuovaFase].sort((a, b) => a.sequenza - b.sequenza)
@@ -257,7 +280,13 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       centri_lavoro_alternativi_ids: [],
       tempo_attrezzaggio_min: '15',
       tempo_ciclo_pezzo_min: '5',
-      note_operative: ''
+      note_operative: '',
+      is_esterna: false,
+      fornitore_nome: '',
+      giorni_rientro_previsti: 5,
+      modello_tariffa: 'pezzo_fisso',
+      costo_tariffa_valore: 0,
+      costo_minimo_fornitura: 0
     })
   }
 
@@ -322,8 +351,22 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold text-white mt-2">{articolo.descrizione}</h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Giacenza: <strong className="text-slate-200">{articolo.giacenza_attuale} {articolo.unita_misura}</strong> • Scorta minima: {articolo.scorta_minima} {articolo.unita_misura}
+            <p className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-3">
+              <span>Giacenza: <strong className="text-slate-200">{articolo.giacenza_attuale} {articolo.unita_misura}</strong></span>
+              <span>•</span>
+              <span>Scorta minima: {articolo.scorta_minima} {articolo.unita_misura}</span>
+              {articolo.peso_kg_unitario ? (
+                <>
+                  <span>•</span>
+                  <span>Peso: <strong className="text-amber-400">{articolo.peso_kg_unitario} kg</strong></span>
+                </>
+              ) : null}
+              {articolo.superficie_m2_unitaria ? (
+                <>
+                  <span>•</span>
+                  <span>Superficie: <strong className="text-emerald-400">{articolo.superficie_m2_unitaria} m²</strong> ({(articolo.superficie_m2_unitaria * 100).toFixed(1)} dm²)</span>
+                </>
+              ) : null}
             </p>
           </div>
 
@@ -473,22 +516,50 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
-                        <Cpu className="w-3.5 h-3.5 text-slate-500" />
-                        Centro Principale: <strong className="text-slate-300">{centro ? centro.nome : 'N/D'}</strong>
-                      </p>
-                      {fase.centri_lavoro_alternativi_ids && fase.centri_lavoro_alternativi_ids.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-slate-400">
-                          <span className="text-blue-400 font-semibold">Macchine Alternative:</span>
-                          {fase.centri_lavoro_alternativi_ids.map((altId) => {
-                            const altC = centriLavoro.find((c) => c.id === altId)
-                            return altC ? (
-                              <span key={altId} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300">
-                                {altC.codice} ({altC.nome})
-                              </span>
-                            ) : null
-                          })}
+                      {fase.is_esterna ? (
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-pink-950/80 border border-pink-700/60 text-pink-300 font-bold text-[10px]">
+                            <Truck className="w-3 h-3 text-pink-400" />
+                            CONTO TERZI ESTERNO
+                          </span>
+                          <span className="text-slate-300 font-medium">
+                            Fornitore: <strong className="text-white">{fase.fornitore_nome || 'Da definire'}</strong>
+                          </span>
+                          <span className="text-slate-400 text-[11px]">
+                            • Rientro stimato: <strong className="text-amber-400">{fase.giorni_rientro_previsti || 5} giorni</strong>
+                          </span>
+                          {fase.costo_tariffa_valore ? (
+                            <span className="text-emerald-400 font-mono text-[11px] bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                              € {fase.costo_tariffa_valore.toFixed(2)} / {
+                                fase.modello_tariffa === 'peso_kg' ? 'kg' :
+                                fase.modello_tariffa === 'superficie_m2' ? 'm²' :
+                                fase.modello_tariffa === 'superficie_dm2' ? 'dm²' :
+                                fase.modello_tariffa === 'lotto_forfettario' ? 'lotto fisso' : 'pezzo'
+                              }
+                              {fase.costo_minimo_fornitura ? ` (min. € ${fase.costo_minimo_fornitura.toFixed(2)})` : ''}
+                            </span>
+                          ) : null}
                         </div>
+                      ) : (
+                        <>
+                          <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
+                            <Cpu className="w-3.5 h-3.5 text-slate-500" />
+                            Centro Principale: <strong className="text-slate-300">{centro ? centro.nome : 'N/D'}</strong>
+                          </p>
+                          {fase.centri_lavoro_alternativi_ids && fase.centri_lavoro_alternativi_ids.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-slate-400">
+                              <span className="text-blue-400 font-semibold">Macchine Alternative:</span>
+                              {fase.centri_lavoro_alternativi_ids.map((altId) => {
+                                const altC = centriLavoro.find((c) => c.id === altId)
+                                return altC ? (
+                                  <span key={altId} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300">
+                                    {altC.codice} ({altC.nome})
+                                  </span>
+                                ) : null
+                              })}
+                            </div>
+                          )}
+                        </>
                       )}
                       {fase.note_operative && (
                         <p className="text-xs text-slate-500 mt-1 italic">
@@ -499,15 +570,27 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                   </div>
 
                   <div className="flex items-center justify-between md:justify-end gap-6 pt-3 md:pt-0 border-t md:border-t-0 border-slate-800">
-                    <div className="text-right">
-                      <div className="text-[11px] text-slate-400">Tempo Attrezzaggio</div>
-                      <div className="text-xs font-bold text-slate-200">{fase.tempo_attrezzaggio_min} min</div>
-                    </div>
+                    {fase.is_esterna ? (
+                      <div className="text-right">
+                        <div className="text-[11px] text-slate-400">Lead Time Fuori Sede</div>
+                        <div className="text-xs font-bold text-pink-300 flex items-center justify-end gap-1">
+                          <Truck className="w-3.5 h-3.5 text-pink-400" />
+                          {fase.giorni_rientro_previsti || 5} gg lavorativi
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-right">
+                          <div className="text-[11px] text-slate-400">Tempo Attrezzaggio</div>
+                          <div className="text-xs font-bold text-slate-200">{fase.tempo_attrezzaggio_min} min</div>
+                        </div>
 
-                    <div className="text-right">
-                      <div className="text-[11px] text-slate-400">Tempo Pezzo</div>
-                      <div className="text-xs font-bold text-orange-400">{fase.tempo_ciclo_pezzo_min} min/pz</div>
-                    </div>
+                        <div className="text-right">
+                          <div className="text-[11px] text-slate-400">Tempo Pezzo</div>
+                          <div className="text-xs font-bold text-orange-400">{fase.tempo_ciclo_pezzo_min} min/pz</div>
+                        </div>
+                      </>
+                    )}
 
                     <button
                       onClick={() => handleRimuoviFase(fase.id)}
@@ -534,14 +617,15 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
 
       {/* MODALE AGGIUNGI COMPONENTE BOM */}
       {modaleBomAperta && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 <Layers className="w-5 h-5 text-orange-500" />
                 Aggiungi Componente alla Distinta Base
               </h2>
               <button
+                type="button"
                 onClick={() => setModaleBomAperta(false)}
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
               >
@@ -549,7 +633,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
               </button>
             </div>
 
-            <form onSubmit={handleAggiungiComponente} className="p-5 space-y-4">
+            <form onSubmit={handleAggiungiComponente} className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
               {/* SWITCH: SELEZIONA ESISTENTE O CREA AL VOLO */}
               {!creazioneRapidaAttiva ? (
                 <div>
@@ -869,7 +953,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                 />
               </div>
 
-              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+              <div className="sticky -bottom-4 sm:-bottom-5 -mx-4 sm:-mx-5 p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-900/95 backdrop-blur-md">
                 <button
                   type="button"
                   onClick={() => setModaleBomAperta(false)}
@@ -891,14 +975,15 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
 
       {/* MODALE AGGIUNGI FASE CICLO */}
       {modaleCicloAperta && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 <Clock className="w-5 h-5 text-orange-500" />
                 Aggiungi Fase al Ciclo di Lavorazione
               </h2>
               <button
+                type="button"
                 onClick={() => setModaleCicloAperta(false)}
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
               >
@@ -906,7 +991,35 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
               </button>
             </div>
 
-            <form onSubmit={handleAggiungiFase} className="p-5 space-y-4">
+            <form onSubmit={handleAggiungiFase} className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
+              {/* SELETTORE TIPO DI LAVORAZIONE (INTERNA vs ESTERNA C/TERZI) */}
+              <div className="flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setFormCiclo({ ...formCiclo, is_esterna: false })}
+                  className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    !formCiclo.is_esterna
+                      ? 'bg-orange-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Cpu className="w-3.5 h-3.5" />
+                  Lavorazione Interna Officina
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormCiclo({ ...formCiclo, is_esterna: true, centro_lavoro_id: 'mc-esterna-01' })}
+                  className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    formCiclo.is_esterna
+                      ? 'bg-pink-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  Conto Terzi Esterno
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -1033,189 +1146,301 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                 />
               </div>
 
-              {/* RICERCA LIVE CENTRO DI LAVORO / MACCHINA */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Cerca e Assegna Macchina / Centro di Lavoro *
-                </label>
-                {formCiclo.centro_lavoro_id ? (
-                  // Macchina Selezionata
-                  (() => {
-                    const centro = centriLavoro.find((c) => c.id === formCiclo.centro_lavoro_id)
-                    return (
-                      <div className="p-3 rounded-xl bg-slate-950 border border-orange-500/50 flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono font-bold text-orange-400 bg-orange-950 px-2 py-0.5 rounded border border-orange-500/20">
-                              {centro?.codice}
-                            </span>
-                            <span className="text-xs font-bold text-white">{centro?.nome}</span>
-                          </div>
-                          <span className="text-[11px] text-slate-400 block mt-0.5">
-                            Reparto: <strong className="text-slate-200">{centro?.reparto}</strong> • Capacità: {centro?.capacita_giornaliera_ore}h/giorno
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormCiclo({ ...formCiclo, centro_lavoro_id: '' })
-                            setFiltroMacchinaTesto('')
-                            setMostraDropdownMacchine(true)
-                          }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs cursor-pointer"
-                          title="Cambia centro di lavoro"
-                        >
-                          <X className="w-4 h-4" />
-                          <span className="text-[11px]">Cambia</span>
-                        </button>
-                      </div>
-                    )
-                  })()
-                ) : (
-                  // Input Ricerca Live Macchina
-                  <div className="relative">
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              {/* SEZIONE CONTO TERZI vs INTERNA */}
+              {formCiclo.is_esterna ? (
+                /* Campi per Lavorazione Esterna Conto Terzi */
+                <div className="space-y-4 p-4 rounded-xl bg-pink-950/20 border border-pink-900/50">
+                  <div className="flex items-center gap-2 text-pink-400 font-semibold text-xs border-b border-pink-900/40 pb-2">
+                    <Truck className="w-4 h-4" />
+                    Dati Fornitore Esterno e Lead Time
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Nome Terzista / Fornitore *
+                      </label>
                       <input
                         type="text"
-                        placeholder="Digita per filtrare macchina (es: Mazak, Tornio, Laser, MC-01)..."
-                        value={filtroMacchinaTesto}
-                        onFocus={() => setMostraDropdownMacchine(true)}
-                        onChange={(e) => {
-                          setFiltroMacchinaTesto(e.target.value)
-                          setMostraDropdownMacchine(true)
-                        }}
-                        className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-orange-500"
+                        required={formCiclo.is_esterna}
+                        placeholder="es: Zincatura Veneta Srl, Trattamenti Termici Spa..."
+                        value={formCiclo.fornitore_nome}
+                        onChange={(e) => setFormCiclo({ ...formCiclo, fornitore_nome: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
                       />
                     </div>
 
-                    {mostraDropdownMacchine && (
-                      <div className="absolute z-20 top-full left-0 right-0 mt-1 max-h-52 overflow-y-auto rounded-xl bg-slate-900 border border-slate-700 shadow-2xl divide-y divide-slate-800">
-                        {centriLavoro
-                          .filter(
-                            (c) =>
-                              c.nome.toLowerCase().includes(filtroMacchinaTesto.toLowerCase()) ||
-                              c.codice.toLowerCase().includes(filtroMacchinaTesto.toLowerCase()) ||
-                              c.reparto.toLowerCase().includes(filtroMacchinaTesto.toLowerCase())
-                          )
-                          .map((c) => (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Lead Time di Rientro (Giorni Lavorativi) *
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        required={formCiclo.is_esterna}
+                        placeholder="es: 5 o 7"
+                        value={formCiclo.giorni_rientro_previsti}
+                        onChange={(e) => setFormCiclo({ ...formCiclo, giorni_rientro_previsti: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-pink-900/40 pt-3">
+                    <label className="block text-xs font-semibold text-slate-300 mb-2">
+                      Metodo di Calcolo Costo Lavorazione *
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { id: 'pezzo_fisso', label: '€ / Pezzo Finito' },
+                        { id: 'peso_kg', label: '€ / Kg (Peso)' },
+                        { id: 'superficie_m2', label: '€ / m² (Area)' },
+                        { id: 'superficie_dm2', label: '€ / dm² (Area)' },
+                        { id: 'lotto_forfettario', label: '€ / Lotto Forfettario' }
+                      ].map((tariffa) => (
+                        <button
+                          key={tariffa.id}
+                          type="button"
+                          onClick={() => setFormCiclo({ ...formCiclo, modello_tariffa: tariffa.id as any })}
+                          className={`p-2 rounded-lg text-xs font-medium text-left transition-all border cursor-pointer ${
+                            formCiclo.modello_tariffa === tariffa.id
+                              ? 'bg-pink-600/30 border-pink-500 text-pink-200 font-bold'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {tariffa.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Tariffa Unitaria (€)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="es: 1.50"
+                        value={formCiclo.costo_tariffa_valore || ''}
+                        onChange={(e) => setFormCiclo({ ...formCiclo, costo_tariffa_valore: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-slate-100 focus:outline-none focus:border-pink-500"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        Costo applicato in base all'unità scelta (per kg, m², pz, ecc.)
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Minimo di Fatturazione (€)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="es: 50.00 (opzionale)"
+                        value={formCiclo.costo_minimo_fornitura || ''}
+                        onChange={(e) => setFormCiclo({ ...formCiclo, costo_minimo_fornitura: Number(e.target.value) })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
+                      />
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        Importo minimo applicato se il totale riga è inferiore
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Campi per Lavorazione Interna Officina */
+                <>
+                  {/* RICERCA LIVE CENTRO DI LAVORO / MACCHINA */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Cerca e Assegna Macchina / Centro di Lavoro *
+                    </label>
+                    {formCiclo.centro_lavoro_id && formCiclo.centro_lavoro_id !== 'mc-esterna-01' ? (
+                      // Macchina Selezionata
+                      (() => {
+                        const centro = centriLavoro.find((c) => c.id === formCiclo.centro_lavoro_id)
+                        return (
+                          <div className="p-3 rounded-xl bg-slate-950 border border-orange-500/50 flex items-center justify-between">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono font-bold text-orange-400 bg-orange-950 px-2 py-0.5 rounded border border-orange-500/20">
+                                  {centro?.codice}
+                                </span>
+                                <span className="text-xs font-bold text-white">{centro?.nome}</span>
+                              </div>
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                Reparto: <strong className="text-slate-200">{centro?.reparto}</strong> • Capacità: {centro?.capacita_giornaliera_ore}h/giorno
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormCiclo({ ...formCiclo, centro_lavoro_id: '' })
+                                setFiltroMacchinaTesto('')
+                                setMostraDropdownMacchine(true)
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs cursor-pointer"
+                              title="Cambia centro di lavoro"
+                            >
+                              <X className="w-4 h-4" />
+                              <span className="text-[11px]">Cambia</span>
+                            </button>
+                          </div>
+                        )
+                      })()
+                    ) : (
+                      // Input Ricerca Live Macchina
+                      <div className="relative">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Digita per filtrare macchina (es: Mazak, Tornio, Laser, MC-01)..."
+                            value={filtroMacchinaTesto}
+                            onFocus={() => setMostraDropdownMacchine(true)}
+                            onChange={(e) => {
+                              setFiltroMacchinaTesto(e.target.value)
+                              setMostraDropdownMacchine(true)
+                            }}
+                            className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-orange-500"
+                          />
+                        </div>
+
+                        {mostraDropdownMacchine && (
+                          <div className="absolute z-20 top-full left-0 right-0 mt-1 max-h-52 overflow-y-auto rounded-xl bg-slate-900 border border-slate-700 shadow-2xl divide-y divide-slate-800">
+                            {centriLavoro
+                              .filter((c) => c.id !== 'mc-esterna-01')
+                              .filter(
+                                (c) =>
+                                  c.nome.toLowerCase().includes(filtroMacchinaTesto.toLowerCase()) ||
+                                  c.codice.toLowerCase().includes(filtroMacchinaTesto.toLowerCase()) ||
+                                  c.reparto.toLowerCase().includes(filtroMacchinaTesto.toLowerCase())
+                              )
+                              .map((c) => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setFormCiclo({ ...formCiclo, centro_lavoro_id: c.id })
+                                    setMostraDropdownMacchine(false)
+                                    setFiltroMacchinaTesto('')
+                                  }}
+                                  className="w-full text-left p-2.5 hover:bg-slate-800/90 transition-colors flex items-center justify-between cursor-pointer group"
+                                >
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-mono font-bold text-orange-400 group-hover:underline">
+                                        {c.codice}
+                                      </span>
+                                      <span className="text-xs font-semibold text-white">
+                                        {c.nome}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">
+                                      Reparto: {c.reparto} • {c.capacita_giornaliera_ore} ore/giorno
+                                    </span>
+                                  </div>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* MACCHINE ALTERNATIVE COMPATIBILI (BILANCIAMENTO CARICO) */}
+                  <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-slate-300">
+                        Macchine Alternative Compatibili (Bilanciamento Carico)
+                      </label>
+                      <span className="text-[10px] text-slate-400">
+                        {formCiclo.centri_lavoro_alternativi_ids?.length || 0} selezionate
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Seleziona le altre macchine dell'officina in grado di eseguire questa fase, in modo che il sistema possa deviare il pezzo in caso di sovraccarico della macchina principale:
+                    </p>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {centriLavoro
+                        .filter((c) => c.id !== formCiclo.centro_lavoro_id && c.id !== 'mc-esterna-01')
+                        .map((c) => {
+                          const isSelezionata = formCiclo.centri_lavoro_alternativi_ids?.includes(c.id)
+                          return (
                             <button
                               key={c.id}
                               type="button"
                               onClick={() => {
-                                setFormCiclo({ ...formCiclo, centro_lavoro_id: c.id })
-                                setMostraDropdownMacchine(false)
-                                setFiltroMacchinaTesto('')
+                                const attuali = formCiclo.centri_lavoro_alternativi_ids || []
+                                const aggiornati = isSelezionata
+                                  ? attuali.filter((id) => id !== c.id)
+                                  : [...attuali, c.id]
+                                setFormCiclo({ ...formCiclo, centri_lavoro_alternativi_ids: aggiornati })
                               }}
-                              className="w-full text-left p-2.5 hover:bg-slate-800/90 transition-colors flex items-center justify-between cursor-pointer group"
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                                isSelezionata
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:bg-slate-800'
+                              }`}
                             >
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-mono font-bold text-orange-400 group-hover:underline">
-                                    {c.codice}
-                                  </span>
-                                  <span className="text-xs font-semibold text-white">
-                                    {c.nome}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] text-slate-400">
-                                  Reparto: {c.reparto} • {c.capacita_giornaliera_ore} ore/giorno
-                                </span>
-                              </div>
+                              {isSelezionata && <CheckCircle2 className="w-3.5 h-3.5" />}
+                              <span>{c.codice}</span>
+                              <span className="text-[10px] opacity-80">({c.nome})</span>
                             </button>
-                          ))}
-                      </div>
-                    )}
+                          )
+                        })}
+                    </div>
                   </div>
-                )}
-              </div>
 
-              {/* MACCHINE ALTERNATIVE COMPATIBILI (BILANCIAMENTO CARICO) */}
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Macchine Alternative Compatibili (Bilanciamento Carico)
-                  </label>
-                  <span className="text-[10px] text-slate-400">
-                    {formCiclo.centri_lavoro_alternativi_ids?.length || 0} selezionate
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Seleziona le altre macchine dell'officina in grado di eseguire questa fase, in modo che il sistema possa deviare il pezzo in caso di sovraccarico della macchina principale:
-                </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Tempo Attrezzaggio (Minuti Setup)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required={!formCiclo.is_esterna}
+                        placeholder="es: 15 o 20"
+                        value={formCiclo.tempo_attrezzaggio_min}
+                        onChange={(e) =>
+                          setFormCiclo({
+                            ...formCiclo,
+                            tempo_attrezzaggio_min: e.target.value.replace(/[^0-9.,]/g, '')
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-slate-100 focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
 
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {centriLavoro
-                    .filter((c) => c.id !== formCiclo.centro_lavoro_id)
-                    .map((c) => {
-                      const isSelezionata = formCiclo.centri_lavoro_alternativi_ids?.includes(c.id)
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            const attuali = formCiclo.centri_lavoro_alternativi_ids || []
-                            const aggiornati = isSelezionata
-                              ? attuali.filter((id) => id !== c.id)
-                              : [...attuali, c.id]
-                            setFormCiclo({ ...formCiclo, centri_lavoro_alternativi_ids: aggiornati })
-                          }}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                            isSelezionata
-                              ? 'bg-blue-600 text-white shadow-sm'
-                              : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white hover:bg-slate-800'
-                          }`}
-                        >
-                          {isSelezionata && <CheckCircle2 className="w-3.5 h-3.5" />}
-                          <span>{c.codice}</span>
-                          <span className="text-[10px] opacity-80">({c.nome})</span>
-                        </button>
-                      )
-                    })}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Tempo Attrezzaggio (Minuti Setup)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    placeholder="es: 15 o 20"
-                    value={formCiclo.tempo_attrezzaggio_min}
-                    onChange={(e) =>
-                      setFormCiclo({
-                        ...formCiclo,
-                        tempo_attrezzaggio_min: e.target.value.replace(/[^0-9.,]/g, '')
-                      })
-                    }
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-slate-100 focus:outline-none focus:border-orange-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Tempo Ciclo Pezzo (Minuti/pz)
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    required
-                    placeholder="es: 5 o 1.5"
-                    value={formCiclo.tempo_ciclo_pezzo_min}
-                    onChange={(e) =>
-                      setFormCiclo({
-                        ...formCiclo,
-                        tempo_ciclo_pezzo_min: e.target.value.replace(/[^0-9.,]/g, '')
-                      })
-                    }
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-slate-100 focus:outline-none focus:border-orange-500"
-                  />
-                </div>
-              </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Tempo Ciclo Pezzo (Minuti/pz)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        required={!formCiclo.is_esterna}
+                        placeholder="es: 5 o 1.5"
+                        value={formCiclo.tempo_ciclo_pezzo_min}
+                        onChange={(e) =>
+                          setFormCiclo({
+                            ...formCiclo,
+                            tempo_ciclo_pezzo_min: e.target.value.replace(/[^0-9.,]/g, '')
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-slate-100 focus:outline-none focus:border-orange-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -1230,7 +1455,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                 />
               </div>
 
-              <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+              <div className="sticky -bottom-4 sm:-bottom-5 -mx-4 sm:-mx-5 p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-900/95 backdrop-blur-md">
                 <button
                   type="button"
                   onClick={() => setModaleCicloAperta(false)}

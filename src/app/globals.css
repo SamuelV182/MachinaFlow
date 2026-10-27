@@ -10,6 +10,15 @@ body {
   color: var(--foreground);
 }
 
+/* Nasconde la barra di scorrimento visiva mantenendo lo scorrimento attivo e fluido */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Stili specifici per la stampa pulita delle schede e dei documenti in officina */
 @media print {
   html,
