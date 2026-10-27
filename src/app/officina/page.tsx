@@ -3329,9 +3329,9 @@ export default function TerminaleOfficinaPage() {
         const articoloDettaglio = articoli.find((a) => a.id === odpDettaglio.articolo_id)
 
         return (
-          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="scheda-a4-container fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200 print:p-0 print:bg-white print:static">
             {/* Barra superiore Kiosk Blindata */}
-            <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800 mb-6 shrink-0">
+            <div className="no-print max-w-5xl w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800 mb-6 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-500/40 text-orange-400 flex items-center justify-center font-bold">
                   <QrCode className="w-5 h-5" />
@@ -3370,7 +3370,7 @@ export default function TerminaleOfficinaPage() {
             </div>
 
             {/* Foglio Scheda Lavoro A4 Blindato in sola lettura */}
-            <div className="max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
+            <div className="scheda-a4-foglio max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 print:p-0 print:border-none print:shadow-none print:rounded-none">
               {/* Intestazione A4 */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
                 <div>
@@ -3559,7 +3559,7 @@ export default function TerminaleOfficinaPage() {
               </div>
 
               {/* Pulsante Chiusura Footer A4 */}
-              <div className="pt-4 border-t border-slate-200 flex justify-end">
+              <div className="no-print pt-4 border-t border-slate-200 flex justify-end">
                 <button
                   type="button"
                   onClick={() => setSchedaA4OdpId(null)}
@@ -4304,9 +4304,9 @@ export default function TerminaleOfficinaPage() {
         const articoloDettaglio = articoli.find((a) => a.id === odpDettaglio.articolo_id)
 
         return (
-          <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+          <div className="scheda-a4-container fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col p-3 sm:p-6 overflow-y-auto animate-in fade-in duration-200 print:p-0 print:bg-white print:static">
             {/* Barra superiore Kiosk Blindata */}
-            <div className="max-w-5xl w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800 mb-6 shrink-0">
+            <div className="no-print max-w-5xl w-full mx-auto flex items-center justify-between pb-4 border-b border-slate-800 mb-6 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-500/40 text-orange-400 flex items-center justify-center font-bold">
                   <QrCode className="w-5 h-5" />
@@ -4345,7 +4345,7 @@ export default function TerminaleOfficinaPage() {
             </div>
 
             {/* Foglio Scheda Lavoro A4 Blindato in sola lettura */}
-            <div className="max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6">
+            <div className="scheda-a4-foglio max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 print:p-0 print:border-none print:shadow-none print:rounded-none">
               {/* Intestazione A4 */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
                 <div>
@@ -4534,7 +4534,7 @@ export default function TerminaleOfficinaPage() {
               </div>
 
               {/* Pulsante Chiusura Footer A4 */}
-              <div className="pt-4 border-t border-slate-200 flex justify-end">
+              <div className="no-print pt-4 border-t border-slate-200 flex justify-end">
                 <button
                   type="button"
                   onClick={() => setSchedaA4OdpId(null)}

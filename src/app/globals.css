@@ -19,38 +19,51 @@ body {
   scrollbar-width: none;
 }
 
-/* Stili specifici per la stampa pulita delle schede e dei documenti in officina */
+/* Stili specifici per la stampa pulita delle schede e dei documenti in officina (Esattamente 1 foglio A4) */
 @media print {
-  html,
-  body,
-  #__next,
-  div {
-    background-color: #ffffff !important;
-    background: #ffffff !important;
-    color: #000000 !important;
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
   }
-  
+
+  /* Nascondi la pagina sottostante e tutti gli elementi dell'interfaccia */
   header,
   aside,
+  nav,
   button,
   .no-print,
   .print\:hidden {
     display: none !important;
   }
-  
-  .print-only,
-  .print\:block {
-    display: block !important;
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11px !important;
   }
 
-  main {
+  /* Rendi visibili solo i fogli A4 dedicati */
+  .scheda-a4-container {
+    position: static !important;
+    background: transparent !important;
     padding: 0 !important;
     margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
     max-width: 100% !important;
-    background: #ffffff !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
-  .page-break {
-    page-break-after: always;
+  .scheda-a4-foglio {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 }

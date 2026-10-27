@@ -62,7 +62,7 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto print:p-0 print:bg-white print:static">
+    <div className="scheda-a4-container fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto print:p-0 print:bg-white print:static">
       <div className="max-w-4xl w-full my-auto space-y-4">
         {/* Barra Comandi (Non Stampata) */}
         <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xl">
@@ -114,7 +114,7 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
         </div>
 
         {/* FOGLIO A4 DDT RIGOROSO E CONFORME */}
-        <div className="bg-white text-slate-950 rounded-2xl p-8 sm:p-10 shadow-2xl border border-slate-200 text-xs space-y-6 print:border-none print:shadow-none print:p-0 print:rounded-none">
+        <div className="scheda-a4-foglio bg-white text-slate-950 rounded-2xl p-8 sm:p-10 shadow-2xl border border-slate-200 text-xs space-y-6 print:border-none print:shadow-none print:p-0 print:rounded-none">
           {/* Header Azienda & Documento */}
           <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-5 gap-4">
             <div>
