@@ -62,8 +62,8 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
   }
 
   return (
-    <div className="scheda-a4-container fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto print:p-0 print:bg-white print:static">
-      <div className="max-w-4xl w-full my-auto space-y-4">
+    <div className="scheda-a4-container fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto print:p-0 print:bg-white print:static print:z-auto print:overflow-visible">
+      <div className="max-w-4xl w-full my-auto space-y-4 print:max-w-full print:w-full print:m-0 print:p-0 print:space-y-0">
         {/* Barra Comandi (Non Stampata) */}
         <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xl">
           <div className="flex items-center gap-3">

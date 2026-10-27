@@ -26,19 +26,16 @@ body {
     margin: 8mm;
   }
 
-  /* Quando è presente un documento A4 stampabile (scheda-a4-container), 
-     nascondi completamente il resto del layout per evitare che la pagina sotto appaia come pagina 1 */
-  body:has(.scheda-a4-container) > * {
-    display: none !important;
-  }
-
-  body:has(.scheda-a4-container) {
+  html,
+  body {
     background: #ffffff !important;
-    padding: 0 !important;
-    margin: 0 !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
   }
 
-  /* Nascondi header, sidebar, nav, bottoni e qualsiasi controllo dell'interfaccia */
+  /* Nascondi header, sidebar, nav, bottoni e qualsiasi controllo con classe no-print o print:hidden */
   header,
   aside,
   nav,
@@ -48,26 +45,17 @@ body {
     display: none !important;
   }
 
-  /* Rendi visibile e a tutto schermo solo il contenitore del foglio A4 */
+  /* Rendi il contenitore A4 statico a flusso normale per il motore di stampa */
   .scheda-a4-container {
-    display: block !important;
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
+    position: static !important;
+    inset: auto !important;
     background: #ffffff !important;
     padding: 0 !important;
     margin: 0 !important;
-    z-index: 99999 !important;
-    page-break-before: avoid !important;
-    page-break-after: avoid !important;
-    page-break-inside: avoid !important;
-    break-before: avoid !important;
-    break-after: avoid !important;
-    break-inside: avoid !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    z-index: auto !important;
   }
 
   .scheda-a4-foglio {
@@ -77,11 +65,7 @@ body {
     margin: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
-    page-break-before: avoid !important;
-    page-break-after: avoid !important;
     page-break-inside: avoid !important;
-    break-before: avoid !important;
-    break-after: avoid !important;
     break-inside: avoid !important;
   }
 }

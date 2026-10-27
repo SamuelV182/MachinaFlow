@@ -3441,7 +3441,10 @@ export default function TerminaleOfficinaPage() {
                               <th className="py-2.5 px-3">Descrizione Tecnica</th>
                               <th className="py-2.5 px-3 text-center">Fabbisogno Unit.</th>
                               <th className="py-2.5 px-3 text-center">Fabbisogno Lotto ({odpDettaglio.quantita_da_produrre} pz)</th>
-                              <th className="py-2.5 px-3 text-center">Giacenza Stock</th>
+                              {/* A video mostriamo Giacenza Stock */}
+                              <th className="py-2.5 px-3 text-center print:hidden">Giacenza Stock</th>
+                              {/* In stampa A4 sostituiamo con Lotto / Colata per tracciabilità ISO */}
+                              <th className="py-2.5 px-3 text-center w-32 hidden print:table-cell">Lotto / Colata MP</th>
                               <th className="py-2.5 px-3">Note Taglio / Preparazione</th>
                             </tr>
                           </thead>
@@ -3465,7 +3468,8 @@ export default function TerminaleOfficinaPage() {
                                   <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-900">
                                     {fabbisognoTotale} {mat?.unita_misura}
                                   </td>
-                                  <td className="py-2.5 px-3 text-center">
+                                  {/* A video: Giacenza Stock */}
+                                  <td className="py-2.5 px-3 text-center print:hidden">
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
                                       haGiacenza
                                         ? 'bg-emerald-100 text-emerald-800'
@@ -3474,6 +3478,10 @@ export default function TerminaleOfficinaPage() {
                                       {mat?.giacenza_attuale ?? 0} {mat?.unita_misura}
                                       {!haGiacenza && ' ⚠️ SOTTO SCORTA'}
                                     </span>
+                                  </td>
+                                  {/* In stampa cartacea: Box tratteggiato per penna */}
+                                  <td className="py-2.5 px-3 text-center hidden print:table-cell">
+                                    <div className="w-24 h-5 border-b border-dashed border-slate-900 mx-auto" />
                                   </td>
                                   <td className="py-2.5 px-3 text-slate-500 italic text-[11px]">
                                     {comp.note || '-'}
@@ -4416,7 +4424,10 @@ export default function TerminaleOfficinaPage() {
                               <th className="py-2.5 px-3">Descrizione Tecnica</th>
                               <th className="py-2.5 px-3 text-center">Fabbisogno Unit.</th>
                               <th className="py-2.5 px-3 text-center">Fabbisogno Lotto ({odpDettaglio.quantita_da_produrre} pz)</th>
-                              <th className="py-2.5 px-3 text-center">Giacenza Stock</th>
+                              {/* A video mostriamo Giacenza Stock */}
+                              <th className="py-2.5 px-3 text-center print:hidden">Giacenza Stock</th>
+                              {/* In stampa A4 sostituiamo con Lotto / Colata per tracciabilità ISO */}
+                              <th className="py-2.5 px-3 text-center w-32 hidden print:table-cell">Lotto / Colata MP</th>
                               <th className="py-2.5 px-3">Note Taglio / Preparazione</th>
                             </tr>
                           </thead>
@@ -4440,7 +4451,8 @@ export default function TerminaleOfficinaPage() {
                                   <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-900">
                                     {fabbisognoTotale} {mat?.unita_misura}
                                   </td>
-                                  <td className="py-2.5 px-3 text-center">
+                                  {/* A video: Giacenza Stock */}
+                                  <td className="py-2.5 px-3 text-center print:hidden">
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
                                       haGiacenza
                                         ? 'bg-emerald-100 text-emerald-800'
@@ -4449,6 +4461,10 @@ export default function TerminaleOfficinaPage() {
                                       {mat?.giacenza_attuale ?? 0} {mat?.unita_misura}
                                       {!haGiacenza && ' ⚠️ SOTTO SCORTA'}
                                     </span>
+                                  </td>
+                                  {/* In stampa cartacea: Box tratteggiato per penna */}
+                                  <td className="py-2.5 px-3 text-center hidden print:table-cell">
+                                    <div className="w-24 h-5 border-b border-dashed border-slate-900 mx-auto" />
                                   </td>
                                   <td className="py-2.5 px-3 text-slate-500 italic text-[11px]">
                                     {comp.note || '-'}

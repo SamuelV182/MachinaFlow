@@ -607,7 +607,7 @@ export default function SpedizioniDdtPage() {
         /* =========================================================================
            TAB 2: ANAGRAFICA FORNITORI TERZISTI & PARTNER ESTERNI
            ========================================================================= */
-        <div className="space-y-4">
+        <div className="no-print space-y-4">
           <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="relative flex-1 max-w-md">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />

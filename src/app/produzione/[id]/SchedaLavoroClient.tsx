@@ -16,14 +16,18 @@ import {
   Layers,
   Wrench,
   Check,
-  Play
+  Play,
+  Boxes,
+  Truck
 } from 'lucide-react'
-import { OrdineProduzione, FaseOdP, Articolo, CentroLavoro } from '@/types/database'
-import { SEED_ODP, SEED_ARTICOLI, SEED_CENTRI_LAVORO } from '@/lib/data-service'
+import { OrdineProduzione, FaseOdP, Articolo, CentroLavoro, ComponenteDistintaBase } from '@/types/database'
+import { SEED_ODP, SEED_ARTICOLI, SEED_CENTRI_LAVORO, SEED_DISTINTA_BASE } from '@/lib/data-service'
 
 export function SchedaLavoroClient({ odpId }: { odpId: string }) {
   const [odp, setOdp] = useState<(OrdineProduzione & { fasi: FaseOdP[] }) | null>(null)
+  const [articoli, setArticoli] = useState<Articolo[]>([])
   const [articolo, setArticolo] = useState<Articolo | null>(null)
+  const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
 
@@ -43,6 +47,10 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
     setOdp(trovatoOdp || null)
 
     const articoliList = parseSicuro<Articolo[]>('machinaflow_articoli', SEED_ARTICOLI)
+    setArticoli(articoliList)
+
+    const distinteList = parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', SEED_DISTINTA_BASE)
+    setDistinte(distinteList)
     if (trovatoOdp) {
       const art = articoliList.find((a) => a.id === trovatoOdp.articolo_id)
       setArticolo(art || null)
@@ -165,7 +173,8 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
       {/* ========================================================================= */}
       {/* SCHEDA DI LAVORAZIONE (LAYOUT DEDICATO SIA A VIDEO CHE ALLA STAMPA A4)    */}
       {/* ========================================================================= */}
-      <div className="bg-white text-black p-8 sm:p-10 rounded-2xl shadow-2xl border border-slate-200 max-w-4xl mx-auto print:p-0 print:border-none print:shadow-none print:max-w-none">
+      <div className="scheda-a4-container bg-white text-black p-8 sm:p-10 rounded-2xl shadow-2xl border border-slate-200 max-w-4xl mx-auto print:p-0 print:border-none print:shadow-none print:max-w-none">
+        <div className="scheda-a4-foglio">
         {/* Header Scheda con Logo e QR Code */}
         <div className="flex items-start justify-between border-b-2 border-black pb-5">
           <div>
@@ -257,6 +266,86 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
             </p>
           )}
         </div>
+
+        {/* Materia Prima & Distinta Base (BOM) */}
+        {(() => {
+          const componenti = distinte.filter((d) => d.articolo_padre_id === odp.articolo_id)
+          return (
+            <div className="mt-4 border-b border-black pb-4">
+              <h2 className="text-xs font-black uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Boxes className="w-3.5 h-3.5 text-orange-600 print:text-black" />
+                Materia Prima di Partenza & Distinta Base (BOM)
+              </h2>
+              {componenti.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse border border-black">
+                    <thead>
+                      <tr className="bg-slate-100 print:bg-slate-200 border-b border-black font-black uppercase text-[10px]">
+                        <th className="p-2 border-r border-black">Codice Grezzo / Comp.</th>
+                        <th className="p-2 border-r border-black">Descrizione Tecnica</th>
+                        <th className="p-2 border-r border-black text-center w-24">Fabb. Unit.</th>
+                        <th className="p-2 border-r border-black text-center w-28">Fabb. Lotto ({odp.quantita_da_produrre} pz)</th>
+                        {/* A video mostriamo Giacenza Stock */}
+                        <th className="p-2 border-r border-black text-center w-28 print:hidden">Giacenza Stock</th>
+                        {/* In stampa A4 sostituiamo con Lotto / Colata per tracciabilità ISO */}
+                        <th className="p-2 border-r border-black text-center w-32 hidden print:table-cell">Lotto / Colata MP</th>
+                        <th className="p-2">Note Taglio / Preparazione</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black">
+                      {componenti.map((comp) => {
+                        const mat = articoli.find((a) => a.id === comp.articolo_componente_id)
+                        const fabbisognoTotale = comp.quantita_necessaria * odp.quantita_da_produrre
+                        const haGiacenza = (mat?.giacenza_attuale || 0) >= fabbisognoTotale
+
+                        return (
+                          <tr key={comp.id} className="border-b border-black text-[11px]">
+                            <td className="p-2 border-r border-black font-mono font-bold text-orange-600 print:text-black">
+                              {mat?.codice_articolo || 'N/D'}
+                            </td>
+                            <td className="p-2 border-r border-black font-medium">
+                              {mat?.descrizione || 'Materia Prima'}
+                            </td>
+                            <td className="p-2 border-r border-black text-center font-mono">
+                              {comp.quantita_necessaria} {mat?.unita_misura}
+                            </td>
+                            <td className="p-2 border-r border-black text-center font-mono font-bold">
+                              {fabbisognoTotale} {mat?.unita_misura}
+                            </td>
+                            {/* A video: Giacenza Stock */}
+                            <td className="p-2 border-r border-black text-center font-mono font-semibold print:hidden">
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                  haGiacenza
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-rose-100 text-rose-800 font-bold'
+                                }`}
+                              >
+                                {mat?.giacenza_attuale ?? 0} {mat?.unita_misura}
+                                {!haGiacenza && ' ⚠️ SOTTO SCORTA'}
+                              </span>
+                            </td>
+                            {/* In stampa cartacea: Box vuoto per compilazione penna lotto/colata */}
+                            <td className="p-2 border-r border-black text-center hidden print:table-cell">
+                              <div className="w-24 h-5 border-b border-dashed border-black mx-auto" />
+                            </td>
+                            <td className="p-2 text-slate-600 print:text-black italic text-[10px]">
+                              {comp.note || '-'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-2 bg-slate-50 border border-slate-200 text-xs text-slate-500 italic rounded">
+                  Nessun componente o materia prima associata in distinta base.
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* TABELLA SEQUENZA DELLE FASI DI LAVORAZIONE */}
         <div className="mt-6">
@@ -403,6 +492,7 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
               Stampato dal sistema MachinaFlow • {new Date().toLocaleDateString('it-IT')}
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
