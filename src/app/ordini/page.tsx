@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
   ShoppingCart,
@@ -20,7 +20,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Building,
+  Edit2,
+  Trash2,
+  Phone,
+  Mail,
+  MapPin
 } from 'lucide-react'
 import {
   Cliente,
@@ -57,6 +63,20 @@ export default function OrdiniPage() {
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
+
+  const [tabAttivo, setTabAttivo] = useState<'ordini' | 'clienti'>('ordini')
+
+  // Stato Anagrafica Clienti
+  const [ricercaClienti, setRicercaClienti] = useState('')
+  const [modaleClienteAperta, setModaleClienteAperta] = useState(false)
+  const [clienteInModifica, setClienteInModifica] = useState<Cliente | null>(null)
+  const [formCliente, setFormCliente] = useState<Omit<Cliente, 'id' | 'creato_il'>>({
+    ragione_sociale: '',
+    partita_iva: '',
+    email: '',
+    telefono: '',
+    indirizzo: ''
+  })
 
   // Simulatore CTP Data Consegna
   const [dettaglioSimulazione, setDettaglioSimulazione] = useState<{
@@ -676,6 +696,88 @@ export default function OrdiniPage() {
     setTimeout(() => setNotifica(null), 5000)
   }
 
+  // GESTIONE ANAGRAFICA CLIENTI
+  const handleApriNuovoCliente = () => {
+    setClienteInModifica(null)
+    setFormCliente({
+      ragione_sociale: '',
+      partita_iva: '',
+      email: '',
+      telefono: '',
+      indirizzo: ''
+    })
+    setModaleClienteAperta(true)
+  }
+
+  const handleApriModificaCliente = (c: Cliente) => {
+    setClienteInModifica(c)
+    setFormCliente({
+      ragione_sociale: c.ragione_sociale,
+      partita_iva: c.partita_iva || '',
+      email: c.email || '',
+      telefono: c.telefono || '',
+      indirizzo: c.indirizzo || ''
+    })
+    setModaleClienteAperta(true)
+  }
+
+  const handleSalvaCliente = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formCliente.ragione_sociale.trim()) return
+
+    let aggiornati: Cliente[]
+    if (clienteInModifica) {
+      aggiornati = clienti.map((c) =>
+        c.id === clienteInModifica.id
+          ? { ...c, ...formCliente, ragione_sociale: formCliente.ragione_sociale.trim() }
+          : c
+      )
+      setNotifica(`✓ Cliente "${formCliente.ragione_sociale}" aggiornato con successo!`)
+    } else {
+      const nuovoCliente: Cliente = {
+        id: `cli-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        ...formCliente,
+        ragione_sociale: formCliente.ragione_sociale.trim(),
+        creato_il: new Date().toISOString()
+      }
+      aggiornati = [nuovoCliente, ...clienti]
+      setNotifica(`✓ Nuovo cliente "${nuovoCliente.ragione_sociale}" inserito con successo!`)
+    }
+
+    setClienti(aggiornati)
+    localStorage.setItem('machinaflow_clienti', JSON.stringify(aggiornati))
+    setModaleClienteAperta(false)
+    setClienteInModifica(null)
+    setTimeout(() => setNotifica(null), 4000)
+  }
+
+  const handleEliminaCliente = (id: string, ragioneSociale: string) => {
+    const haOrdini = ordini.some((o) => o.cliente_id === id)
+    if (haOrdini) {
+      alert(`Impossibile eliminare "${ragioneSociale}": sono presenti commesse o ordini cliente associati a questo cliente.`)
+      return
+    }
+    if (!confirm(`Sei sicuro di voler eliminare il cliente "${ragioneSociale}"?`)) return
+
+    const filtrati = clienti.filter((c) => c.id !== id)
+    setClienti(filtrati)
+    localStorage.setItem('machinaflow_clienti', JSON.stringify(filtrati))
+    setNotifica(`Cliente "${ragioneSociale}" rimosso dall'anagrafica.`)
+    setTimeout(() => setNotifica(null), 3000)
+  }
+
+  const clientiFiltrati = useMemo(() => {
+    if (!ricercaClienti.trim()) return clienti
+    const q = ricercaClienti.toLowerCase()
+    return clienti.filter(
+      (c) =>
+        c.ragione_sociale.toLowerCase().includes(q) ||
+        (c.partita_iva && c.partita_iva.toLowerCase().includes(q)) ||
+        (c.email && c.email.toLowerCase().includes(q)) ||
+        (c.indirizzo && c.indirizzo.toLowerCase().includes(q))
+    )
+  }, [clienti, ricercaClienti])
+
   // Reset pagina al cambio filtro o ricerca
   useEffect(() => {
     setPaginaCards(1)
@@ -759,7 +861,38 @@ export default function OrdiniPage() {
         </div>
       )}
 
-      {/* Barra Azioni Batch Selezione Flottante */}
+      {/* Barra di Navigazione Tab */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+        <button
+          type="button"
+          onClick={() => setTabAttivo('ordini')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            tabAttivo === 'ordini'
+              ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          <span>Commesse & Ordini Clienti ({ordini.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setTabAttivo('clienti')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            tabAttivo === 'clienti'
+              ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <Building className="w-4 h-4" />
+          <span>Anagrafica Clienti ({clienti.length})</span>
+        </button>
+      </div>
+
+      {tabAttivo === 'ordini' ? (
+        <>
+          {/* Barra Azioni Batch Selezione Flottante */}
       {righeSelezionate.length > 0 && (
         <div className="p-4 rounded-2xl bg-gradient-to-r from-orange-950/90 via-slate-900 to-slate-950 border-2 border-orange-500/60 shadow-2xl shadow-orange-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-3">
           <div className="flex items-center gap-3">
@@ -1355,6 +1488,241 @@ export default function OrdiniPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+        </>
+      ) : (
+        /* =========================================================================
+           TAB 2: ANAGRAFICA CLIENTI
+           ========================================================================= */
+        <div className="space-y-4">
+          <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Cerca cliente per ragione sociale, P.IVA, email o città..."
+                value={ricercaClienti}
+                onChange={(e) => setRicercaClienti(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-orange-500"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleApriNuovoCliente}
+              className="px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-black uppercase tracking-wide shadow-lg shadow-orange-600/30 transition-all cursor-pointer active:scale-95 flex items-center gap-2 self-start sm:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nuovo Cliente</span>
+            </button>
+          </div>
+
+          {/* Griglia Schede Clienti */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {clientiFiltrati.map((c: Cliente) => {
+              const commesseCliente = ordini.filter((o) => o.cliente_id === c.id)
+              const attive = commesseCliente.filter((o) => o.stato === 'in_produzione' || o.stato === 'confermato').length
+
+              return (
+                <div
+                  key={c.id}
+                  className="p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-orange-500/50 transition-all shadow-xl space-y-3 flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-orange-600/20 text-orange-400 flex items-center justify-center font-bold">
+                          <Building className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm text-white leading-tight">
+                            {c.ragione_sociale}
+                          </h3>
+                          {c.partita_iva && (
+                            <span className="font-mono text-[10px] text-slate-400 block">
+                              P.IVA: {c.partita_iva}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {attive > 0 ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
+                          {attive} in corso
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          {commesseCliente.length} commesse
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5 mt-3 pt-3 border-t border-slate-800/80 text-xs text-slate-300">
+                      {c.indirizzo && (
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+                          <span>{c.indirizzo}</span>
+                        </div>
+                      )}
+                      {c.telefono && (
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <Phone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                          <span>{c.telefono}</span>
+                        </div>
+                      )}
+                      {c.email && (
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                          <span className="truncate">{c.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => handleApriModificaCliente(c)}
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                      title="Modifica anagrafica cliente"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Modifica</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEliminaCliente(c.id, c.ragione_sociale)}
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 text-xs cursor-pointer transition-colors"
+                      title="Elimina cliente"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
+            {clientiFiltrati.length === 0 && (
+              <div className="col-span-full py-12 text-center text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800">
+                Nessun cliente trovato con i criteri di ricerca.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODALE INSERIMENTO / MODIFICA CLIENTE */}
+      {modaleClienteAperta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border-2 border-orange-500/50 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-orange-950/20">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-orange-600/20 text-orange-400">
+                  <Building className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-white">
+                    {clienteInModifica ? 'Modifica Cliente' : 'Nuovo Cliente'}
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Anagrafica cliente per emissione commesse e fatturazione
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModaleClienteAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvaCliente} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto no-scrollbar text-xs">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Ragione Sociale Cliente *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="es: Brembo S.p.A."
+                  value={formCliente.ragione_sociale}
+                  onChange={(e) => setFormCliente({ ...formCliente, ragione_sociale: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-white font-bold focus:outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Partita IVA / Codice Fiscale
+                </label>
+                <input
+                  type="text"
+                  placeholder="IT01234567890"
+                  value={formCliente.partita_iva}
+                  onChange={(e) => setFormCliente({ ...formCliente, partita_iva: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 font-mono focus:outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Indirizzo Sede Legale / Stabilimento
+                </label>
+                <input
+                  type="text"
+                  placeholder="Via delle Industrie 10, 24040 Stezzano (BG)"
+                  value={formCliente.indirizzo}
+                  onChange={(e) => setFormCliente({ ...formCliente, indirizzo: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Telefono / Ufficio Acquisti
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="+39 035 ..."
+                    value={formCliente.telefono}
+                    onChange={(e) => setFormCliente({ ...formCliente, telefono: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Email Invio Conferme / Ordini
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="ordini@cliente.it"
+                    value={formCliente.email}
+                    onChange={(e) => setFormCliente({ ...formCliente, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setModaleClienteAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs uppercase shadow-md shadow-orange-600/30 transition-all cursor-pointer active:scale-95"
+                >
+                  {clienteInModifica ? 'Salva Modifiche' : 'Registra Cliente'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

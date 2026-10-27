@@ -19,7 +19,8 @@ import {
   PanelLeft,
   Building2,
   ShieldCheck,
-  Eye
+  Eye,
+  Truck
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -67,6 +68,12 @@ const menuOfficinaItems = [
     href: '/officina',
     icon: QrCode,
     badge: 'Touch'
+  },
+  {
+    name: 'Spedizioni & DDT Esterni',
+    href: '/spedizioni',
+    icon: Truck,
+    badge: 'DDT'
   },
   {
     name: 'Manuale Utente',

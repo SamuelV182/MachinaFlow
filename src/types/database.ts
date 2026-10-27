@@ -63,6 +63,20 @@ export interface TipoProcesso {
   creato_il: string
 }
 
+export interface FornitoreTerzista {
+  id: string
+  ragione_sociale: string
+  partita_iva?: string
+  codice_fiscale?: string
+  indirizzo?: string
+  citta?: string
+  cap?: string
+  provincia?: string
+  telefono?: string
+  email?: string
+  specialita?: string // es. 'Zincatura', 'Trattamenti Termici', 'Anodizzazione', 'Verniciatura', 'Brunitura'
+}
+
 export type ModelloTariffaEsterna = 'peso_kg' | 'superficie_dm2' | 'superficie_m2' | 'pezzo_fisso' | 'lotto_forfettario'
 
 export interface Articolo {
@@ -203,7 +217,47 @@ export interface FaseOdP {
   data_uscita_terzista?: string
   data_rientro_terzista?: string
   ddt_rientro_numero?: string
+  numero_colli?: number
+  peso_totale_kg?: number
+  vettore_trasporto?: string
+  causale_trasporto?: string
   centro_lavoro?: CentroLavoro
   tipo_processo?: TipoProcesso
   operatore?: ProfiloUtente
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENTO DI TRASPORTO (DDT) ESTERNO & INTERSCAMBIO GESTIONALI CONTABILI
+// ---------------------------------------------------------------------------
+export interface RigaDDTContoTerzi {
+  id: string
+  odp_id: string
+  codice_odp: string
+  articolo_codice: string
+  articolo_descrizione: string
+  fase_sequenza: number
+  nome_fase: string
+  quantita_spedita: number
+  unita_misura: string
+  peso_kg_riga?: number
+  note_lavorazione?: string
+}
+
+export interface DocumentoTrasportoEsterno {
+  id: string
+  numero_ddt: string
+  data_emissione: string
+  fornitore_nome: string
+  fornitore_indirizzo?: string
+  fornitore_piva?: string
+  causale_trasporto: string // es: 'Invio per Conto Lavorazione'
+  porto: 'Franco' | 'Assegnato'
+  aspetto_beni: string // es: 'A vista su pallet', 'In casse metalliche'
+  numero_colli: number
+  peso_totale_kg: number
+  vettore_nome: string // es: 'Mittente (Mezzo proprio)', 'Vettore / Corriere', 'Destinatario'
+  note_trasporto?: string
+  stato: 'spedito' | 'rientrato_parziale' | 'rientrato_totale'
+  righe: RigaDDTContoTerzi[]
+  creato_il: string
 }

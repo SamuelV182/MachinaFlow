@@ -8,8 +8,73 @@ import {
   OrdineCliente,
   RigaOrdineCliente,
   OrdineProduzione,
-  FaseOdP
+  FaseOdP,
+  FornitoreTerzista
 } from '@/types/database'
+
+// 0. Anagrafica Fornitori Terzisti Specializzati
+export const SEED_FORNITORI_TERZISTI: FornitoreTerzista[] = [
+  {
+    id: 'forn-zincatura-veneta',
+    ragione_sociale: 'Zincatura Veneta Srl',
+    partita_iva: 'IT02891230245',
+    indirizzo: 'Via dell\'Artigianato, 14',
+    citta: 'Vicenza',
+    cap: '36100',
+    provincia: 'VI',
+    telefono: '+39 0444 892110',
+    email: 'logistica@zincaturaveneta.it',
+    specialita: 'Zincatura Bianca, Gialla e Trivalente'
+  },
+  {
+    id: 'forn-trattamenti-friulani',
+    ragione_sociale: 'Trattamenti Termici Friulani Srl',
+    partita_iva: 'IT01984210309',
+    indirizzo: 'Via Maniago, 8',
+    citta: 'Udine',
+    cap: '33100',
+    provincia: 'UD',
+    telefono: '+39 0432 543990',
+    email: 'ordini@ttfriulani.it',
+    specialita: 'Tempra ad Induzione, Bonifica e Cementazione'
+  },
+  {
+    id: 'forn-ossidazione-modenese',
+    ragione_sociale: 'Ossidazione Anodica Modenese Srl',
+    partita_iva: 'IT03348120361',
+    indirizzo: 'Via Galileo Galilei, 22',
+    citta: 'Modena',
+    cap: '41126',
+    provincia: 'MO',
+    telefono: '+39 059 781204',
+    email: 'qualita@ossidazionemodenese.it',
+    specialita: 'Anodizzazione Dura, Naturale e Colorata'
+  },
+  {
+    id: 'forn-verniciatura-nordest',
+    ragione_sociale: 'Verniciatura Industriale Nord-Est Spa',
+    partita_iva: 'IT01827490288',
+    indirizzo: 'Viale delle Industrie, 55',
+    citta: 'Padova',
+    cap: '35129',
+    provincia: 'PD',
+    telefono: '+39 049 809211',
+    email: 'spedizioni@verniciaturanordest.it',
+    specialita: 'Verniciatura a Polvere Epossidica e Sabbiatura'
+  },
+  {
+    id: 'forn-trattamenti-bruniti',
+    ragione_sociale: 'Trattamenti Termici & Bruniti Srl',
+    partita_iva: 'IT02148900234',
+    indirizzo: 'Via dell\'Acciaio, 3',
+    citta: 'Verona',
+    cap: '37135',
+    provincia: 'VR',
+    telefono: '+39 045 612800',
+    email: 'info@trattamentibruniti.it',
+    specialita: 'Brunitura Chimica a Caldo & Fosfatazione'
+  }
+]
 
 // 1. Centri di Lavoro Reali Officina Meccanica di Precisione (10 Macchine)
 export const SEED_CENTRI_LAVORO: CentroLavoro[] = [

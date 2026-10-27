@@ -44,8 +44,12 @@ import {
   OrdineProduzione,
   FaseOdP,
   Articolo,
-  ComponenteDistintaBase
+  ComponenteDistintaBase,
+  DocumentoTrasportoEsterno,
+  FornitoreTerzista
 } from '@/types/database'
+import { SEED_FORNITORI_TERZISTI } from '@/lib/data-service'
+import SchedaDDTStampabile from '@/components/SchedaDDTStampabile'
 import {
   SEED_CENTRI_LAVORO,
   SEED_ODP,
@@ -113,14 +117,42 @@ export default function TerminaleOfficinaPage() {
     nomeMateriaPrimaLimite?: string
   } | null>(null)
 
-  // Gestione Lavorazioni Esterne Conto Terzi
+  // Gestione Lavorazioni Esterne Conto Terzi & DDT Completo
   const [modaleEsternaAperta, setModaleEsternaAperta] = useState(false)
+  const [ddtStampabileCorrente, setDdtStampabileCorrente] = useState<DocumentoTrasportoEsterno | null>(null)
+  
+  // Anagrafica Fornitori Terzisti e Filtro Rapido
+  const [fornitoriTerzisti, setFornitoriTerzisti] = useState<FornitoreTerzista[]>(SEED_FORNITORI_TERZISTI)
+  const [filtroTerzistaSelezionato, setFiltroTerzistaSelezionato] = useState<string>('tutti')
+
+  // Selezione Massiva OdP per Spedizione Cumulativa (Unico DDT per più ordini)
+  const [fasiEsterneSelezionateIds, setFasiEsterneSelezionateIds] = useState<string[]>([])
+  const [modaleSpedizioneCumulativaAperta, setModaleSpedizioneCumulativaAperta] = useState(false)
+  const [formCumulativo, setFormCumulativo] = useState({
+    ddtNumero: '',
+    fornitoreNome: '',
+    fornitoreId: '',
+    fornitoreIndirizzo: '',
+    fornitorePiva: '',
+    numeroColli: 1,
+    pesoTotaleKg: 0,
+    vettoreNome: 'Mittente (Mezzo Proprio)',
+    aspettoBeni: 'A vista su bancale',
+    causaleTrasporto: 'Invio per Conto Lavorazione',
+    note: ''
+  })
+
   const [datiEsterna, setDatiEsterna] = useState<{
     odp: OrdineProduzione & { fasi: FaseOdP[] }
     fase: FaseOdP
     tipoAzione: 'spedizione' | 'rientro'
     ddtNumero: string
     note: string
+    numeroColli: number
+    pesoTotaleKg: number
+    vettoreNome: string
+    aspettoBeni: string
+    causaleTrasporto: string
   } | null>(null)
 
   useEffect(() => {
@@ -144,6 +176,17 @@ export default function TerminaleOfficinaPage() {
 
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
       setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
+
+      // Carica anagrafica terzisti aggiornata dall'ufficio
+      const terzistiSalvati = parseSicuro<FornitoreTerzista[]>('machinaflow_fornitori_terzisti', [])
+      if (terzistiSalvati.length > 0) {
+        const mappaTerz = new Map<string, FornitoreTerzista>()
+        SEED_FORNITORI_TERZISTI.forEach((t) => mappaTerz.set(t.id, t))
+        terzistiSalvati.forEach((t) => mappaTerz.set(t.id, t))
+        setFornitoriTerzisti(Array.from(mappaTerz.values()))
+      } else {
+        setFornitoriTerzisti(SEED_FORNITORI_TERZISTI)
+      }
 
       // Carica OdP sincronizzati dal Cloud Supabase (ottimizzato per tablet: solo ordini attivi)
       const odpSincronizzati = await syncService.getOrdiniProduzione({ soloAttivi: true })
@@ -691,11 +734,158 @@ export default function TerminaleOfficinaPage() {
     setDatiEsterna(null)
 
     if (tipoAzione === 'spedizione') {
-      setNotifica(`📦 Lavorazione inviata al terzista ${fase.fornitore_nome || ''}! (DDT: ${ddtNumero || 'N/D'})`)
+      // Salva nei DDT registrati per interscambio ed eventuale stampa immediata
+      const art = articoli.find((a) => a.id === odp.articolo_id)
+      const terzistaAnag = fornitoriTerzisti.find((t) => t.ragione_sociale.toLowerCase() === (fase.fornitore_nome || '').toLowerCase())
+      const nuovoDdtDoc: DocumentoTrasportoEsterno = {
+        id: `ddt-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+        numero_ddt: ddtNumero.trim(),
+        data_emissione: oggiIso,
+        fornitore_nome: fase.fornitore_nome || 'Terzista Esterno',
+        fornitore_indirizzo: terzistaAnag ? `${terzistaAnag.indirizzo}, ${terzistaAnag.cap || ''} ${terzistaAnag.citta || ''} (${terzistaAnag.provincia || ''})` : 'Zona Industriale - Reparto Trattamenti',
+        fornitore_piva: terzistaAnag?.partita_iva || 'IT02984100362',
+        causale_trasporto: datiEsterna.causaleTrasporto || 'Invio per Conto Lavorazione',
+        porto: 'Franco',
+        aspetto_beni: datiEsterna.aspettoBeni || 'A vista su bancale',
+        numero_colli: datiEsterna.numeroColli || 1,
+        peso_totale_kg: datiEsterna.pesoTotaleKg || 0,
+        vettore_nome: datiEsterna.vettoreNome || 'Mittente (Mezzo Proprio)',
+        note_trasporto: note.trim() || undefined,
+        stato: 'spedito',
+        righe: [
+          {
+            id: `riga-ddt-${Date.now()}`,
+            odp_id: odp.id,
+            codice_odp: odp.codice_odp,
+            articolo_codice: art?.codice_articolo || 'PART-01',
+            articolo_descrizione: art?.descrizione || 'Particolare Meccanico',
+            fase_sequenza: fase.sequenza,
+            nome_fase: fase.nome_fase,
+            quantita_spedita: odp.quantita_da_produrre,
+            unita_misura: art?.unita_misura || 'pz',
+            peso_kg_riga: datiEsterna.pesoTotaleKg,
+            note_lavorazione: note.trim() || undefined
+          }
+        ],
+        creato_il: oggiIso
+      }
+
+      try {
+        const ddtSalvati = JSON.parse(localStorage.getItem('machinaflow_ddt_esterni') || '[]')
+        localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify([nuovoDdtDoc, ...ddtSalvati]))
+      } catch {}
+
+      // Apri automaticamente l'anteprima di stampa del DDT A4 per consentire la stampa immediata all'operatore
+      setDdtStampabileCorrente(nuovoDdtDoc)
+      setNotifica(`📦 Lavorazione inviata al terzista ${fase.fornitore_nome || ''}! (DDT: ${ddtNumero || 'N/D'}) - Aperta Scheda DDT A4`)
     } else {
       setNotifica(`✓ Pezzi rientrati con successo dal terzista! Sbloccata la fase successiva.`)
     }
-    setTimeout(() => setNotifica(null), 5000)
+    setTimeout(() => setNotifica(null), 6000)
+  }
+
+  // Conferma Spedizione CUMULATIVA di Più OdP con UNICO DDT
+  const handleConfermaSpedizioneCumulativa = async () => {
+    if (fasiEsterneSelezionateIds.length === 0) return
+    const oggiIso = new Date().toISOString()
+    const numeroDdtFinale = formCumulativo.ddtNumero.trim() || `DDT-CUM-${Date.now().toString().slice(-4)}`
+
+    // Recupera tutti gli item selezionati
+    const itemsSelezionati = fasiInOfficina.filter((it) => fasiEsterneSelezionateIds.includes(it.fase.id))
+    if (itemsSelezionati.length === 0) return
+
+    const righeDdt: import('@/types/database').RigaDDTContoTerzi[] = []
+
+    // Aggiorna gli OdP coinvolti
+    const aggiornati = odpList.map((odp) => {
+      const fasiCoinvolte = itemsSelezionati.filter((it) => it.odp.id === odp.id).map((it) => it.fase.id)
+      if (fasiCoinvolte.length === 0) return odp
+
+      const nuoveFasi = odp.fasi.map((f) => {
+        if (fasiCoinvolte.includes(f.id)) {
+          const art = articoli.find((a) => a.id === odp.articolo_id)
+          righeDdt.push({
+            id: `riga-ddt-${Date.now()}-${f.id}`,
+            odp_id: odp.id,
+            codice_odp: odp.codice_odp,
+            articolo_codice: art?.codice_articolo || 'PART-01',
+            articolo_descrizione: art?.descrizione || 'Particolare Meccanico',
+            fase_sequenza: f.sequenza,
+            nome_fase: f.nome_fase,
+            quantita_spedita: odp.quantita_da_produrre,
+            unita_misura: art?.unita_misura || 'pz',
+            peso_kg_riga: Number(((art?.peso_kg_unitario || 2.5) * odp.quantita_da_produrre).toFixed(1)),
+            note_lavorazione: formCumulativo.note.trim() || undefined
+          })
+
+          return {
+            ...f,
+            stato: 'in_corso' as const,
+            stato_esterna: 'inviato_al_terzista' as const,
+            data_uscita_terzista: oggiIso,
+            ddt_uscita_numero: numeroDdtFinale,
+            note_officina: formCumulativo.note.trim()
+              ? `${f.note_officina ? f.note_officina + ' | ' : ''}Spedito cumulativo con DDT ${numeroDdtFinale}: ${formCumulativo.note.trim()}`
+              : f.note_officina
+          }
+        }
+        return f
+      })
+
+      const almenoUnaAvviata = nuoveFasi.some((f) => f.stato === 'in_corso')
+      return {
+        ...odp,
+        fasi: nuoveFasi,
+        stato: almenoUnaAvviata ? ('in_lavorazione' as const) : odp.stato
+      }
+    })
+
+    setOdpList(aggiornati)
+    localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    // Salva su Supabase Cloud per ogni OdP aggiornato
+    for (const it of itemsSelezionati) {
+      const odpMod = aggiornati.find((o) => o.id === it.odp.id)
+      const faseMod = odpMod?.fasi.find((f) => f.id === it.fase.id)
+      if (faseMod) await syncService.aggiornaFaseOdP(faseMod)
+      if (odpMod) await syncService.aggiornaStatoOdP(odpMod.id, odpMod.stato, odpMod.quantita_prodotta)
+    }
+
+    // Salva il documento DDT cumulativo in archivio per l'ufficio e la stampa
+    const fornitoreRif = formCumulativo.fornitoreNome || itemsSelezionati[0].fase.fornitore_nome || 'Terzista Esterno'
+    const terzistaAnag = fornitoriTerzisti.find((t) => t.ragione_sociale.toLowerCase() === fornitoreRif.toLowerCase())
+    const indirizzoRif = formCumulativo.fornitoreIndirizzo || (terzistaAnag ? `${terzistaAnag.indirizzo}, ${terzistaAnag.cap || ''} ${terzistaAnag.citta || ''} (${terzistaAnag.provincia || ''})` : 'Zona Industriale - Reparto Trattamenti')
+    const pivaRif = formCumulativo.fornitorePiva || terzistaAnag?.partita_iva || 'IT02984100362'
+
+    const nuovoDdtCumulativo: DocumentoTrasportoEsterno = {
+      id: `ddt-cum-${Date.now()}`,
+      numero_ddt: numeroDdtFinale,
+      data_emissione: oggiIso,
+      fornitore_nome: fornitoreRif,
+      fornitore_indirizzo: indirizzoRif,
+      fornitore_piva: pivaRif,
+      causale_trasporto: formCumulativo.causaleTrasporto,
+      porto: 'Franco',
+      aspetto_beni: formCumulativo.aspettoBeni,
+      numero_colli: formCumulativo.numeroColli,
+      peso_totale_kg: formCumulativo.pesoTotaleKg,
+      vettore_nome: formCumulativo.vettoreNome,
+      note_trasporto: formCumulativo.note.trim() || undefined,
+      stato: 'spedito',
+      righe: righeDdt,
+      creato_il: oggiIso
+    }
+
+    try {
+      const ddtSalvati = JSON.parse(localStorage.getItem('machinaflow_ddt_esterni') || '[]')
+      localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify([nuovoDdtCumulativo, ...ddtSalvati]))
+    } catch {}
+
+    setFasiEsterneSelezionateIds([])
+    setModaleSpedizioneCumulativaAperta(false)
+    setDdtStampabileCorrente(nuovoDdtCumulativo)
+    setNotifica(`✓ Spedizione CUMULATIVA completata per ${itemsSelezionati.length} ordini con DDT ${numeroDdtFinale}! Aperta Scheda A4.`)
+    setTimeout(() => setNotifica(null), 6000)
   }
 
   // Salvataggio nota operatore
@@ -915,12 +1105,18 @@ export default function TerminaleOfficinaPage() {
     }
   }
 
-  // Filtra per macchina selezionata e ricerca QR/testo
+  // Filtra per macchina selezionata, terzista e ricerca QR/testo
   const fasiFiltrateRaw = useMemo(() => {
     return fasiInOfficina.filter((item) => {
       const isPrincipale = item.fase.centro_lavoro_id === macchinaSelezionataId
       const isAlternativa = item.fase.centri_lavoro_alternativi_ids?.includes(macchinaSelezionataId)
       const matchMacchina = macchinaSelezionataId === 'tutte' || isPrincipale || isAlternativa
+
+      // Filtro per specifico Fornitore Terzista su EXT-TERZISTI
+      const matchTerzista =
+        macchinaSelezionataId !== 'mc-esterna-01' ||
+        filtroTerzistaSelezionato === 'tutti' ||
+        (item.fase.fornitore_nome || '').toLowerCase() === filtroTerzistaSelezionato.toLowerCase()
 
       const matchRicerca =
         !ricercaQr.trim() ||
@@ -928,9 +1124,9 @@ export default function TerminaleOfficinaPage() {
         item.odp.qr_code_token.toLowerCase().includes(ricercaQr.toLowerCase()) ||
         (item.articolo && item.articolo.codice_articolo.toLowerCase().includes(ricercaQr.toLowerCase()))
 
-      return matchMacchina && matchRicerca
+      return matchMacchina && matchTerzista && matchRicerca
     })
-  }, [fasiInOfficina, macchinaSelezionataId, ricercaQr])
+  }, [fasiInOfficina, macchinaSelezionataId, filtroTerzistaSelezionato, ricercaQr])
 
   // Coda Ordinata Tassativamente secondo logica MES Industriale:
   // 1. Ordini IN CORSO (hanno la massima priorità sulla macchina attuale)
@@ -1451,6 +1647,30 @@ export default function TerminaleOfficinaPage() {
 
         {/* Controlli Vista e Opzioni */}
         <div className="flex flex-wrap items-center gap-2 self-start md:self-end">
+          {/* Selezionatore Fornitore Terzista su EXT-TERZISTI */}
+          {macchinaSelezionataId === 'mc-esterna-01' && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-pink-950/40 border border-pink-500/40 text-xs">
+              <Truck className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+              <label htmlFor="filtro-terzista" className="text-pink-300 font-bold hidden sm:inline">Terzista:</label>
+              <select
+                id="filtro-terzista"
+                value={filtroTerzistaSelezionato}
+                onChange={(e) => setFiltroTerzistaSelezionato(e.target.value)}
+                className="bg-slate-900 border border-pink-500/30 rounded-lg text-slate-100 px-2 py-1 text-xs font-semibold focus:outline-none focus:border-pink-500 cursor-pointer"
+              >
+                <option value="tutti">Tutti i Terzisti ({fasiInOfficina.filter(f => f.fase.centro_lavoro_id === 'mc-esterna-01' && f.fase.stato !== 'completata').length})</option>
+                {Array.from(new Set(fasiInOfficina.filter(f => f.fase.centro_lavoro_id === 'mc-esterna-01').map(f => f.fase.fornitore_nome).filter(Boolean))).map((forn) => {
+                  const qta = fasiInOfficina.filter(f => f.fase.centro_lavoro_id === 'mc-esterna-01' && f.fase.fornitore_nome === forn && f.fase.stato !== 'completata').length
+                  return (
+                    <option key={forn} value={forn}>
+                      {forn} ({qta})
+                    </option>
+                  )
+                })}
+              </select>
+            </div>
+          )}
+
           {/* Toggle Mostra/Nascondi Ordini Completati */}
           <button
             type="button"
@@ -1495,6 +1715,67 @@ export default function TerminaleOfficinaPage() {
           </div>
         </div>
       </div>
+
+      {/* BARRA AZIONI BATCH SPEDIZIONE CUMULATIVA CONTO TERZI (MULTI-ODP) */}
+      {fasiEsterneSelezionateIds.length > 0 && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-pink-950/90 via-slate-900 to-slate-950 border-2 border-pink-500/70 shadow-2xl shadow-pink-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-3">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-xl bg-pink-600 text-white font-black flex items-center justify-center text-sm shadow-md shadow-pink-600/40">
+              {fasiEsterneSelezionateIds.length}
+            </span>
+            <div>
+              <p className="text-sm font-bold text-white flex items-center gap-2">
+                <Truck className="w-4 h-4 text-pink-400" />
+                Spedizione Cumulativa Conto Terzi ({fasiEsterneSelezionateIds.length} OdP selezionati)
+              </p>
+              <p className="text-xs text-slate-400">
+                Puoi raggruppare tutti questi particolari in un <strong>UNICO DDT di trasporto</strong> verso lo stesso fornitore.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setFasiEsterneSelezionateIds([])}
+              className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              Deseleziona tutti
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const itemsSelezionati = fasiInOfficina.filter((it) => fasiEsterneSelezionateIds.includes(it.fase.id))
+                const fornitorePrimo = itemsSelezionati[0]?.fase.fornitore_nome || 'Terzista Esterno'
+                const terzistaAnag = fornitoriTerzisti.find((t) => t.ragione_sociale.toLowerCase() === fornitorePrimo.toLowerCase())
+                const pesoTotale = itemsSelezionati.reduce((acc, it) => {
+                  const art = articoli.find((a) => a.id === it.odp.articolo_id)
+                  return acc + (art?.peso_kg_unitario || 2.5) * it.odp.quantita_da_produrre
+                }, 0)
+
+                setFormCumulativo({
+                  ddtNumero: `DDT-CUM-${Date.now().toString().slice(-4)}`,
+                  fornitoreNome: fornitorePrimo,
+                  fornitoreId: terzistaAnag?.id || '',
+                  fornitoreIndirizzo: terzistaAnag ? `${terzistaAnag.indirizzo}, ${terzistaAnag.cap || ''} ${terzistaAnag.citta || ''} (${terzistaAnag.provincia || ''})` : '',
+                  fornitorePiva: terzistaAnag?.partita_iva || '',
+                  numeroColli: Math.ceil(itemsSelezionati.length / 2),
+                  pesoTotaleKg: Number(pesoTotale.toFixed(1)),
+                  vettoreNome: 'Mittente (Mezzo Proprio)',
+                  aspettoBeni: 'A vista su bancale reggettato',
+                  causaleTrasporto: 'Invio per Conto Lavorazione',
+                  note: `Spedizione cumulativa per ${itemsSelezionati.map((it) => it.odp.codice_odp).join(', ')}`
+                })
+                setModaleSpedizioneCumulativaAperta(true)
+              }}
+              className="px-5 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-black uppercase tracking-wide shadow-lg shadow-pink-600/40 transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+            >
+              <Truck className="w-4 h-4" />
+              <span>Crea DDT Cumulativo ({fasiEsterneSelezionateIds.length} OdP)</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* VISTA A SCHEDE (CARDS TOUCH) */}
       {modalitaVista === 'cards' && (
@@ -1558,25 +1839,41 @@ export default function TerminaleOfficinaPage() {
                 <div>
                   {/* Header Card Fase */}
                   <div className="flex items-start justify-between gap-3 pt-1">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-mono font-bold text-orange-400 bg-orange-950 px-2.5 py-0.5 rounded border border-orange-500/20">
-                          {odp.codice_odp}
-                        </span>
-                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                          Seq. {fase.sequenza}
-                        </span>
-                        {/* Badge Priorità OdP */}
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded border flex items-center gap-1 ${prioritaConfig.bg}`}
-                        >
-                          <PrioritaIcon className="w-3 h-3" />
-                          {prioritaConfig.label}
-                        </span>
+                    <div className="flex items-start gap-2.5">
+                      {/* Checkbox per Spedizione Cumulativa Conto Terzi */}
+                      {fase.is_esterna && (!fase.stato_esterna || fase.stato_esterna === 'in_attesa_uscita') && !isCompletata && fasePrecedenteCompletata && (
+                        <input
+                          type="checkbox"
+                          checked={fasiEsterneSelezionateIds.includes(fase.id)}
+                          onChange={() => {
+                            setFasiEsterneSelezionateIds((prev) =>
+                              prev.includes(fase.id) ? prev.filter((id) => id !== fase.id) : [...prev, fase.id]
+                            )
+                          }}
+                          className="w-5 h-5 rounded-md text-pink-600 focus:ring-pink-500 bg-slate-950 border-slate-700 mt-1 cursor-pointer accent-pink-600"
+                          title="Seleziona questo particolare per raggrupparlo in un unico DDT con altri ordini"
+                        />
+                      )}
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-orange-400 bg-orange-950 px-2.5 py-0.5 rounded border border-orange-500/20">
+                            {odp.codice_odp}
+                          </span>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                            Seq. {fase.sequenza}
+                          </span>
+                          {/* Badge Priorità OdP */}
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded border flex items-center gap-1 ${prioritaConfig.bg}`}
+                          >
+                            <PrioritaIcon className="w-3 h-3" />
+                            {prioritaConfig.label}
+                          </span>
+                        </div>
+                        <h2 className="text-lg font-black text-white mt-2 leading-tight">
+                          {fase.nome_fase}
+                        </h2>
                       </div>
-                      <h2 className="text-lg font-black text-white mt-2 leading-tight">
-                        {fase.nome_fase}
-                      </h2>
                     </div>
 
                     {/* Badge Stato Lavorazione */}
@@ -1780,12 +2077,19 @@ export default function TerminaleOfficinaPage() {
                             <button
                               type="button"
                               onClick={() => {
+                                const art = articoli.find((a) => a.id === odp.articolo_id)
+                                const pesoStimato = Number(((art?.peso_kg_unitario || 2.5) * odp.quantita_da_produrre).toFixed(1))
                                 setDatiEsterna({
                                   odp,
                                   fase,
                                   tipoAzione: 'spedizione',
                                   ddtNumero: `DDT-EXT-${Date.now().toString().slice(-4)}`,
-                                  note: ''
+                                  note: '',
+                                  numeroColli: 1,
+                                  pesoTotaleKg: pesoStimato,
+                                  vettoreNome: 'Mittente (Mezzo Proprio)',
+                                  aspettoBeni: 'A vista su bancale',
+                                  causaleTrasporto: 'Invio per Conto Lavorazione'
                                 })
                                 setModaleEsternaAperta(true)
                               }}
@@ -1824,7 +2128,12 @@ export default function TerminaleOfficinaPage() {
                                 fase,
                                 tipoAzione: 'rientro',
                                 ddtNumero: '',
-                                note: ''
+                                note: '',
+                                numeroColli: 1,
+                                pesoTotaleKg: 0,
+                                vettoreNome: 'Vettore incaricato dal Fornitore',
+                                aspettoBeni: 'A vista',
+                                causaleTrasporto: 'Reso da Conto Lavorazione'
                               })
                               setModaleEsternaAperta(true)
                             }}
@@ -2119,6 +2428,20 @@ export default function TerminaleOfficinaPage() {
                       {/* Posizione in Coda & Priorità */}
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
+                          {/* Checkbox Spedizione Cumulativa */}
+                          {fase.is_esterna && (!fase.stato_esterna || fase.stato_esterna === 'in_attesa_uscita') && !isCompletata && fasePrecedenteCompletata && (
+                            <input
+                              type="checkbox"
+                              checked={fasiEsterneSelezionateIds.includes(fase.id)}
+                              onChange={() => {
+                                setFasiEsterneSelezionateIds((prev) =>
+                                  prev.includes(fase.id) ? prev.filter((id) => id !== fase.id) : [...prev, fase.id]
+                                )
+                              }}
+                              className="w-4 h-4 rounded text-pink-600 focus:ring-pink-500 bg-slate-950 border-slate-700 cursor-pointer accent-pink-600 mr-1"
+                              title="Seleziona per DDT cumulativo"
+                            />
+                          )}
                           <span
                             className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
                               isInCorso
@@ -2269,12 +2592,19 @@ export default function TerminaleOfficinaPage() {
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      const art = articoli.find((a) => a.id === odp.articolo_id)
+                                      const pesoStimato = Number(((art?.peso_kg_unitario || 2.5) * odp.quantita_da_produrre).toFixed(1))
                                       setDatiEsterna({
                                         odp,
                                         fase,
                                         tipoAzione: 'spedizione',
                                         ddtNumero: `DDT-EXT-${Date.now().toString().slice(-4)}`,
-                                        note: ''
+                                        note: '',
+                                        numeroColli: 1,
+                                        pesoTotaleKg: pesoStimato,
+                                        vettoreNome: 'Mittente (Mezzo Proprio)',
+                                        aspettoBeni: 'A vista su bancale',
+                                        causaleTrasporto: 'Invio per Conto Lavorazione'
                                       })
                                       setModaleEsternaAperta(true)
                                     }}
@@ -2304,7 +2634,12 @@ export default function TerminaleOfficinaPage() {
                                       fase,
                                       tipoAzione: 'rientro',
                                       ddtNumero: '',
-                                      note: ''
+                                      note: '',
+                                      numeroColli: 1,
+                                      pesoTotaleKg: 0,
+                                      vettoreNome: 'Vettore incaricato dal Fornitore',
+                                      aspettoBeni: 'A vista',
+                                      causaleTrasporto: 'Reso da Conto Lavorazione'
                                     })
                                     setModaleEsternaAperta(true)
                                   }}
@@ -2621,6 +2956,65 @@ export default function TerminaleOfficinaPage() {
                 />
               </div>
 
+              {/* Campi Dettagliati Spedizione Operativa DDT (Visibili solo in uscita) */}
+              {datiEsterna.tipoAzione === 'spedizione' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800/60">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Numero Colli / Casse
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={datiEsterna.numeroColli}
+                      onChange={(e) => setDatiEsterna({ ...datiEsterna, numeroColli: Math.max(1, Number(e.target.value)) })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Peso Totale Stimato (kg)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={datiEsterna.pesoTotaleKg}
+                      onChange={(e) => setDatiEsterna({ ...datiEsterna, pesoTotaleKg: Math.max(0, Number(e.target.value)) })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Vettore Incaricato
+                    </label>
+                    <select
+                      value={datiEsterna.vettoreNome}
+                      onChange={(e) => setDatiEsterna({ ...datiEsterna, vettoreNome: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    >
+                      <option value="Mittente (Mezzo Proprio)">Mittente (Mezzo Proprio)</option>
+                      <option value="Corriere Espresso (Arcese / BRT / TNT)">Corriere Espresso (Arcese / BRT / TNT)</option>
+                      <option value="Destinatario (Ritiro a cura fornitore)">Destinatario (Ritiro a cura fornitore)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                      Aspetto Beni
+                    </label>
+                    <input
+                      type="text"
+                      value={datiEsterna.aspettoBeni}
+                      onChange={(e) => setDatiEsterna({ ...datiEsterna, aspettoBeni: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Note Operative, Spedizioniere o Controllo Qualità Rientro:
@@ -2658,6 +3052,269 @@ export default function TerminaleOfficinaPage() {
                   {datiEsterna.tipoAzione === 'spedizione'
                     ? 'Conferma Spedizione Esterna'
                     : 'Conferma Rientro Pezzi in Officina'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* MODALE SPEDIZIONE CUMULATIVA CONTO TERZI (MULTI-ODP CON UNICO DDT) */}
+      {modaleSpedizioneCumulativaAperta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border-2 border-pink-500/50 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-pink-950/20">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-pink-600/20 text-pink-400">
+                  <Truck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-white flex items-center gap-2">
+                    Emissione DDT Cumulativo Conto Lavoro
+                    <span className="text-xs px-2 py-0.5 rounded bg-pink-900 text-pink-200 font-mono">
+                      {fasiEsterneSelezionateIds.length} OdP accorpati
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Genera un solo documento di trasporto unificato per tutti i particolari selezionati.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModaleSpedizioneCumulativaAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto no-scrollbar">
+              {/* Elenco Ordini Selezionati per questo DDT */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Particolari che viaggeranno insieme nel documento:
+                </span>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {fasiInOfficina
+                    .filter((it) => fasiEsterneSelezionateIds.includes(it.fase.id))
+                    .map((it) => {
+                      const art = articoli.find((a) => a.id === it.odp.articolo_id)
+                      return (
+                        <div key={it.fase.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-slate-900 border border-slate-800">
+                          <div>
+                            <span className="font-mono font-bold text-orange-400 mr-2">{it.odp.codice_odp}</span>
+                            <span className="text-white font-medium">{art?.codice_articolo}</span>
+                            <span className="text-slate-400 text-[11px] block">{it.fase.nome_fase}</span>
+                          </div>
+                          <span className="font-bold text-pink-400 font-mono">
+                            {it.odp.quantita_da_produrre} {art?.unita_misura || 'pz'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                </div>
+              </div>
+
+              {/* Alert Poka-Yoke: Controllo Terzisti Differenti tra gli OdP selezionati */}
+              {(() => {
+                const terzistiDiversi = Array.from(
+                  new Set(
+                    fasiInOfficina
+                      .filter((it) => fasiEsterneSelezionateIds.includes(it.fase.id))
+                      .map((it) => it.fase.fornitore_nome || 'Non specificato')
+                  )
+                )
+                if (terzistiDiversi.length > 1) {
+                  return (
+                    <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-500/60 text-xs text-amber-200 flex items-start gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-amber-300 block font-bold">Avviso Poka-Yoke: Fornitori di origine differenti</strong>
+                        <span>
+                          Gli OdP selezionati prevedono a ciclo terzisti diversi: <strong>{terzistiDiversi.join(' / ')}</strong>.
+                          Confermi di volerli accorpare e inviare tutti a <strong>{formCumulativo.fornitoreNome || 'questo fornitore'}</strong>?
+                        </span>
+                      </div>
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Numero DDT di Trasporto *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formCumulativo.ddtNumero}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, ddtNumero: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono font-bold text-slate-100 focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      Fornitore Terzista Destinatario *
+                    </label>
+                    {fornitoriTerzisti.length > 0 && (
+                      <span className="text-[10px] text-pink-400 font-bold">
+                        Anagrafica Rapida
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <select
+                      value={formCumulativo.fornitoreNome}
+                      onChange={(e) => {
+                        const nomeSelezionato = e.target.value
+                        const forn = fornitoriTerzisti.find((t) => t.ragione_sociale === nomeSelezionato)
+                        setFormCumulativo({
+                          ...formCumulativo,
+                          fornitoreNome: nomeSelezionato,
+                          fornitoreId: forn?.id || '',
+                          fornitoreIndirizzo: forn ? `${forn.indirizzo}, ${forn.cap || ''} ${forn.citta || ''} (${forn.provincia || ''})` : formCumulativo.fornitoreIndirizzo,
+                          fornitorePiva: forn?.partita_iva || formCumulativo.fornitorePiva
+                        })
+                      }}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 font-semibold focus:outline-none focus:border-pink-500 cursor-pointer"
+                    >
+                      <option value="">-- Seleziona o digita sotto --</option>
+                      {fornitoriTerzisti.map((f) => (
+                        <option key={f.id} value={f.ragione_sociale}>
+                          {f.ragione_sociale} {f.specialita ? `(${f.specialita})` : ''}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="text"
+                      required
+                      placeholder="Oppure inserisci fornitore manuale..."
+                      value={formCumulativo.fornitoreNome}
+                      onChange={(e) => setFormCumulativo({ ...formCumulativo, fornitoreNome: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Dati Fiscali Destinatario DDT */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Indirizzo di Consegna / Sede Terzista
+                  </label>
+                  <input
+                    type="text"
+                    value={formCumulativo.fornitoreIndirizzo}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, fornitoreIndirizzo: e.target.value })}
+                    placeholder="Via, CAP, Città (Prov)"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Partita IVA / Codice Fiscale
+                  </label>
+                  <input
+                    type="text"
+                    value={formCumulativo.fornitorePiva}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, fornitorePiva: e.target.value })}
+                    placeholder="IT01234567890"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-200"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Numero Colli Totali
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formCumulativo.numeroColli}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, numeroColli: Math.max(1, Number(e.target.value)) })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Peso Complessivo (kg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formCumulativo.pesoTotaleKg}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, pesoTotaleKg: Math.max(0, Number(e.target.value)) })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Aspetto Beni
+                  </label>
+                  <input
+                    type="text"
+                    value={formCumulativo.aspettoBeni}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, aspettoBeni: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Vettore Incaricato del Trasporto
+                </label>
+                <select
+                  value={formCumulativo.vettoreNome}
+                  onChange={(e) => setFormCumulativo({ ...formCumulativo, vettoreNome: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-pink-500"
+                >
+                  <option value="Mittente (Mezzo Proprio)">Mittente (Mezzo Proprio)</option>
+                  <option value="Corriere Espresso (Arcese / BRT / TNT)">Corriere Espresso (Arcese / BRT / TNT)</option>
+                  <option value="Destinatario (Ritiro a cura fornitore)">Destinatario (Ritiro a cura fornitore)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Note Trasporto e Istruzioni Generali:
+                </label>
+                <textarea
+                  rows={2}
+                  value={formCumulativo.note}
+                  onChange={(e) => setFormCumulativo({ ...formCumulativo, note: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setModaleSpedizioneCumulativaAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfermaSpedizioneCumulativa}
+                  className="px-6 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-black uppercase tracking-wide shadow-lg shadow-pink-600/30 transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Conferma e Stampa DDT Cumulativo ({fasiEsterneSelezionateIds.length} OdP)</span>
                 </button>
               </div>
             </div>
@@ -3377,6 +4034,269 @@ export default function TerminaleOfficinaPage() {
         </div>
       )}
 
+
+
+      {/* MODALE SPEDIZIONE CUMULATIVA CONTO TERZI (MULTI-ODP CON UNICO DDT) */}
+      {modaleSpedizioneCumulativaAperta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border-2 border-pink-500/50 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-pink-950/20">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-pink-600/20 text-pink-400">
+                  <Truck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-white flex items-center gap-2">
+                    Emissione DDT Cumulativo Conto Lavoro
+                    <span className="text-xs px-2 py-0.5 rounded bg-pink-900 text-pink-200 font-mono">
+                      {fasiEsterneSelezionateIds.length} OdP accorpati
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Genera un solo documento di trasporto unificato per tutti i particolari selezionati.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModaleSpedizioneCumulativaAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto no-scrollbar">
+              {/* Elenco Ordini Selezionati per questo DDT */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Particolari che viaggeranno insieme nel documento:
+                </span>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {fasiInOfficina
+                    .filter((it) => fasiEsterneSelezionateIds.includes(it.fase.id))
+                    .map((it) => {
+                      const art = articoli.find((a) => a.id === it.odp.articolo_id)
+                      return (
+                        <div key={it.fase.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-slate-900 border border-slate-800">
+                          <div>
+                            <span className="font-mono font-bold text-orange-400 mr-2">{it.odp.codice_odp}</span>
+                            <span className="text-white font-medium">{art?.codice_articolo}</span>
+                            <span className="text-slate-400 text-[11px] block">{it.fase.nome_fase}</span>
+                          </div>
+                          <span className="font-bold text-pink-400 font-mono">
+                            {it.odp.quantita_da_produrre} {art?.unita_misura || 'pz'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                </div>
+              </div>
+
+              {/* Alert Poka-Yoke: Controllo Terzisti Differenti tra gli OdP selezionati */}
+              {(() => {
+                const terzistiDiversi = Array.from(
+                  new Set(
+                    fasiInOfficina
+                      .filter((it) => fasiEsterneSelezionateIds.includes(it.fase.id))
+                      .map((it) => it.fase.fornitore_nome || 'Non specificato')
+                  )
+                )
+                if (terzistiDiversi.length > 1) {
+                  return (
+                    <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-500/60 text-xs text-amber-200 flex items-start gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-amber-300 block font-bold">Avviso Poka-Yoke: Fornitori di origine differenti</strong>
+                        <span>
+                          Gli OdP selezionati prevedono a ciclo terzisti diversi: <strong>{terzistiDiversi.join(' / ')}</strong>.
+                          Confermi di volerli accorpare e inviare tutti a <strong>{formCumulativo.fornitoreNome || 'questo fornitore'}</strong>?
+                        </span>
+                      </div>
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Numero DDT di Trasporto *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formCumulativo.ddtNumero}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, ddtNumero: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono font-bold text-slate-100 focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      Fornitore Terzista Destinatario *
+                    </label>
+                    {fornitoriTerzisti.length > 0 && (
+                      <span className="text-[10px] text-pink-400 font-bold">
+                        Anagrafica Rapida
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <select
+                      value={formCumulativo.fornitoreNome}
+                      onChange={(e) => {
+                        const nomeSelezionato = e.target.value
+                        const forn = fornitoriTerzisti.find((t) => t.ragione_sociale === nomeSelezionato)
+                        setFormCumulativo({
+                          ...formCumulativo,
+                          fornitoreNome: nomeSelezionato,
+                          fornitoreId: forn?.id || '',
+                          fornitoreIndirizzo: forn ? `${forn.indirizzo}, ${forn.cap || ''} ${forn.citta || ''} (${forn.provincia || ''})` : formCumulativo.fornitoreIndirizzo,
+                          fornitorePiva: forn?.partita_iva || formCumulativo.fornitorePiva
+                        })
+                      }}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 font-semibold focus:outline-none focus:border-pink-500 cursor-pointer"
+                    >
+                      <option value="">-- Seleziona o digita sotto --</option>
+                      {fornitoriTerzisti.map((f) => (
+                        <option key={f.id} value={f.ragione_sociale}>
+                          {f.ragione_sociale} {f.specialita ? `(${f.specialita})` : ''}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="text"
+                      required
+                      placeholder="Oppure inserisci fornitore manuale..."
+                      value={formCumulativo.fornitoreNome}
+                      onChange={(e) => setFormCumulativo({ ...formCumulativo, fornitoreNome: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Dati Fiscali Destinatario DDT */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Indirizzo di Consegna / Sede Terzista
+                  </label>
+                  <input
+                    type="text"
+                    value={formCumulativo.fornitoreIndirizzo}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, fornitoreIndirizzo: e.target.value })}
+                    placeholder="Via, CAP, Città (Prov)"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Partita IVA / Codice Fiscale
+                  </label>
+                  <input
+                    type="text"
+                    value={formCumulativo.fornitorePiva}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, fornitorePiva: e.target.value })}
+                    placeholder="IT01234567890"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-200"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Numero Colli Totali
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formCumulativo.numeroColli}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, numeroColli: Math.max(1, Number(e.target.value)) })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Peso Complessivo (kg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formCumulativo.pesoTotaleKg}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, pesoTotaleKg: Math.max(0, Number(e.target.value)) })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                    Aspetto Beni
+                  </label>
+                  <input
+                    type="text"
+                    value={formCumulativo.aspettoBeni}
+                    onChange={(e) => setFormCumulativo({ ...formCumulativo, aspettoBeni: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Vettore Incaricato del Trasporto
+                </label>
+                <select
+                  value={formCumulativo.vettoreNome}
+                  onChange={(e) => setFormCumulativo({ ...formCumulativo, vettoreNome: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-pink-500"
+                >
+                  <option value="Mittente (Mezzo Proprio)">Mittente (Mezzo Proprio)</option>
+                  <option value="Corriere Espresso (Arcese / BRT / TNT)">Corriere Espresso (Arcese / BRT / TNT)</option>
+                  <option value="Destinatario (Ritiro a cura fornitore)">Destinatario (Ritiro a cura fornitore)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Note Trasporto e Istruzioni Generali:
+                </label>
+                <textarea
+                  rows={2}
+                  value={formCumulativo.note}
+                  onChange={(e) => setFormCumulativo({ ...formCumulativo, note: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setModaleSpedizioneCumulativaAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfermaSpedizioneCumulativa}
+                  className="px-6 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-black uppercase tracking-wide shadow-lg shadow-pink-600/30 transition-all cursor-pointer active:scale-95 flex items-center gap-2"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Conferma e Stampa DDT Cumulativo ({fasiEsterneSelezionateIds.length} OdP)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODALE BLINDATA SCHEDA LAVORO A4 (TOUCH KIOSK BORDO MACCHINA) */}
       {schedaA4OdpId && (() => {
         const odpDettaglio = odpList.find((o) => o.id === schedaA4OdpId)
@@ -3967,6 +4887,14 @@ export default function TerminaleOfficinaPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ANTEPRIMA STAMPA DDT CONTO LAVORO A4 */}
+      {ddtStampabileCorrente && (
+        <SchedaDDTStampabile
+          ddt={ddtStampabileCorrente}
+          onChiudi={() => setDdtStampabileCorrente(null)}
+        />
       )}
     </div>
   )
