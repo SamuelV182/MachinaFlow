@@ -67,7 +67,29 @@ export default function ProduzionePage() {
         }
       }
 
+      // Carica i DDT Clienti per identificare con precisione assoluta gli OdP già spediti
+      const ddtClienti = parseSicuro<import('@/types/database').DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', [])
+      const odpSpeditiSet = new Set<string>()
+      ddtClienti.forEach((ddt) => {
+        ddt.righe?.forEach((r) => {
+          if (r.odp_id) odpSpeditiSet.add(r.odp_id)
+        })
+      })
+
       const arricchiti: OdPConFasi[] = odpCaricati.map((odp) => {
+        // Se l'OdP è presente in un DDT cliente o ha stato 'spedito', è archiviato come 'spedito'
+        if (odp.stato === 'spedito' || odpSpeditiSet.has(odp.id)) {
+          if (odp.stato !== 'spedito') {
+            syncService.aggiornaStatoOdP(odp.id, 'spedito', odp.quantita_da_produrre)
+          }
+          return {
+            ...odp,
+            stato: 'spedito' as const,
+            quantita_prodotta: odp.quantita_da_produrre,
+            articolo: articoliList.find((a) => a.id === odp.articolo_id)
+          }
+        }
+
         // Controllo automatico di coerenza: se tutte le fasi risultano completate, l'OdP è completato
         const tutteCompletate = odp.fasi && odp.fasi.length > 0 && odp.fasi.every((f) => f.stato === 'completata')
         const almenoUnaInCorso = odp.fasi && odp.fasi.some((f) => f.stato === 'in_corso')
@@ -212,7 +234,8 @@ export default function ProduzionePage() {
             { id: 'tutti', label: 'Tutti gli OdP' },
             { id: 'pianificato', label: 'Pianificati' },
             { id: 'in_lavorazione', label: 'In Lavorazione' },
-            { id: 'completato', label: 'Completati' }
+            { id: 'completato', label: 'Pronti a Terra' },
+            { id: 'spedito', label: 'Spediti / Storico' }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -302,14 +325,16 @@ export default function ProduzionePage() {
 
                     <span
                       className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
-                        odp.stato === 'completato'
+                        odp.stato === 'spedito'
+                          ? 'bg-purple-950 text-purple-300 border border-purple-700'
+                          : odp.stato === 'completato'
                           ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                           : odp.stato === 'in_lavorazione'
                           ? 'bg-blue-950 text-blue-300 border border-blue-800'
                           : 'bg-slate-800 text-slate-400 border border-slate-700'
                       }`}
                     >
-                      {odp.stato.replace('_', ' ')}
+                      {odp.stato === 'spedito' ? '✓ Spedito con DDT' : odp.stato.replace('_', ' ')}
                     </span>
 
                     {puntualita && (
@@ -449,14 +474,16 @@ export default function ProduzionePage() {
                       <td className="py-2.5 px-2 text-center whitespace-nowrap">
                         <span
                           className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
-                            odp.stato === 'completato'
+                            odp.stato === 'spedito'
+                              ? 'bg-purple-950 text-purple-300 border border-purple-700'
+                              : odp.stato === 'completato'
                               ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                               : odp.stato === 'in_lavorazione'
                               ? 'bg-blue-950 text-blue-300 border border-blue-800'
                               : 'bg-slate-800 text-slate-400 border border-slate-700'
                           }`}
                         >
-                          {odp.stato.replace('_', ' ')}
+                          {odp.stato === 'spedito' ? 'Spedito' : odp.stato.replace('_', ' ')}
                         </span>
                       </td>
 

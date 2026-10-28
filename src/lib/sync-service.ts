@@ -92,10 +92,10 @@ export const syncService = {
         `)
         .order('creato_il', { ascending: false })
 
-      // Se richiesto solo il carico attivo (es. tablet officina), escludiamo gli ordini completati
+      // Se richiesto solo il carico attivo (es. tablet officina), escludiamo gli ordini completati o già spediti
       // mantenendo gli ordini pianificati, in_corso o sospesi
       if (opzioni?.soloAttivi) {
-        query = query.neq('stato', 'completato')
+        query = query.neq('stato', 'completato').neq('stato', 'spedito')
       }
 
       const { data: odpCloud, error } = await query
@@ -244,7 +244,7 @@ export const syncService = {
     }
   },
 
-  async aggiornaStatoOdP(odpId: string, nuovoStato: 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso', quantitaProdotta?: number) {
+  async aggiornaStatoOdP(odpId: string, nuovoStato: 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso' | 'scartato' | 'spedito', quantitaProdotta?: number) {
     try {
       // Aggiorna localStorage
       const salvati = localStorage.getItem('machinaflow_odp')

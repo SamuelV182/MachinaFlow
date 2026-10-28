@@ -22,10 +22,31 @@ import {
   Phone,
   Mail,
   MapPin,
-  Sparkles
+  Sparkles,
+  PackageCheck,
+  Check,
+  UserCheck
 } from 'lucide-react'
-import { DocumentoTrasportoEsterno, FornitoreTerzista } from '@/types/database'
-import { SEED_FORNITORI_TERZISTI } from '@/lib/data-service'
+import {
+  DocumentoTrasportoEsterno,
+  DocumentoTrasportoCliente,
+  FornitoreTerzista,
+  Cliente,
+  OrdineCliente,
+  RigaOrdineCliente,
+  OrdineProduzione,
+  FaseOdP,
+  Articolo
+} from '@/types/database'
+import {
+  SEED_FORNITORI_TERZISTI,
+  SEED_DDT_CLIENTI,
+  SEED_CLIENTI,
+  SEED_ORDINI_CLIENTI,
+  SEED_ODP,
+  SEED_ARTICOLI
+} from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 import SchedaDDTStampabile from '@/components/SchedaDDTStampabile'
 
 // Esempio di DDT di conto lavoro iniziali per testing e demo immediata
@@ -109,14 +130,68 @@ const SEED_DDT_ESTERNI: DocumentoTrasportoEsterno[] = [
 ]
 
 export default function SpedizioniDdtPage() {
-  const [tabAttivo, setTabAttivo] = useState<'ddt' | 'terzisti'>('ddt')
+  const [tabAttivo, setTabAttivo] = useState<'clienti' | 'ddt' | 'terzisti'>('clienti')
 
-  // Stato DDT
+  // Stato DDT Conto Terzi
   const [listaDdt, setListaDdt] = useState<DocumentoTrasportoEsterno[]>([])
   const [ricerca, setRicerca] = useState('')
   const [filtroStato, setFiltroStato] = useState<'tutti' | 'spedito' | 'rientrato_totale'>('tutti')
   const [ddtSelezionatoPerStampa, setDdtSelezionatoPerStampa] = useState<DocumentoTrasportoEsterno | null>(null)
   const [notifica, setNotifica] = useState<string | null>(null)
+
+  // Stato DDT Vendite Clienti
+  const [listaDdtClienti, setListaDdtClienti] = useState<DocumentoTrasportoCliente[]>([])
+  const [ricercaDdtClienti, setRicercaDdtClienti] = useState('')
+  const [ddtClientePerStampa, setDdtClientePerStampa] = useState<DocumentoTrasportoCliente | null>(null)
+
+  // Stato Modale Emissione DDT Cliente
+  const [modaleDdtClienteAperta, setModaleDdtClienteAperta] = useState(false)
+  const [clienti, setClienti] = useState<Cliente[]>([])
+  const [ordiniClienti, setOrdiniClienti] = useState<(OrdineCliente & { righe?: RigaOrdineCliente[] })[]>([])
+  const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi?: FaseOdP[] })[]>([])
+  const [articoli, setArticoli] = useState<Articolo[]>([])
+
+  // Form Nuovo DDT Cliente
+  const [formDdtCliente, setFormDdtCliente] = useState<{
+    cliente_id: string
+    destinazione_diversa: string
+    causale_trasporto: string
+    porto: 'Franco' | 'Assegnato'
+    aspetto_beni: string
+    numero_colli: number
+    peso_totale_kg: number
+    vettore_nome: string
+    note_trasporto: string
+    righeSelezionate: {
+      riga_ordine_id: string
+      ordine_id: string
+      codice_ordine: string
+      odp_id: string
+      codice_odp: string
+      articolo_id: string
+      articolo_codice: string
+      articolo_descrizione: string
+      quantita_ordinata: number
+      quantita_pronta: number
+      giacenza_magazzino: number
+      quantita_gia_spedita: number
+      quantita_da_spedire: number
+      unita_misura: string
+      peso_unitario: number
+      selezionato: boolean
+    }[]
+  }>({
+    cliente_id: '',
+    destinazione_diversa: '',
+    causale_trasporto: 'Vendita Beni di Produzione',
+    porto: 'Franco',
+    aspetto_beni: 'Scatole su Europallet',
+    numero_colli: 1,
+    peso_totale_kg: 0,
+    vettore_nome: 'Mittente (Mezzo Proprio)',
+    note_trasporto: '',
+    righeSelezionate: []
+  })
 
   // Stato Anagrafica Fornitori Terzisti
   const [terzisti, setTerzisti] = useState<FornitoreTerzista[]>([])
@@ -139,33 +214,79 @@ export default function SpedizioniDdtPage() {
   // Caricamento Dati
   useEffect(() => {
     try {
-      // 1. DDT Esterni
-      const salvatiDdt = localStorage.getItem('machinaflow_ddt_esterni')
-      if (salvatiDdt) {
-        const parsed = JSON.parse(salvatiDdt)
-        const mappa = new Map<string, DocumentoTrasportoEsterno>()
-        SEED_DDT_ESTERNI.forEach((d) => mappa.set(d.id, d))
-        parsed.forEach((d: DocumentoTrasportoEsterno) => mappa.set(d.id, d))
-        setListaDdt(Array.from(mappa.values()))
-      } else {
-        setListaDdt(SEED_DDT_ESTERNI)
-        localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(SEED_DDT_ESTERNI))
+      const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+        try {
+          const item = localStorage.getItem(chiave)
+          if (!item || item === 'undefined' || item === 'null') return fallback
+          return JSON.parse(item) as T
+        } catch {
+          return fallback
+        }
       }
 
-      // 2. Anagrafica Fornitori Terzisti
-      const salvatiTerzisti = localStorage.getItem('machinaflow_fornitori_terzisti')
-      if (salvatiTerzisti) {
-        const parsedT = JSON.parse(salvatiTerzisti)
-        const mappaT = new Map<string, FornitoreTerzista>()
-        SEED_FORNITORI_TERZISTI.forEach((t) => mappaT.set(t.id, t))
-        parsedT.forEach((t: FornitoreTerzista) => mappaT.set(t.id, t))
-        setTerzisti(Array.from(mappaT.values()))
-      } else {
-        setTerzisti(SEED_FORNITORI_TERZISTI)
-        localStorage.setItem('machinaflow_fornitori_terzisti', JSON.stringify(SEED_FORNITORI_TERZISTI))
+      // 1. DDT Esterni Terzisti
+      const salvatiDdt = parseSicuro<DocumentoTrasportoEsterno[]>('machinaflow_ddt_esterni', SEED_DDT_ESTERNI)
+      const mappaDdt = new Map<string, DocumentoTrasportoEsterno>()
+      SEED_DDT_ESTERNI.forEach((d) => mappaDdt.set(d.id, d))
+      salvatiDdt.forEach((d) => mappaDdt.set(d.id, d))
+      setListaDdt(Array.from(mappaDdt.values()))
+
+      // 2. DDT Clienti: escludiamo ddt-cli-demo-01 se presente in cache per consentire il collaudo reale
+      const salvatiDdtCli = parseSicuro<DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', [])
+      const ddtCliReali = salvatiDdtCli.filter((d) => d.id !== 'ddt-cli-demo-01' && d.numero_ddt !== 'DDT-2026/054')
+      setListaDdtClienti(ddtCliReali)
+      localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(ddtCliReali))
+
+      // 3. Clienti, Ordini, OdP e Articoli
+      const cList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
+      const ordList = parseSicuro<typeof ordiniClienti>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+      const odpLocali = parseSicuro<(OrdineProduzione & { fasi?: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
+
+      setClienti(cList)
+      setOrdiniClienti(ordList)
+      setOdpList(odpLocali)
+      setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
+
+      // Carica e sincronizza in parallelo OdP da Supabase Cloud per essere sempre allineati
+      syncService.getOrdiniProduzione().then((odpCloud) => {
+        if (odpCloud && odpCloud.length > 0) {
+          const mappa = new Map<string, OrdineProduzione & { fasi?: FaseOdP[] }>()
+          odpLocali.forEach((o) => mappa.set(o.id, o))
+          odpCloud.forEach((o) => mappa.set(o.id, o))
+          const listaFinale = Array.from(mappa.values())
+          setOdpList(listaFinale)
+
+          // Se la modale è già aperta su un cliente da query param, rinfresca la lista candidate con gli OdP cloud
+          if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search)
+            const paramClienteId = params.get('clienteId')
+            if (paramClienteId) {
+              handleSelezionaClientePerDDT(paramClienteId, listaFinale, cList, ordList)
+            }
+          }
+        }
+      })
+
+      // 4. Anagrafica Fornitori Terzisti
+      const salvatiTerzisti = parseSicuro<FornitoreTerzista[]>('machinaflow_fornitori_terzisti', SEED_FORNITORI_TERZISTI)
+      const mappaT = new Map<string, FornitoreTerzista>()
+      SEED_FORNITORI_TERZISTI.forEach((t) => mappaT.set(t.id, t))
+      salvatiTerzisti.forEach((t) => mappaT.set(t.id, t))
+      setTerzisti(Array.from(mappaT.values()))
+
+      // Controllo se nella query string è specificato un clienteId (es. da /ordini)
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search)
+        const paramClienteId = params.get('clienteId')
+        if (paramClienteId) {
+          setTimeout(() => {
+            handleApriModaleDdtCliente(paramClienteId, odpLocali, cList, ordList)
+          }, 50)
+        }
       }
     } catch {
       setListaDdt(SEED_DDT_ESTERNI)
+      setListaDdtClienti(SEED_DDT_CLIENTI)
       setTerzisti(SEED_FORNITORI_TERZISTI)
     }
   }, [])
@@ -277,7 +398,377 @@ export default function SpedizioniDdtPage() {
     })
   }, [listaDdt, ricerca, filtroStato])
 
-  // Esportazione Massiva CSV / Excel compatibile con tutti i gestionali contabili
+  // Calcolo pezzi pronti a magazzino per cliente (per emissione DDT consegna)
+  const handleSelezionaClientePerDDT = (clienteId: string, currentOdpList?: (OrdineProduzione & { fasi?: FaseOdP[] })[], currentClienti?: Cliente[], currentOrdini?: typeof ordiniClienti) => {
+    const elencoClienti = currentClienti || clienti
+    const elencoOdp = currentOdpList || odpList
+    const elencoOrdini = currentOrdini || ordiniClienti
+
+    const clienteTrovato = elencoClienti.find((c) => c.id === clienteId)
+    if (!clienteTrovato) return
+
+    // Trova tutti gli ordini attivi di questo cliente
+    const ordiniDelCliente = elencoOrdini.filter((o) => o.cliente_id === clienteId)
+
+    // Per ciascun ordine e riga, trova l'OdP corrispondente e le quantità già spedite
+    const righeCandidati: typeof formDdtCliente.righeSelezionate = []
+
+    ordiniDelCliente.forEach((ord) => {
+      ;(ord.righe || []).forEach((riga) => {
+        const art = articoli.find((a) => a.id === riga.articolo_id)
+        const giacenzaStock = art?.giacenza_attuale || 0
+
+        // Calcola quanto già spedito in precedenti DDT clienti per questa riga
+        let qtaGiaSpedita = 0
+        listaDdtClienti.forEach((doc) => {
+          doc.righe.forEach((r) => {
+            if (r.riga_ordine_cliente_id === riga.id || (r.ordine_cliente_id === ord.id && r.articolo_id === riga.articolo_id)) {
+              qtaGiaSpedita += r.quantita_spedita
+            }
+          })
+        })
+
+        const qtaOrdinata = riga.quantita || 0
+        const residuoDaSpedire = Math.max(0, qtaOrdinata - qtaGiaSpedita)
+        if (residuoDaSpedire <= 0) return
+
+        // Trova l'OdP originario della riga commessa
+        const odpMadre = elencoOdp.find((o) => o.riga_ordine_cliente_id === riga.id)
+        const radiceCodiceOdp = odpMadre ? odpMadre.codice_odp.split('/')[0] : null
+
+        // Trova TUTTI gli OdP associati ESCLUSIVAMENTE a questa commessa cliente:
+        const odpCandidati = elencoOdp.filter((o) => {
+          if (o.articolo_id !== riga.articolo_id) return false
+
+          const matchRigaEsatta = o.riga_ordine_cliente_id === riga.id
+          const matchRadiceMadre = radiceCodiceOdp && o.codice_odp.startsWith(radiceCodiceOdp)
+          const matchNoteCommessa = o.note && (o.note.includes(ord.numero_ordine) || o.note.includes(ord.id))
+
+          return matchRigaEsatta || matchRadiceMadre || matchNoteCommessa
+        })
+
+        // Rileva se per questo articolo/commessa esiste un rimpiazzo di scarto
+        const lottiRimpiazzo = odpCandidati.filter((o) => o.codice_odp.endsWith('/R') || o.odp_origine_scarto_id)
+
+        // Se ci sono OdP finiti o parziali, considerali
+        let trovatiOdpValidi = false
+
+        odpCandidati.forEach((odp) => {
+          if (odp.stato === 'scartato') return
+
+          const eLottoRimpiazzatoDaScarto = lottiRimpiazzo.length > 0 && 
+            odp.codice_odp.endsWith('/B') && 
+            lottiRimpiazzo.some((r) => r.codice_odp.replace(/\/R$/, '') === odp.codice_odp.replace(/\/B$/, ''))
+
+          if (eLottoRimpiazzatoDaScarto) return
+
+          const tutteFasiCompletate = odp.fasi && odp.fasi.length > 0 && odp.fasi.every((f) => f.stato === 'completata')
+          const isCompletato = odp.stato === 'completato' || tutteFasiCompletate
+          const qtaFisicaFinita = isCompletato
+            ? odp.quantita_da_produrre
+            : (odp.quantita_prodotta || 0)
+
+          // Proponiamo la riga se l'OdP ha pezzi finiti OPPURE se c'è giacenza a magazzino
+          if (qtaFisicaFinita > 0 || giacenzaStock > 0) {
+            const giaInserito = righeCandidati.some((rc) => rc.odp_id === odp.id)
+            if (!giaInserito) {
+              trovatiOdpValidi = true
+              // Default proposto: se ci sono pezzi da OdP usa quelli, altrimenti proponi il residuo copribile da magazzino
+              const qtaDaSpedireDefault = qtaFisicaFinita > 0
+                ? Math.min(residuoDaSpedire, qtaFisicaFinita)
+                : Math.min(residuoDaSpedire, giacenzaStock)
+
+              righeCandidati.push({
+                riga_ordine_id: riga.id,
+                ordine_id: ord.id,
+                codice_ordine: ord.numero_ordine,
+                odp_id: odp.id,
+                codice_odp: odp.codice_odp,
+                articolo_id: riga.articolo_id,
+                articolo_codice: art?.codice_articolo || 'N/D',
+                articolo_descrizione: art?.descrizione || 'Particolare Meccanico',
+                quantita_ordinata: qtaOrdinata,
+                quantita_pronta: qtaFisicaFinita,
+                giacenza_magazzino: giacenzaStock,
+                quantita_gia_spedita: qtaGiaSpedita,
+                quantita_da_spedire: qtaDaSpedireDefault,
+                unita_misura: art?.unita_misura || 'pz',
+                peso_unitario: art?.peso_kg_unitario || 1.5,
+                selezionato: qtaDaSpedireDefault > 0
+              })
+            }
+          }
+        })
+
+        // Se non ci sono OdP ma c'è giacenza a magazzino, consenti la spedizione diretta da stock
+        if (!trovatiOdpValidi && giacenzaStock > 0) {
+          const qtaDaSpedireDefault = Math.min(residuoDaSpedire, giacenzaStock)
+          righeCandidati.push({
+            riga_ordine_id: riga.id,
+            ordine_id: ord.id,
+            codice_ordine: ord.numero_ordine,
+            odp_id: '',
+            codice_odp: 'DA MAGAZZINO (STOCK)',
+            articolo_id: riga.articolo_id,
+            articolo_codice: art?.codice_articolo || 'N/D',
+            articolo_descrizione: art?.descrizione || 'Particolare Meccanico',
+            quantita_ordinata: qtaOrdinata,
+            quantita_pronta: 0,
+            giacenza_magazzino: giacenzaStock,
+            quantita_gia_spedita: qtaGiaSpedita,
+            quantita_da_spedire: qtaDaSpedireDefault,
+            unita_misura: art?.unita_misura || 'pz',
+            peso_unitario: art?.peso_kg_unitario || 1.5,
+            selezionato: true
+          })
+        }
+      })
+    })
+
+    const pesoIniziale = righeCandidati
+      .filter((r) => r.selezionato)
+      .reduce((acc, curr) => acc + curr.quantita_da_spedire * curr.peso_unitario, 0)
+
+    setFormDdtCliente({
+      cliente_id: clienteId,
+      destinazione_diversa: clienteTrovato.indirizzo || '',
+      causale_trasporto: 'Vendita Beni di Produzione',
+      porto: 'Franco',
+      aspetto_beni: 'Scatole su Europallet reggettato',
+      numero_colli: 1,
+      peso_totale_kg: Number(pesoIniziale.toFixed(1)),
+      vettore_nome: 'Mittente (Mezzo Proprio)',
+      note_trasporto: 'Consegna con collaudo a disegno.',
+      righeSelezionate: righeCandidati
+    })
+  }
+
+  // Apertura Modale DDT Cliente da zero
+  const handleApriModaleDdtCliente = (clientePreselezionatoId?: string, listaOdpAttuale?: (OrdineProduzione & { fasi?: FaseOdP[] })[], listaClientiAttuale?: Cliente[], listaOrdiniAttuale?: typeof ordiniClienti) => {
+    const elencoClienti = listaClientiAttuale || clienti
+    const targetClienteId = clientePreselezionatoId || elencoClienti[0]?.id || ''
+    handleSelezionaClientePerDDT(targetClienteId, listaOdpAttuale, elencoClienti, listaOrdiniAttuale)
+    setModaleDdtClienteAperta(true)
+  }
+
+  // Conferma ed Emissione DDT Cliente
+  const handleConfermaEmissioneDdtCliente = (e: React.FormEvent) => {
+    e.preventDefault()
+    const clienteTrovato = clienti.find((c) => c.id === formDdtCliente.cliente_id)
+    if (!clienteTrovato) return
+
+    const righeDaSpedire = formDdtCliente.righeSelezionate.filter(
+      (r) => r.selezionato && r.quantita_da_spedire > 0
+    )
+
+    if (righeDaSpedire.length === 0) {
+      alert('Seleziona almeno un articolo da includere nel DDT con quantità maggiore di zero.')
+      return
+    }
+
+    const annoCorrente = new Date().getFullYear()
+    const progressivo = String(listaDdtClienti.length + 1).padStart(3, '0')
+    const numeroDdtGenerato = `DDT-${annoCorrente}/${progressivo}`
+
+    const nuovoDdt: DocumentoTrasportoCliente = {
+      id: `ddt-cli-${Date.now()}`,
+      numero_ddt: numeroDdtGenerato,
+      data_emissione: new Date().toISOString(),
+      cliente_id: clienteTrovato.id,
+      cliente_nome: clienteTrovato.ragione_sociale,
+      cliente_indirizzo: clienteTrovato.indirizzo,
+      cliente_piva: clienteTrovato.partita_iva,
+      destinazione_diversa: formDdtCliente.destinazione_diversa || clienteTrovato.indirizzo,
+      causale_trasporto: formDdtCliente.causale_trasporto,
+      porto: formDdtCliente.porto,
+      aspetto_beni: formDdtCliente.aspetto_beni,
+      numero_colli: formDdtCliente.numero_colli,
+      peso_totale_kg: formDdtCliente.peso_totale_kg,
+      vettore_nome: formDdtCliente.vettore_nome,
+      note_trasporto: formDdtCliente.note_trasporto,
+      creato_il: new Date().toISOString(),
+      righe: righeDaSpedire.map((r, idx) => ({
+        id: `riga-ddt-cli-${Date.now()}-${idx}`,
+        ordine_cliente_id: r.ordine_id,
+        riga_ordine_cliente_id: r.riga_ordine_id,
+        codice_ordine_cliente: r.codice_ordine,
+        odp_id: r.odp_id,
+        codice_odp: r.codice_odp,
+        articolo_id: r.articolo_id,
+        articolo_codice: r.articolo_codice,
+        articolo_descrizione: r.articolo_descrizione,
+        quantita_ordinata: r.quantita_ordinata,
+        quantita_spedita: r.quantita_da_spedire,
+        unita_misura: r.unita_misura,
+        peso_kg_riga: Number((r.quantita_da_spedire * r.peso_unitario).toFixed(1)),
+        note_riga: r.quantita_da_spedire < (r.quantita_ordinata - r.quantita_gia_spedita)
+          ? `Spedizione parziale (${r.quantita_da_spedire} su ${r.quantita_ordinata} tot.)`
+          : 'Saldo fornitura'
+      }))
+    }
+
+    const aggiornatiDdtCli = [nuovoDdt, ...listaDdtClienti]
+    setListaDdtClienti(aggiornatiDdtCli)
+    localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(aggiornatiDdtCli))
+
+    // Aggiorna giacenza a magazzino per la quota eventualmente spedita da stock
+    let articoliModificati = false
+    const articoliAggiornati = articoli.map((art) => {
+      // Calcola quanti pezzi sono stati prelevati da stock per questo articolo
+      const righeArticolo = righeDaSpedire.filter((r) => r.articolo_id === art.id)
+      if (righeArticolo.length === 0) return art
+
+      let prelievoDaStock = 0
+      righeArticolo.forEach((r) => {
+        // Se la quantità spedita supera i pezzi pronti da OdP (o non c'è OdP), la differenza scala il magazzino stock
+        const daStock = Math.max(0, r.quantita_da_spedire - r.quantita_pronta)
+        prelievoDaStock += daStock
+      })
+
+      if (prelievoDaStock > 0) {
+        articoliModificati = true
+        const nuovaGiacenza = Math.max(0, art.giacenza_attuale - prelievoDaStock)
+        const artAggiornato = { ...art, giacenza_attuale: nuovaGiacenza }
+        syncService.salvaArticolo(artAggiornato)
+        return artAggiornato
+      }
+      return art
+    })
+
+    if (articoliModificati) {
+      setArticoli(articoliAggiornati)
+      localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
+    }
+
+    // Aggiorna stato degli Ordini Clienti coinvolti
+    const ordiniCoinvolti = new Set(righeDaSpedire.map((r) => r.ordine_id))
+    const ordiniAggiornati = ordiniClienti.map((ord) => {
+      if (!ordiniCoinvolti.has(ord.id)) return ord
+
+      // Calcola avanzamento globale dell'ordine
+      const totaleOrdinato = (ord.righe || []).reduce((acc, r) => acc + (r.quantita || 0), 0)
+      let totaleSpedito = 0
+
+      aggiornatiDdtCli.forEach((doc) => {
+        doc.righe.forEach((r) => {
+          if (r.ordine_cliente_id === ord.id) {
+            totaleSpedito += r.quantita_spedita
+          }
+        })
+      })
+
+      const nuovoStato = totaleSpedito >= totaleOrdinato
+        ? ('evaso' as const)
+        : totaleSpedito > 0
+        ? ('parzialmente_evaso' as const)
+        : ord.stato
+
+      return {
+        ...ord,
+        stato: nuovoStato
+      }
+    })
+
+    setOrdiniClienti(ordiniAggiornati)
+    localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+
+    // Aggiorna stato degli OdP coinvolti a 'spedito' se interamente consegnati
+    const odpIdsCoinvolti = new Set(righeDaSpedire.map((r) => r.odp_id).filter(Boolean))
+    if (odpIdsCoinvolti.size > 0) {
+      const odpAggiornati = odpList.map((odp) => {
+        if (odpIdsCoinvolti.has(odp.id)) {
+          syncService.aggiornaStatoOdP(odp.id, 'spedito', odp.quantita_da_produrre)
+          return {
+            ...odp,
+            stato: 'spedito' as const
+          }
+        }
+        return odp
+      })
+      setOdpList(odpAggiornati)
+      localStorage.setItem('machinaflow_odp', JSON.stringify(odpAggiornati))
+    }
+
+    // Chiudi modale e apri anteprima di stampa A4 immediata
+    setModaleDdtClienteAperta(false)
+    setDdtClientePerStampa(nuovoDdt)
+    setNotifica(`✓ Documento di Trasporto ${numeroDdtGenerato} emesso con successo! Pronto per la stampa.`)
+    setTimeout(() => setNotifica(null), 5000)
+  }
+
+  // Filtro ricerca DDT Clienti
+  const ddtClientiFiltrati = useMemo(() => {
+    if (!ricercaDdtClienti.trim()) return listaDdtClienti
+    const q = ricercaDdtClienti.toLowerCase()
+    return listaDdtClienti.filter(
+      (doc) =>
+        doc.numero_ddt.toLowerCase().includes(q) ||
+        doc.cliente_nome.toLowerCase().includes(q) ||
+        (doc.destinazione_diversa && doc.destinazione_diversa.toLowerCase().includes(q)) ||
+        doc.righe.some(
+          (r) =>
+            r.articolo_codice.toLowerCase().includes(q) ||
+            r.articolo_descrizione.toLowerCase().includes(q) ||
+            (r.codice_ordine_cliente && r.codice_ordine_cliente.toLowerCase().includes(q)) ||
+            (r.codice_odp && r.codice_odp.toLowerCase().includes(q))
+        )
+    )
+  }, [listaDdtClienti, ricercaDdtClienti])
+
+  // Esportazione CSV DDT Clienti
+  const handleEsportaTuttiCsvClienti = () => {
+    const separatore = ';'
+    const intestazioni = [
+      'DataDDT',
+      'NumeroDDT',
+      'Cliente',
+      'PartitaIVA',
+      'Destinazione',
+      'RifOrdine',
+      'RifOdP',
+      'CodiceArticolo',
+      'DescrizioneArticolo',
+      'QuantitaSpedita',
+      'UnitaMisura',
+      'PesoKg',
+      'Causale',
+      'Vettore',
+      'Colli'
+    ]
+
+    const righeCsv = ddtClientiFiltrati.flatMap((doc) =>
+      doc.righe.map((r) => [
+        new Date(doc.data_emissione).toLocaleDateString('it-IT'),
+        `"${doc.numero_ddt}"`,
+        `"${doc.cliente_nome}"`,
+        `"${doc.cliente_piva || ''}"`,
+        `"${doc.destinazione_diversa || doc.cliente_indirizzo || ''}"`,
+        `"${r.codice_ordine_cliente || ''}"`,
+        `"${r.codice_odp || ''}"`,
+        `"${r.articolo_codice}"`,
+        `"${r.articolo_descrizione.replace(/"/g, '""')}"`,
+        r.quantita_spedita,
+        r.unita_misura,
+        r.peso_kg_riga || '',
+        `"${doc.causale_trasporto}"`,
+        `"${doc.vettore_nome}"`,
+        doc.numero_colli
+      ])
+    )
+
+    const contenuto = [intestazioni.join(separatore), ...righeCsv.map((r) => r.join(separatore))].join('\r\n')
+    const blob = new Blob(['\uFEFF' + contenuto], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `DDT_Clienti_MachinaFlow_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    setNotifica('✓ File DDT Clienti esportato con successo per la fatturazione!')
+    setTimeout(() => setNotifica(null), 4000)
+  }
   const handleEsportaTuttiCsv = () => {
     const separatore = ';'
     const intestazioni = [
@@ -338,31 +829,52 @@ export default function SpedizioniDdtPage() {
       <div className="no-print flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
-            <Truck className="w-8 h-8 text-pink-500" />
-            Spedizioni & DDT Conto Terzi
+            <Truck className="w-8 h-8 text-emerald-400" />
+            Spedizioni & Documenti di Trasporto (DDT)
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Gestisci i Documenti di Trasporto verso terzisti (zincatura, verniciatura, trattamenti termici), ristampa i moduli A4 ed esporta i dati per il gestionale contabile.
+            Emetti e gestisci i DDT di consegna per i clienti (vendite complete e parziali) e i DDT verso terzisti (trattamenti termici, zincatura, verniciatura).
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={handleEsportaTuttiCsv}
-            className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-white text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-2"
-            title="Esporta tutte le righe visibili in formato CSV/Excel per il software contabile"
+            onClick={() => handleApriModaleDdtCliente()}
+            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wide shadow-lg shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-2"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>Esporta per Gestionale (CSV/Excel)</span>
+            <PackageCheck className="w-4 h-4" />
+            <span>Nuovo DDT di Consegna Cliente</span>
           </button>
+
+          {tabAttivo === 'clienti' ? (
+            <button
+              type="button"
+              onClick={handleEsportaTuttiCsvClienti}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-white text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-2"
+              title="Esporta DDT clienti per la contabilità / fatturazione"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+              <span>Esporta Clienti (CSV)</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleEsportaTuttiCsv}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-white text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-2"
+              title="Esporta tutte le righe terzisti in formato CSV/Excel per il software contabile"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-pink-400" />
+              <span>Esporta Terzisti (CSV)</span>
+            </button>
+          )}
 
           <Link
             href="/officina"
-            className="px-4 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold shadow-md shadow-pink-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
           >
-            <Truck className="w-4 h-4" />
-            <span>Terminale Officina EXT</span>
+            <Truck className="w-4 h-4 text-pink-400" />
+            <span>Terminale EXT</span>
           </Link>
         </div>
       </div>
@@ -375,8 +887,21 @@ export default function SpedizioniDdtPage() {
         </div>
       )}
 
-      {/* Barra di Navigazione Tab */}
+      {/* Barra di Navigazione Tab Coordinata */}
       <div className="no-print flex items-center gap-2 border-b border-slate-800 pb-2">
+        <button
+          type="button"
+          onClick={() => setTabAttivo('clienti')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            tabAttivo === 'clienti'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <PackageCheck className="w-4 h-4" />
+          <span>DDT Vendite & Consegne Clienti ({listaDdtClienti.length})</span>
+        </button>
+
         <button
           type="button"
           onClick={() => setTabAttivo('ddt')}
@@ -387,7 +912,7 @@ export default function SpedizioniDdtPage() {
           }`}
         >
           <Truck className="w-4 h-4" />
-          <span>DDT & Spedizioni Fuori Sede ({listaDdt.length})</span>
+          <span>DDT Conto Terzi & Fuori Sede ({listaDdt.length})</span>
         </button>
 
         <button
@@ -404,7 +929,186 @@ export default function SpedizioniDdtPage() {
         </button>
       </div>
 
-      {tabAttivo === 'ddt' ? (
+      {/* ========================================================================= */}
+      {/* TAB 1: DDT VENDITE & CONSEGNE CLIENTI                                      */}
+      {/* ========================================================================= */}
+      {tabAttivo === 'clienti' && (
+        <>
+          {/* KPI Cards Riepilogo Spedizioni Clienti */}
+          <div className="no-print grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+              <div>
+                <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">DDT Consegna Emessi</div>
+                <div className="text-2xl font-black text-white mt-1 font-mono">{listaDdtClienti.length}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Spedizioni ai clienti finali</div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-800/80 text-emerald-400">
+                <PackageCheck className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-emerald-950/20 border border-emerald-900/40 flex items-center justify-between">
+              <div>
+                <div className="text-xs text-emerald-300 font-bold uppercase tracking-wider">Pezzi Totali Spediti</div>
+                <div className="text-2xl font-black text-emerald-400 mt-1 font-mono">
+                  {listaDdtClienti.reduce((acc, d) => acc + d.righe.reduce((rAcc, r) => rAcc + r.quantita_spedita, 0), 0)}
+                </div>
+                <div className="text-[11px] text-emerald-200/60 mt-0.5">Particolari meccanici consegnati</div>
+              </div>
+              <div className="p-3 rounded-xl bg-emerald-900/40 text-emerald-300">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-blue-950/20 border border-blue-900/40 flex items-center justify-between">
+              <div>
+                <div className="text-xs text-blue-300 font-bold uppercase tracking-wider">Clienti Serviti</div>
+                <div className="text-2xl font-black text-blue-400 mt-1 font-mono">
+                  {new Set(listaDdtClienti.map((d) => d.cliente_id)).size}
+                </div>
+                <div className="text-[11px] text-blue-200/60 mt-0.5">Destinatari unici con consegne</div>
+              </div>
+              <div className="p-3 rounded-xl bg-blue-900/40 text-blue-300">
+                <UserCheck className="w-6 h-6" />
+              </div>
+            </div>
+          </div>
+
+          {/* Barra Ricerca e Filtri DDT Clienti */}
+          <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="relative w-full md:w-96">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={ricercaDdtClienti}
+                onChange={(e) => setRicercaDdtClienti(e.target.value)}
+                placeholder="Cerca per numero DDT, cliente, commessa o particolare..."
+                className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleApriModaleDdtCliente()}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-2 self-start md:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nuovo DDT Consegna</span>
+            </button>
+          </div>
+
+          {/* Tabella DDT Consegne Clienti */}
+          <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-3.5 whitespace-nowrap">DDT / Emissione</th>
+                    <th className="py-3 px-3.5">Cliente Destinatario</th>
+                    <th className="py-3 px-3.5">Rif. Ordine / Commessa</th>
+                    <th className="py-3 px-3.5">Particolari & Quantità</th>
+                    <th className="py-3 px-3.5">Trasporto & Vettore</th>
+                    <th className="py-3 px-3.5 text-right">Azioni</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {ddtClientiFiltrati.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-500">
+                        Nessun DDT di vendita trovato con i filtri attuali.
+                      </td>
+                    </tr>
+                  ) : (
+                    ddtClientiFiltrati.map((doc) => (
+                      <tr key={doc.id} className="hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span className="font-mono font-black text-emerald-400 block text-sm">
+                            {doc.numero_ddt}
+                          </span>
+                          <span className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                            <Calendar className="w-3 h-3" />
+                            {new Date(doc.data_emissione).toLocaleDateString('it-IT')}
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-3.5">
+                          <strong className="text-white block text-sm font-semibold">{doc.cliente_nome}</strong>
+                          <span className="text-[11px] text-slate-400 block">
+                            {doc.destinazione_diversa || doc.cliente_indirizzo || 'Sede legale'}
+                          </span>
+                        </td>
+
+                        <td className="py-3 px-3.5">
+                          <div className="space-y-1">
+                            {Array.from(new Set(doc.righe.map((r) => r.codice_ordine_cliente).filter(Boolean))).map((c) => (
+                              <span key={c} className="inline-block px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-[11px] font-mono text-emerald-300 mr-1">
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3.5">
+                          <div className="space-y-1.5 max-w-md">
+                            {doc.righe.map((r) => (
+                              <div
+                                key={r.id}
+                                className="flex items-center justify-between gap-3 p-1.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs"
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-mono font-bold text-slate-100 shrink-0">
+                                    {r.articolo_codice}
+                                  </span>
+                                  <span className="text-slate-400 text-[11px] truncate" title={r.articolo_descrizione}>
+                                    {r.articolo_descrizione}
+                                  </span>
+                                </div>
+
+                                <div className="shrink-0 flex items-center gap-2">
+                                  {r.codice_odp && (
+                                    <span className="font-mono text-[10px] text-slate-500 hidden sm:inline">
+                                      {r.codice_odp}
+                                    </span>
+                                  )}
+                                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-bold font-mono text-[11px] border border-emerald-800/60">
+                                    {r.quantita_spedita} {r.unita_misura}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3.5 text-xs text-slate-400">
+                          <div><strong className="text-slate-200">{doc.vettore_nome}</strong></div>
+                          <div>{doc.numero_colli} colli &bull; {doc.peso_totale_kg ? `${doc.peso_totale_kg} kg` : 'A vista'}</div>
+                        </td>
+
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => setDdtClientePerStampa(doc)}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ml-auto"
+                            title="Visualizza e Stampa A4 del DDT"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Stampa A4</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: DDT CONTO TERZI & FUORI SEDE                                        */}
+      {/* ========================================================================= */}
+      {tabAttivo === 'ddt' && (
         <>
           {/* KPI Cards Riepilogo Spedizioni */}
           <div className="no-print grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -533,15 +1237,32 @@ export default function SpedizioniDdtPage() {
 
                         {/* Merci Spedite */}
                         <td className="py-3 px-3.5">
-                          <div className="space-y-1">
+                          <div className="space-y-1.5 max-w-md">
                             {doc.righe.map((r, i) => (
-                              <div key={r.id || i} className="text-xs">
-                                <span className="font-mono font-bold text-orange-400 mr-1.5">{r.codice_odp}</span>
-                                <span className="text-slate-200 font-semibold">{r.articolo_codice}</span>
-                                <span className="text-slate-400 text-[11px]"> ({r.quantita_spedita} {r.unita_misura})</span>
-                                <span className="block text-[10px] text-pink-300/80 font-mono italic">
-                                  &bull; {r.nome_fase}
-                                </span>
+                              <div
+                                key={r.id || i}
+                                className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs space-y-1"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-mono font-bold text-orange-400 shrink-0">
+                                      {r.codice_odp}
+                                    </span>
+                                    <span className="text-slate-200 font-semibold truncate">
+                                      {r.articolo_codice}
+                                    </span>
+                                  </div>
+                                  <span className="px-2 py-0.5 rounded bg-pink-950/80 text-pink-300 font-bold font-mono text-[11px] border border-pink-800/60 shrink-0">
+                                    {r.quantita_spedita} {r.unita_misura}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-medium truncate">
+                                  {r.articolo_descrizione}
+                                </div>
+                                <div className="text-[10px] text-pink-300 font-mono flex items-center gap-1">
+                                  <span>↳</span>
+                                  <span className="font-bold">{r.nome_fase}</span>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -603,10 +1324,12 @@ export default function SpedizioniDdtPage() {
             </div>
           </div>
         </>
-      ) : (
-        /* =========================================================================
-           TAB 2: ANAGRAFICA FORNITORI TERZISTI & PARTNER ESTERNI
-           ========================================================================= */
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: ANAGRAFICA FORNITORI TERZISTI & PARTNER ESTERNI                    */}
+      {/* ========================================================================= */}
+      {tabAttivo === 'terzisti' && (
         <div className="no-print space-y-4">
           <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="relative flex-1 max-w-md">
@@ -898,10 +1621,392 @@ export default function SpedizioniDdtPage() {
         </div>
       )}
 
-      {/* MODALE ANTEPRIMA STAMPA DDT */}
+      {/* MODALE EMISSIONE NUOVO DDT CONSEGNA CLIENTE */}
+      {modaleDdtClienteAperta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            {/* Header Modale */}
+            <div className="p-5 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center font-bold">
+                  <PackageCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">
+                    Emissione Documento di Trasporto (DDT Vendita / Consegna)
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Seleziona gli articoli finiti e inserisci le quantità per consegna totale o parziale
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModaleDdtClienteAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form Principale */}
+            <form onSubmit={handleConfermaEmissioneDdtCliente} className="p-6 space-y-6 overflow-y-auto flex-1">
+              {/* Selezione Cliente e Destinazione */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Cliente Intestatario Commessa *
+                  </label>
+                  <select
+                    value={formDdtCliente.cliente_id}
+                    onChange={(e) => handleSelezionaClientePerDDT(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {clienti.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.ragione_sociale} {c.partita_iva ? `(P.IVA ${c.partita_iva})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Luogo di Destinazione Merci
+                  </label>
+                  <input
+                    type="text"
+                    value={formDdtCliente.destinazione_diversa}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, destinazione_diversa: e.target.value })}
+                    placeholder="Indirizzo stabilimento o cantiere cliente..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Dati Logistici Vettore e Colli */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                    Causale Trasporto
+                  </label>
+                  <input
+                    type="text"
+                    value={formDdtCliente.causale_trasporto}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, causale_trasporto: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                    Porto
+                  </label>
+                  <select
+                    value={formDdtCliente.porto}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, porto: e.target.value as 'Franco' | 'Assegnato' })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Franco">Franco</option>
+                    <option value="Assegnato">Assegnato</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                    Numero Colli
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={formDdtCliente.numero_colli}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, numero_colli: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                    Peso Totale (kg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={formDdtCliente.peso_totale_kg}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, peso_totale_kg: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                    Vettore Incaricato
+                  </label>
+                  <input
+                    type="text"
+                    value={formDdtCliente.vettore_nome}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, vettore_nome: e.target.value })}
+                    placeholder="Es: Mittente (Mezzo Proprio), BRT Corriere, Ritiro Cliente..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                    Aspetto Esteriore Beni
+                  </label>
+                  <input
+                    type="text"
+                    value={formDdtCliente.aspetto_beni}
+                    onChange={(e) => setFormDdtCliente({ ...formDdtCliente, aspetto_beni: e.target.value })}
+                    placeholder="Es: Scatole su Europallet, Casse in legno..."
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Elenco Articoli Pronti / Ordinati per la Spedizione */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    Articoli Ordinati & Particolari da Spedire
+                  </h3>
+                  <span className="text-[11px] text-slate-400 italic">
+                    Puoi modificare la quantità da spedire per effettuare consegne parziali
+                  </span>
+                </div>
+
+                {formDdtCliente.righeSelezionate.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 bg-slate-950/40 rounded-xl border border-slate-800">
+                    Nessuna commessa con pezzi in attesa di consegna per questo cliente.
+                  </div>
+                ) : (
+                  <div className="border border-slate-800 rounded-xl overflow-hidden shadow-inner">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold">
+                        <tr>
+                          <th className="py-2.5 px-3 text-center w-10">Includi</th>
+                          <th className="py-2.5 px-3">Commessa / OdP</th>
+                          <th className="py-2.5 px-3">Codice Articolo</th>
+                          <th className="py-2.5 px-3">Descrizione</th>
+                          <th className="py-2.5 px-3 text-center">Ordinati</th>
+                          <th className="py-2.5 px-3 text-center">Pronti OdP</th>
+                          <th className="py-2.5 px-3 text-center">Disponibili Totali</th>
+                          <th className="py-2.5 px-3 text-center">Già Spediti</th>
+                          <th className="py-2.5 px-3 text-center w-36">Q.tà da Spedire Ora</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80 bg-slate-900/60">
+                        {formDdtCliente.righeSelezionate.map((r, idx) => {
+                          const residuoMassimo = r.quantita_ordinata - r.quantita_gia_spedita
+                          const totaleFisicoDisponibile = r.quantita_pronta + r.giacenza_magazzino
+                          const copribile = Math.min(residuoMassimo, totaleFisicoDisponibile)
+
+                          return (
+                            <tr
+                              key={r.odp_id ? `${r.riga_ordine_id}-${r.odp_id}` : (r.riga_ordine_id ? `${r.riga_ordine_id}-${idx}` : `riga-${idx}`)}
+                              className={`transition-colors ${r.selezionato ? 'bg-emerald-950/20' : 'opacity-60'}`}
+                            >
+                              <td className="py-2.5 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={r.selezionato}
+                                  onChange={(e) => {
+                                    const val = e.target.checked
+                                    const aggiornate = [...formDdtCliente.righeSelezionate]
+                                    aggiornate[idx].selezionato = val
+                                    const nuovoPeso = aggiornate
+                                      .filter((x) => x.selezionato)
+                                      .reduce((acc, curr) => acc + curr.quantita_da_spedire * curr.peso_unitario, 0)
+                                    setFormDdtCliente({
+                                      ...formDdtCliente,
+                                      righeSelezionate: aggiornate,
+                                      peso_totale_kg: Number(nuovoPeso.toFixed(1))
+                                    })
+                                  }}
+                                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                />
+                              </td>
+
+                              <td className="py-2.5 px-3 font-mono font-bold text-emerald-400">
+                                {r.codice_ordine}
+                                {r.codice_odp && (
+                                  <span className={`block text-[10px] font-normal ${r.codice_odp.includes('STOCK') ? 'text-amber-400 font-bold' : 'text-slate-500'}`}>
+                                    {r.codice_odp}
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-2.5 px-3 font-mono font-bold text-white">
+                                {r.articolo_codice}
+                              </td>
+
+                              <td className="py-2.5 px-3 text-slate-300 font-medium">
+                                {r.articolo_descrizione}
+                              </td>
+
+                              <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-200">
+                                {r.quantita_ordinata} {r.unita_misura}
+                              </td>
+
+                              {/* Pezzi Pronti da OdP */}
+                              <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                <span className={`font-mono text-xs px-2 py-0.5 rounded font-bold ${
+                                  r.quantita_pronta > 0 
+                                    ? 'bg-blue-950 text-blue-300 border border-blue-800' 
+                                    : 'text-slate-500'
+                                }`}>
+                                  {r.quantita_pronta} {r.unita_misura}
+                                </span>
+                              </td>
+
+                              {/* Giacenza Totale Disponibile (OdP + Magazzino) con dettaglio trasparente */}
+                              <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                <div className="inline-flex flex-col items-center">
+                                  <span className={`font-mono text-xs px-2 py-0.5 rounded font-bold ${
+                                    totaleFisicoDisponibile > 0 
+                                      ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-700/60 shadow-xs' 
+                                      : 'text-slate-500'
+                                  }`}>
+                                    {totaleFisicoDisponibile} {r.unita_misura}
+                                  </span>
+                                  {r.giacenza_magazzino > 0 && r.quantita_pronta > 0 && (
+                                    <span className="text-[10px] text-amber-300/80 mt-0.5 font-medium">
+                                      ({r.quantita_pronta} OdP + {r.giacenza_magazzino} Stock)
+                                    </span>
+                                  )}
+                                  {r.quantita_pronta === 0 && r.giacenza_magazzino > 0 && (
+                                    <span className="text-[10px] text-amber-300/80 mt-0.5 font-medium">
+                                      (tutti da Stock)
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td className="py-2.5 px-3 text-center font-mono text-slate-400">
+                                {r.quantita_gia_spedita} {r.unita_misura}
+                              </td>
+
+                              <td className="py-2.5 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={residuoMassimo}
+                                    disabled={!r.selezionato}
+                                    value={r.quantita_da_spedire}
+                                    onChange={(e) => {
+                                      const nuovaQta = Math.max(1, parseInt(e.target.value) || 0)
+                                      const aggiornate = [...formDdtCliente.righeSelezionate]
+                                      aggiornate[idx].quantita_da_spedire = nuovaQta
+                                      const nuovoPeso = aggiornate
+                                        .filter((x) => x.selezionato)
+                                        .reduce((acc, curr) => acc + curr.quantita_da_spedire * curr.peso_unitario, 0)
+                                      setFormDdtCliente({
+                                        ...formDdtCliente,
+                                        righeSelezionate: aggiornate,
+                                        peso_totale_kg: Number(nuovoPeso.toFixed(1))
+                                      })
+                                    }}
+                                    className="w-20 px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono font-bold text-center text-xs focus:outline-none focus:border-emerald-500"
+                                  />
+
+                                  {/* Pulsante rapido "Saldo da Stock" se c'è giacenza e l'OdP non copre tutto */}
+                                  {totaleFisicoDisponibile > r.quantita_pronta && r.quantita_da_spedire < residuoMassimo && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const aggiornate = [...formDdtCliente.righeSelezionate]
+                                        aggiornate[idx].quantita_da_spedire = copribile
+                                        aggiornate[idx].selezionato = true
+                                        const nuovoPeso = aggiornate
+                                          .filter((x) => x.selezionato)
+                                          .reduce((acc, curr) => acc + curr.quantita_da_spedire * curr.peso_unitario, 0)
+                                        setFormDdtCliente({
+                                          ...formDdtCliente,
+                                          righeSelezionate: aggiornate,
+                                          peso_totale_kg: Number(nuovoPeso.toFixed(1))
+                                        })
+                                      }}
+                                      title={`Usa fino a ${copribile} pz combinando OdP e Magazzino Stock`}
+                                      className="px-1.5 py-1 text-[10px] font-bold rounded bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 cursor-pointer"
+                                    >
+                                      Max
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Note Trasporto */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                  Note di Consegna / Istruzioni Speciali
+                </label>
+                <textarea
+                  rows={2}
+                  value={formDdtCliente.note_trasporto}
+                  onChange={(e) => setFormDdtCliente({ ...formDdtCliente, note_trasporto: e.target.value })}
+                  placeholder="Es: Ritiro al mattino; allegare certificati collaudo 3.1..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Footer Modale */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                <div className="text-xs text-slate-400">
+                  Totale righe selezionate:{' '}
+                  <strong className="text-emerald-400">
+                    {formDdtCliente.righeSelezionate.filter((r) => r.selezionato).length}
+                  </strong>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModaleDdtClienteAperta(false)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 cursor-pointer"
+                  >
+                    Annulla
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wide shadow-lg shadow-emerald-600/30 transition-all cursor-pointer flex items-center gap-2"
+                  >
+                    <PackageCheck className="w-4 h-4" />
+                    <span>Conferma ed Emetti DDT Cliente</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE ANTEPRIMA STAMPA DDT CLIENTE */}
+      {ddtClientePerStampa && (
+        <SchedaDDTStampabile
+          ddt={ddtClientePerStampa}
+          tipo="cliente"
+          onChiudi={() => setDdtClientePerStampa(null)}
+        />
+      )}
+
+      {/* MODALE ANTEPRIMA STAMPA DDT TERZISTA */}
       {ddtSelezionatoPerStampa && (
         <SchedaDDTStampabile
           ddt={ddtSelezionatoPerStampa}
+          tipo="terzista"
           onChiudi={() => setDdtSelezionatoPerStampa(null)}
         />
       )}

@@ -46,9 +46,12 @@ import {
   Articolo,
   ComponenteDistintaBase,
   DocumentoTrasportoEsterno,
-  FornitoreTerzista
+  FornitoreTerzista,
+  OrdineCliente,
+  RigaOrdineCliente,
+  Cliente
 } from '@/types/database'
-import { SEED_FORNITORI_TERZISTI } from '@/lib/data-service'
+import { SEED_FORNITORI_TERZISTI, SEED_ORDINI_CLIENTI, SEED_CLIENTI } from '@/lib/data-service'
 import SchedaDDTStampabile from '@/components/SchedaDDTStampabile'
 import {
   SEED_CENTRI_LAVORO,
@@ -395,6 +398,11 @@ export default function TerminaleOfficinaPage() {
       codice_odp: codiceLottoA,
       quantita_da_produrre: quantitaDaSplittare,
       stato: 'in_lavorazione',
+      ordine_cliente_id: odp.ordine_cliente_id,
+      codice_ordine_cliente: odp.codice_ordine_cliente,
+      cliente_id: odp.cliente_id,
+      cliente_nome: odp.cliente_nome,
+      numero_riga_ordine: odp.numero_riga_ordine,
       fasi: odp.fasi.map((f) => {
         if (f.id === fase.id) {
           return {
@@ -416,6 +424,11 @@ export default function TerminaleOfficinaPage() {
       quantita_da_produrre: quantitaResidua,
       quantita_prodotta: 0,
       stato: 'pianificato',
+      ordine_cliente_id: odp.ordine_cliente_id,
+      codice_ordine_cliente: odp.codice_ordine_cliente,
+      cliente_id: odp.cliente_id,
+      cliente_nome: odp.cliente_nome,
+      numero_riga_ordine: odp.numero_riga_ordine,
       qr_code_token: `QR-${codiceLottoB}`,
       fasi: odp.fasi.map((f) => ({
         ...f,
@@ -486,6 +499,12 @@ export default function TerminaleOfficinaPage() {
         quantita_prodotta: 0,
         stato: 'pianificato',
         priorita: 4, // Priorità URGENTE automatica per i ripristini
+        ordine_cliente_id: odp.ordine_cliente_id,
+        codice_ordine_cliente: odp.codice_ordine_cliente,
+        cliente_id: odp.cliente_id,
+        cliente_nome: odp.cliente_nome,
+        numero_riga_ordine: odp.numero_riga_ordine,
+        odp_origine_scarto_id: odp.id,
         qr_code_token: `QR-${codiceRipristino}`,
         note: `⚡ Ripristino URGENTE di ${pezziScarto} pz scartati durante la Fase #${fase.sequenza} (${fase.nome_fase}).`,
         fasi: odp.fasi.map((f) => ({
@@ -580,6 +599,11 @@ export default function TerminaleOfficinaPage() {
       codice_odp: codiceFatti,
       quantita_da_produrre: pezziBuoni,
       quantita_prodotta: pezziBuoni,
+      ordine_cliente_id: odp.ordine_cliente_id,
+      codice_ordine_cliente: odp.codice_ordine_cliente,
+      cliente_id: odp.cliente_id,
+      cliente_nome: odp.cliente_nome,
+      numero_riga_ordine: odp.numero_riga_ordine,
       fasi: odp.fasi.map((f) => {
         if (f.id === fase.id) {
           return {
@@ -605,6 +629,11 @@ export default function TerminaleOfficinaPage() {
       quantita_da_produrre: quantitaResidua,
       quantita_prodotta: 0,
       stato: 'in_lavorazione',
+      ordine_cliente_id: odp.ordine_cliente_id,
+      codice_ordine_cliente: odp.codice_ordine_cliente,
+      cliente_id: odp.cliente_id,
+      cliente_nome: odp.cliente_nome,
+      numero_riga_ordine: odp.numero_riga_ordine,
       qr_code_token: `QR-${codiceResiduo}`,
       fasi: odp.fasi.map((f) => {
         if (f.sequenza < fase.sequenza) {
@@ -3416,6 +3445,79 @@ export default function TerminaleOfficinaPage() {
                 </div>
               </div>
 
+              {/* Riferimento Commessa & Cliente */}
+              {(() => {
+                let nomeCli = odpDettaglio.cliente_nome || ''
+                let codOrd = odpDettaglio.codice_ordine_cliente || ''
+                let rigaNum = odpDettaglio.numero_riga_ordine ? `Riga / Item #${odpDettaglio.numero_riga_ordine}` : ''
+
+                if (!nomeCli || !codOrd) {
+                  const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+                    try {
+                      const item = localStorage.getItem(chiave)
+                      if (!item || item === 'undefined' || item === 'null') return fallback
+                      return JSON.parse(item) as T
+                    } catch {
+                      return fallback
+                    }
+                  }
+                  const clientiList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
+                  const ordiniSalvati = parseSicuro<(OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })[]>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+
+                  let ordineTrovato: (OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] }) | undefined
+
+                  if (odpDettaglio.ordine_cliente_id) {
+                    ordineTrovato = ordiniSalvati.find((o) => o.id === odpDettaglio.ordine_cliente_id)
+                  } else if (odpDettaglio.riga_ordine_cliente_id) {
+                    ordineTrovato = ordiniSalvati.find((o) => o.righe?.some((r) => r.id === odpDettaglio.riga_ordine_cliente_id))
+                  }
+
+                  if (!ordineTrovato && odpDettaglio.note) {
+                    const matchOrd = odpDettaglio.note.match(/ORD-[A-Z]+-[0-9]+-[0-9]+/i)
+                    if (matchOrd) {
+                      const codiceEstratto = matchOrd[0].toUpperCase()
+                      ordineTrovato = ordiniSalvati.find((o) => o.numero_ordine.toUpperCase() === codiceEstratto)
+                    }
+                  }
+
+                  if (ordineTrovato) {
+                    codOrd = codOrd || ordineTrovato.numero_ordine
+                    const clienteRel = clientiList.find((c) => c.id === ordineTrovato!.cliente_id) || ordineTrovato.cliente
+                    nomeCli = nomeCli || clienteRel?.ragione_sociale || 'Cliente'
+
+                    if (!rigaNum && odpDettaglio.riga_ordine_cliente_id) {
+                      const idx = ordineTrovato.righe?.findIndex((r) => r.id === odpDettaglio.riga_ordine_cliente_id)
+                      if (idx !== undefined && idx >= 0) {
+                        rigaNum = `Riga / Item #${idx + 1}`
+                      }
+                    }
+                  }
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-orange-50/50 p-3.5 rounded-xl border border-orange-200/80 text-xs">
+                    <div>
+                      <span className="text-[10px] font-black text-orange-800 uppercase block">Destinatario / Cliente</span>
+                      <span className="text-sm font-black text-slate-900">
+                        {nomeCli || 'Cliente Interno / Stock'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-orange-800 uppercase block">Rif. Ordine Cliente</span>
+                      <span className="text-sm font-bold font-mono text-slate-900">
+                        {codOrd || 'N/D'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-orange-800 uppercase block">Posizione / Riga Item</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {rigaNum || 'Item #1'}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Note OdP */}
               {odpDettaglio.note && (
                 <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-900">
@@ -4398,6 +4500,79 @@ export default function TerminaleOfficinaPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Riferimento Commessa & Cliente */}
+              {(() => {
+                let nomeCli = odpDettaglio.cliente_nome || ''
+                let codOrd = odpDettaglio.codice_ordine_cliente || ''
+                let rigaNum = odpDettaglio.numero_riga_ordine ? `Riga / Item #${odpDettaglio.numero_riga_ordine}` : ''
+
+                if (!nomeCli || !codOrd) {
+                  const parseSicuro = <T,>(chiave: string, fallback: T): T => {
+                    try {
+                      const item = localStorage.getItem(chiave)
+                      if (!item || item === 'undefined' || item === 'null') return fallback
+                      return JSON.parse(item) as T
+                    } catch {
+                      return fallback
+                    }
+                  }
+                  const clientiList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
+                  const ordiniSalvati = parseSicuro<(OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })[]>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+
+                  let ordineTrovato: (OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] }) | undefined
+
+                  if (odpDettaglio.ordine_cliente_id) {
+                    ordineTrovato = ordiniSalvati.find((o) => o.id === odpDettaglio.ordine_cliente_id)
+                  } else if (odpDettaglio.riga_ordine_cliente_id) {
+                    ordineTrovato = ordiniSalvati.find((o) => o.righe?.some((r) => r.id === odpDettaglio.riga_ordine_cliente_id))
+                  }
+
+                  if (!ordineTrovato && odpDettaglio.note) {
+                    const matchOrd = odpDettaglio.note.match(/ORD-[A-Z]+-[0-9]+-[0-9]+/i)
+                    if (matchOrd) {
+                      const codiceEstratto = matchOrd[0].toUpperCase()
+                      ordineTrovato = ordiniSalvati.find((o) => o.numero_ordine.toUpperCase() === codiceEstratto)
+                    }
+                  }
+
+                  if (ordineTrovato) {
+                    codOrd = codOrd || ordineTrovato.numero_ordine
+                    const clienteRel = clientiList.find((c) => c.id === ordineTrovato!.cliente_id) || ordineTrovato.cliente
+                    nomeCli = nomeCli || clienteRel?.ragione_sociale || 'Cliente'
+
+                    if (!rigaNum && odpDettaglio.riga_ordine_cliente_id) {
+                      const idx = ordineTrovato.righe?.findIndex((r) => r.id === odpDettaglio.riga_ordine_cliente_id)
+                      if (idx !== undefined && idx >= 0) {
+                        rigaNum = `Riga / Item #${idx + 1}`
+                      }
+                    }
+                  }
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-orange-50/50 p-3.5 rounded-xl border border-orange-200/80 text-xs">
+                    <div>
+                      <span className="text-[10px] font-black text-orange-800 uppercase block">Destinatario / Cliente</span>
+                      <span className="text-sm font-black text-slate-900">
+                        {nomeCli || 'Cliente Interno / Stock'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-orange-800 uppercase block">Rif. Ordine Cliente</span>
+                      <span className="text-sm font-bold font-mono text-slate-900">
+                        {codOrd || 'N/D'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black text-orange-800 uppercase block">Posizione / Riga Item</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {rigaNum || 'Item #1'}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Note OdP */}
               {odpDettaglio.note && (

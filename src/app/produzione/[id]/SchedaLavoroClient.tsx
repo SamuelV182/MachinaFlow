@@ -20,8 +20,8 @@ import {
   Boxes,
   Truck
 } from 'lucide-react'
-import { OrdineProduzione, FaseOdP, Articolo, CentroLavoro, ComponenteDistintaBase } from '@/types/database'
-import { SEED_ODP, SEED_ARTICOLI, SEED_CENTRI_LAVORO, SEED_DISTINTA_BASE } from '@/lib/data-service'
+import { OrdineProduzione, FaseOdP, Articolo, CentroLavoro, ComponenteDistintaBase, OrdineCliente, RigaOrdineCliente, Cliente } from '@/types/database'
+import { SEED_ODP, SEED_ARTICOLI, SEED_CENTRI_LAVORO, SEED_DISTINTA_BASE, SEED_ORDINI_CLIENTI, SEED_CLIENTI } from '@/lib/data-service'
 
 export function SchedaLavoroClient({ odpId }: { odpId: string }) {
   const [odp, setOdp] = useState<(OrdineProduzione & { fasi: FaseOdP[] }) | null>(null)
@@ -30,6 +30,11 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
+  const [infoCommessa, setInfoCommessa] = useState<{ clienteNome: string; codiceOrdine: string; rigaItem: string }>({
+    clienteNome: 'Cliente Interno / Stock',
+    codiceOrdine: 'N/D',
+    rigaItem: 'Item #1'
+  })
 
   useEffect(() => {
     const parseSicuro = <T,>(chiave: string, fallback: T): T => {
@@ -54,6 +59,53 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
     if (trovatoOdp) {
       const art = articoliList.find((a) => a.id === trovatoOdp.articolo_id)
       setArticolo(art || null)
+
+      // Risoluzione gerarchica e robusta dei dati commessa cliente
+      const clientiList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
+      const ordiniSalvati = parseSicuro<(OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })[]>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+
+      let nomeCli = trovatoOdp.cliente_nome || ''
+      let codOrd = trovatoOdp.codice_ordine_cliente || ''
+      let rigaNum = trovatoOdp.numero_riga_ordine ? `Riga #${trovatoOdp.numero_riga_ordine}` : ''
+
+      // Se non presenti direttamente nell'OdP, esegui il lookup tramite ordine/riga
+      if (!nomeCli || !codOrd) {
+        let ordineTrovato: (OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] }) | undefined
+
+        if (trovatoOdp.ordine_cliente_id) {
+          ordineTrovato = ordiniSalvati.find((o) => o.id === trovatoOdp.ordine_cliente_id)
+        } else if (trovatoOdp.riga_ordine_cliente_id) {
+          ordineTrovato = ordiniSalvati.find((o) => o.righe?.some((r) => r.id === trovatoOdp.riga_ordine_cliente_id))
+        }
+
+        // Se non trovato tramite ID, cerca corrispondenza nel testo delle note (es. ORD-TOS-2026-140)
+        if (!ordineTrovato && trovatoOdp.note) {
+          const matchOrd = trovatoOdp.note.match(/ORD-[A-Z]+-[0-9]+-[0-9]+/i)
+          if (matchOrd) {
+            const codiceEstratto = matchOrd[0].toUpperCase()
+            ordineTrovato = ordiniSalvati.find((o) => o.numero_ordine.toUpperCase() === codiceEstratto)
+          }
+        }
+
+        if (ordineTrovato) {
+          codOrd = codOrd || ordineTrovato.numero_ordine
+          const clienteRel = clientiList.find((c) => c.id === ordineTrovato!.cliente_id) || ordineTrovato.cliente
+          nomeCli = nomeCli || clienteRel?.ragione_sociale || 'Cliente'
+
+          if (!rigaNum && trovatoOdp.riga_ordine_cliente_id) {
+            const idx = ordineTrovato.righe?.findIndex((r) => r.id === trovatoOdp.riga_ordine_cliente_id)
+            if (idx !== undefined && idx >= 0) {
+              rigaNum = `Riga #${idx + 1}`
+            }
+          }
+        }
+      }
+
+      setInfoCommessa({
+        clienteNome: nomeCli || 'Cliente Interno / Stock',
+        codiceOrdine: codOrd || 'N/D',
+        rigaItem: rigaNum || 'Item #1'
+      })
 
       // Genera QR Code per la scheda
       const payloadQr = JSON.stringify({
@@ -265,6 +317,36 @@ export function SchedaLavoroClient({ odpId }: { odpId: string }) {
               Note commessa: {odp.note}
             </p>
           )}
+        </div>
+
+        {/* Tracciabilità Commessa & Ordine Cliente */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-3 border-b border-black text-xs bg-slate-50 print:bg-transparent">
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-500 print:text-black block">
+              Cliente Destinatario:
+            </span>
+            <strong className="text-sm font-black text-slate-900 print:text-black">
+              {infoCommessa.clienteNome}
+            </strong>
+          </div>
+
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-500 print:text-black block">
+              Rif. Ordine Cliente:
+            </span>
+            <strong className="text-sm font-bold font-mono text-slate-900 print:text-black">
+              {infoCommessa.codiceOrdine}
+            </strong>
+          </div>
+
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-500 print:text-black block">
+              Riga / Item Commessa:
+            </span>
+            <strong className="text-sm font-bold text-slate-900 print:text-black">
+              {infoCommessa.rigaItem}
+            </strong>
+          </div>
         </div>
 
         {/* Materia Prima & Distinta Base (BOM) */}

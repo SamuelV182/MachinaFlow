@@ -2,63 +2,120 @@
 
 import React from 'react'
 import { Printer, Download, Truck, CheckCircle2, QrCode } from 'lucide-react'
-import { DocumentoTrasportoEsterno } from '@/types/database'
+import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente } from '@/types/database'
 
 interface SchedaDDTStampabileProps {
-  ddt: DocumentoTrasportoEsterno
+  ddt: DocumentoTrasportoEsterno | DocumentoTrasportoCliente
+  tipo?: 'terzista' | 'cliente'
   onChiudi: () => void
 }
 
-export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabileProps) {
+export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }: SchedaDDTStampabileProps) {
+  const isCliente = tipo === 'cliente' || 'cliente_nome' in ddt
+  const clienteDdt = isCliente ? (ddt as DocumentoTrasportoCliente) : null
+  const terzistaDdt = !isCliente ? (ddt as DocumentoTrasportoEsterno) : null
+
   const handleStampa = () => {
     window.print()
   }
 
   const handleDownloadCsv = () => {
     const separatore = ';'
-    const intestazioni = [
-      'DataDDT',
-      'NumeroDDT',
-      'DestinatarioFornitore',
-      'PartitaIVA',
-      'CodiceOdP',
-      'CodiceArticolo',
-      'DescrizioneArticolo',
-      'LavorazioneRichiesta',
-      'Quantita',
-      'UnitaMisura',
-      'PesoKg',
-      'CausaleTrasporto',
-      'Vettore',
-      'Colli'
-    ]
+    
+    if (isCliente && clienteDdt) {
+      const intestazioni = [
+        'DataDDT',
+        'NumeroDDT',
+        'DestinatarioCliente',
+        'PartitaIVA',
+        'Destinazione',
+        'RifOrdineCliente',
+        'CodiceOdP',
+        'CodiceArticolo',
+        'DescrizioneArticolo',
+        'QuantitaSpedita',
+        'UnitaMisura',
+        'PesoKg',
+        'CausaleTrasporto',
+        'Vettore',
+        'NumeroColli'
+      ]
 
-    const righeCsv = ddt.righe.map((r) => [
-      new Date(ddt.data_emissione).toLocaleDateString('it-IT'),
-      `"${ddt.numero_ddt}"`,
-      `"${ddt.fornitore_nome}"`,
-      `"${ddt.fornitore_piva || ''}"`,
-      `"${r.codice_odp}"`,
-      `"${r.articolo_codice}"`,
-      `"${r.articolo_descrizione.replace(/"/g, '""')}"`,
-      `"${r.nome_fase.replace(/"/g, '""')}"`,
-      r.quantita_spedita,
-      r.unita_misura,
-      r.peso_kg_riga || '',
-      `"${ddt.causale_trasporto}"`,
-      `"${ddt.vettore_nome}"`,
-      ddt.numero_colli
-    ])
+      const righeCsv = clienteDdt.righe.map((r) => [
+        new Date(clienteDdt.data_emissione).toLocaleDateString('it-IT'),
+        `"${clienteDdt.numero_ddt}"`,
+        `"${clienteDdt.cliente_nome}"`,
+        `"${clienteDdt.cliente_piva || ''}"`,
+        `"${clienteDdt.destinazione_diversa || clienteDdt.cliente_indirizzo || ''}"`,
+        `"${r.codice_ordine_cliente || ''}"`,
+        `"${r.codice_odp || ''}"`,
+        `"${r.articolo_codice}"`,
+        `"${r.articolo_descrizione.replace(/"/g, '""')}"`,
+        r.quantita_spedita,
+        r.unita_misura,
+        r.peso_kg_riga || '',
+        `"${clienteDdt.causale_trasporto}"`,
+        `"${clienteDdt.vettore_nome}"`,
+        clienteDdt.numero_colli
+      ])
 
-    const contenuto = [intestazioni.join(separatore), ...righeCsv.map((r) => r.join(separatore))].join('\r\n')
-    const blob = new Blob(['\uFEFF' + contenuto], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `${ddt.numero_ddt}_interscambio_gestionale.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+      const contenuto = [intestazioni.join(separatore), ...righeCsv.map((r) => r.join(separatore))].join('\r\n')
+      const blob = new Blob(['\uFEFF' + contenuto], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `${clienteDdt.numero_ddt}_consegna_cliente.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      return
+    }
+
+    if (terzistaDdt) {
+      const intestazioni = [
+        'DataDDT',
+        'NumeroDDT',
+        'DestinatarioFornitore',
+        'PartitaIVA',
+        'CodiceOdP',
+        'CodiceArticolo',
+        'DescrizioneArticolo',
+        'LavorazioneRichiesta',
+        'Quantita',
+        'UnitaMisura',
+        'PesoKg',
+        'CausaleTrasporto',
+        'Vettore',
+        'Colli'
+      ]
+
+      const righeCsv = terzistaDdt.righe.map((r) => [
+        new Date(terzistaDdt.data_emissione).toLocaleDateString('it-IT'),
+        `"${terzistaDdt.numero_ddt}"`,
+        `"${terzistaDdt.fornitore_nome}"`,
+        `"${terzistaDdt.fornitore_piva || ''}"`,
+        `"${r.codice_odp}"`,
+        `"${r.articolo_codice}"`,
+        `"${r.articolo_descrizione.replace(/"/g, '""')}"`,
+        `"${r.nome_fase.replace(/"/g, '""')}"`,
+        r.quantita_spedita,
+        r.unita_misura,
+        r.peso_kg_riga || '',
+        `"${terzistaDdt.causale_trasporto}"`,
+        `"${terzistaDdt.vettore_nome}"`,
+        terzistaDdt.numero_colli
+      ])
+
+      const contenuto = [intestazioni.join(separatore), ...righeCsv.map((r) => r.join(separatore))].join('\r\n')
+      const blob = new Blob(['\uFEFF' + contenuto], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `${terzistaDdt.numero_ddt}_interscambio_gestionale.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
   }
 
   return (
@@ -141,21 +198,32 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
             </div>
           </div>
 
-          {/* Mittente e Destinatario Terzista */}
+          {/* Mittente e Destinatario Terzista o Cliente */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
               <span className="text-[10px] font-bold text-slate-500 uppercase block">LUOGO DI PARTENZA (MITTENTE)</span>
               <strong className="text-slate-900 block">MachinaFlow Meccanica S.r.l. - Stabilimento 1</strong>
               <span className="text-slate-600 block text-[11px]">Via dell&apos;Industria 14 - 41012 Carpi (MO)</span>
-              <span className="text-slate-500 text-[10px] block">Causale: {ddt.causale_trasporto}</span>
+              <span className="text-slate-500 text-[10px] block">Causale: {ddt.causale_trasporto} &bull; Porto: {ddt.porto}</span>
             </div>
 
-            <div className="p-3.5 rounded-xl border-2 border-pink-700/60 bg-pink-50/30 space-y-1">
-              <span className="text-[10px] font-bold text-pink-800 uppercase block">DESTINATARIO FORNITORE / TERZISTA</span>
-              <strong className="text-base text-slate-900 block font-black">{ddt.fornitore_nome}</strong>
-              <span className="text-slate-700 block text-[11px]">{ddt.fornitore_indirizzo || 'Sede operativa fornitore'}</span>
-              <span className="text-slate-600 text-[10px] block">P.IVA: {ddt.fornitore_piva || 'Come in anagrafica'}</span>
-            </div>
+            {isCliente && clienteDdt ? (
+              <div className="p-3.5 rounded-xl border-2 border-emerald-600/70 bg-emerald-50/30 space-y-1">
+                <span className="text-[10px] font-bold text-emerald-800 uppercase block">DESTINATARIO CLIENTE FINALE</span>
+                <strong className="text-base text-slate-900 block font-black">{clienteDdt.cliente_nome}</strong>
+                <span className="text-slate-700 block text-[11px]">
+                  {clienteDdt.destinazione_diversa || clienteDdt.cliente_indirizzo || 'Sede legale cliente'}
+                </span>
+                <span className="text-slate-600 text-[10px] block">P.IVA / C.F.: {clienteDdt.cliente_piva || 'In anagrafica'}</span>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl border-2 border-pink-700/60 bg-pink-50/30 space-y-1">
+                <span className="text-[10px] font-bold text-pink-800 uppercase block">DESTINATARIO FORNITORE / TERZISTA</span>
+                <strong className="text-base text-slate-900 block font-black">{terzistaDdt?.fornitore_nome}</strong>
+                <span className="text-slate-700 block text-[11px]">{terzistaDdt?.fornitore_indirizzo || 'Sede operativa fornitore'}</span>
+                <span className="text-slate-600 text-[10px] block">P.IVA: {terzistaDdt?.fornitore_piva || 'Come in anagrafica'}</span>
+              </div>
+            )}
           </div>
 
           {/* Dati Logistici Trasporto */}
@@ -166,7 +234,7 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
             </div>
             <div>
               <span className="text-[10px] text-slate-500 block uppercase font-bold">Numero Colli:</span>
-              <strong className="text-slate-900">{ddt.numero_colli} cassa/e</strong>
+              <strong className="text-slate-900">{ddt.numero_colli} cassa/e - colli</strong>
             </div>
             <div>
               <span className="text-[10px] text-slate-500 block uppercase font-bold">Peso Totale Lordo:</span>
@@ -183,50 +251,78 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900 text-white uppercase text-[10px] font-bold tracking-wider">
                 <tr>
-                  <th className="py-2.5 px-3"># OdP / Rif.</th>
+                  <th className="py-2.5 px-3">{isCliente ? '# Commessa / OdP' : '# OdP / Rif.'}</th>
                   <th className="py-2.5 px-3">Codice Particolare</th>
                   <th className="py-2.5 px-3">Descrizione Tecnica</th>
-                  <th className="py-2.5 px-3">Trattamento Richiesto</th>
-                  <th className="py-2.5 px-3 text-center">Quantità</th>
+                  <th className="py-2.5 px-3">{isCliente ? 'Note Consegna / Rif.' : 'Trattamento Richiesto'}</th>
+                  <th className="py-2.5 px-3 text-center">Quantità Spedita</th>
                   <th className="py-2.5 px-3 text-right">Peso Stima</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {ddt.righe.map((r, i) => (
-                  <tr key={r.id || i} className="hover:bg-slate-50">
-                    <td className="py-2.5 px-3 font-mono font-bold text-pink-700 whitespace-nowrap">
-                      {r.codice_odp}
-                    </td>
-                    <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                      {r.articolo_codice}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-800 font-medium">
-                      {r.articolo_descrizione}
-                    </td>
-                    <td className="py-2.5 px-3 font-bold text-slate-900">
-                      {r.nome_fase}
-                      {r.note_lavorazione && (
-                        <span className="block text-[10px] font-normal text-slate-500 italic">
-                          Note: {r.note_lavorazione}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-black text-slate-900 text-sm whitespace-nowrap font-mono">
-                      {r.quantita_spedita} {r.unita_misura}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap">
-                      {r.peso_kg_riga ? `${r.peso_kg_riga.toFixed(1)} kg` : '-'}
-                    </td>
-                  </tr>
-                ))}
+                {isCliente && clienteDdt
+                  ? clienteDdt.righe.map((r, i) => (
+                      <tr key={r.id || i} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-700 whitespace-nowrap">
+                          {r.codice_ordine_cliente || r.codice_odp || 'COMM-VENDITA'}
+                          {r.codice_odp && r.codice_ordine_cliente && (
+                            <span className="block text-[10px] text-slate-500 font-normal">
+                              OdP: {r.codice_odp}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {r.articolo_codice}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-800 font-medium">
+                          {r.articolo_descrizione}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-700">
+                          {r.note_riga || (r.quantita_ordinata ? `Consegna parziale (Tot. Ordine: ${r.quantita_ordinata} ${r.unita_misura})` : 'Consegna Prodotto Finito')}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-black text-slate-900 text-sm whitespace-nowrap font-mono">
+                          {r.quantita_spedita} {r.unita_misura}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap">
+                          {r.peso_kg_riga ? `${r.peso_kg_riga.toFixed(1)} kg` : '-'}
+                        </td>
+                      </tr>
+                    ))
+                  : terzistaDdt?.righe.map((r, i) => (
+                      <tr key={r.id || i} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-mono font-bold text-pink-700 whitespace-nowrap">
+                          {r.codice_odp}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {r.articolo_codice}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-800 font-medium">
+                          {r.articolo_descrizione}
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-slate-900">
+                          {r.nome_fase}
+                          {r.note_lavorazione && (
+                            <span className="block text-[10px] font-normal text-slate-500 italic">
+                              Note: {r.note_lavorazione}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-black text-slate-900 text-sm whitespace-nowrap font-mono">
+                          {r.quantita_spedita} {r.unita_misura}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap">
+                          {r.peso_kg_riga ? `${r.peso_kg_riga.toFixed(1)} kg` : '-'}
+                        </td>
+                      </tr>
+                    ))}
               </tbody>
             </table>
           </div>
 
-          {/* Note Speciali / Istruzioni di Lavorazione */}
+          {/* Note Speciali / Istruzioni di Spedizione */}
           {ddt.note_trasporto && (
             <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs">
-              <strong>Istruzioni Speciali & Note al Terzista:</strong> {ddt.note_trasporto}
+              <strong>Istruzioni Speciali & Note di Consegna:</strong> {ddt.note_trasporto}
             </div>
           )}
 
@@ -243,7 +339,9 @@ export default function SchedaDDTStampabile({ ddt, onChiudi }: SchedaDDTStampabi
             </div>
 
             <div className="space-y-10 border border-slate-300 p-3 rounded-lg">
-              <span className="font-bold text-slate-500 uppercase block">Firma per Ricezione Fornitore</span>
+              <span className="font-bold text-slate-500 uppercase block">
+                {isCliente ? 'Firma per Ricezione Cliente' : 'Firma per Ricezione Fornitore'}
+              </span>
               <div className="border-b border-dashed border-slate-400"></div>
             </div>
           </div>

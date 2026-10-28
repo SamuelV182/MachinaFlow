@@ -26,7 +26,9 @@ import {
   Trash2,
   Phone,
   Mail,
-  MapPin
+  MapPin,
+  PackageCheck,
+  Truck
 } from 'lucide-react'
 import {
   Cliente,
@@ -37,7 +39,8 @@ import {
   OrdineProduzione,
   FaseOdP,
   ComponenteDistintaBase,
-  CentroLavoro
+  CentroLavoro,
+  DocumentoTrasportoCliente
 } from '@/types/database'
 import {
   SEED_CLIENTI,
@@ -46,7 +49,8 @@ import {
   SEED_FASI_CICLO,
   SEED_ODP,
   SEED_DISTINTA_BASE,
-  SEED_CENTRI_LAVORO
+  SEED_CENTRI_LAVORO,
+  SEED_DDT_CLIENTI
 } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
 
@@ -63,6 +67,7 @@ export default function OrdiniPage() {
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
+  const [ddtClienti, setDdtClienti] = useState<DocumentoTrasportoCliente[]>([])
 
   const [tabAttivo, setTabAttivo] = useState<'ordini' | 'clienti'>('ordini')
 
@@ -185,13 +190,59 @@ export default function OrdiniPage() {
       ordiniSalvati.forEach((o) => mappaOrdini.set(o.id, o))
       const ordiniCaricati = Array.from(mappaOrdini.values())
 
-      // Arricchisci con oggetti collegati e determina lo stato reale in base agli OdP esistenti
+      // Carica DDT Clienti per calcolo esatto delle quantità già consegnate e saldi
+      const ddtCaricati = parseSicuro<DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', SEED_DDT_CLIENTI)
+      setDdtClienti(ddtCaricati)
+
+      // Arricchisci con oggetti collegati e determina lo stato reale in base agli OdP e ai DDT
       const arricchiti: OrdineCompleto[] = ordiniCaricati.map((ord) => {
-        // Se tutte le righe di questo ordine hanno già un OdP associato, lo stato è "in_produzione"
-        const tutteRigheInProduzione = ord.righe.length > 0 && ord.righe.every((r) =>
-          odpCaricati.some((o) => o.riga_ordine_cliente_id === r.id)
+        // Calcola avanzamento OdP per questo ordine (trovando sia per riga ID che per sotto-lotti /A /B /R o commessa)
+        const righeIds = new Set(ord.righe.map((r) => r.id))
+        const odpDellOrdine = odpCaricati.filter((o) =>
+          (o.riga_ordine_cliente_id && righeIds.has(o.riga_ordine_cliente_id)) ||
+          o.ordine_cliente_id === ord.id ||
+          (o.codice_ordine_cliente && o.codice_ordine_cliente.toUpperCase() === ord.numero_ordine.toUpperCase()) ||
+          (o.note && o.note.toUpperCase().includes(ord.numero_ordine.toUpperCase()))
         )
-        const statoReale = tutteRigheInProduzione ? ('in_produzione' as const) : ord.stato
+
+        // Verifica per ciascuna riga dell'ordine se è coperta da OdP completati
+        const righeCoperteECompletate = ord.righe.every((r) => {
+          const odpDellaRiga = odpDellOrdine.filter((o) => 
+            o.riga_ordine_cliente_id === r.id || 
+            (o.articolo_id === r.articolo_id && o.ordine_cliente_id === ord.id)
+          )
+          if (odpDellaRiga.length === 0) return false
+          // Almeno uno completato e nessuno ancora incompleto tra quelli validi
+          return odpDellaRiga.some((o) => o.stato === 'completato' || o.fasi?.every((f) => f.stato === 'completata'))
+        })
+
+        const almenoUnOdpCompletato = odpDellOrdine.some(
+          (o) => o.stato === 'completato' || o.fasi?.every((f) => f.stato === 'completata')
+        )
+
+        // Calcola quantità spedite tramite DDT
+        const totalePezziOrdinati = ord.righe.reduce((acc, r) => acc + (r.quantita || 0), 0)
+        let totalePezziSpediti = 0
+        ddtCaricati.forEach((doc) => {
+          doc.righe.forEach((r) => {
+            if (r.ordine_cliente_id === ord.id || r.codice_ordine_cliente === ord.numero_ordine) {
+              totalePezziSpediti += r.quantita_spedita
+            }
+          })
+        })
+
+        let statoReale = ord.stato
+        if (totalePezziSpediti >= totalePezziOrdinati && totalePezziOrdinati > 0) {
+          statoReale = 'evaso'
+        } else if (totalePezziSpediti > 0) {
+          statoReale = 'parzialmente_evaso'
+        } else if (righeCoperteECompletate && odpDellOrdine.length > 0) {
+          statoReale = 'pronto_spedizione'
+        } else if (almenoUnOdpCompletato) {
+          statoReale = 'pronto_spedizione' // Mostra anche gli ordini con pezzi già pronti per spedizione (parziali o totali)
+        } else if (odpDellOrdine.length > 0) {
+          statoReale = 'in_produzione'
+        }
 
         return {
           ...ord,
@@ -482,6 +533,11 @@ export default function OrdiniPage() {
           id: nuovoOdpId,
           codice_odp: codiceOdp,
           riga_ordine_cliente_id: riga.id,
+          ordine_cliente_id: ord.id,
+          codice_ordine_cliente: ord.numero_ordine,
+          cliente_id: ord.cliente_id,
+          cliente_nome: ord.cliente?.ragione_sociale,
+          numero_riga_ordine: rigaIdx + 1,
           articolo_id: riga.articolo_id,
           quantita_da_produrre: riga.quantita,
           quantita_prodotta: 0,
@@ -573,6 +629,11 @@ export default function OrdiniPage() {
         id: nuovoOdpId,
         codice_odp: codiceOdp,
         riga_ordine_cliente_id: riga.id,
+        ordine_cliente_id: ordine.id,
+        codice_ordine_cliente: ordine.numero_ordine,
+        cliente_id: ordine.cliente_id,
+        cliente_nome: ordine.cliente?.ragione_sociale,
+        numero_riga_ordine: rigaIdx + 1,
         articolo_id: riga.articolo_id,
         quantita_da_produrre: riga.quantita,
         quantita_prodotta: 0,
@@ -660,10 +721,16 @@ export default function OrdiniPage() {
     })
 
     // 3. Crea l'OdP
+    const rigaIdx = ordine.righe.findIndex((r) => r.id === riga.id)
     const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
       id: nuovoOdpId,
       codice_odp: codiceOdp,
       riga_ordine_cliente_id: riga.id,
+      ordine_cliente_id: ordine.id,
+      codice_ordine_cliente: ordine.numero_ordine,
+      cliente_id: ordine.cliente_id,
+      cliente_nome: ordine.cliente?.ragione_sociale,
+      numero_riga_ordine: rigaIdx >= 0 ? rigaIdx + 1 : 1,
       articolo_id: riga.articolo_id,
       quantita_da_produrre: riga.quantita,
       quantita_prodotta: 0,
@@ -934,7 +1001,9 @@ export default function OrdiniPage() {
             { id: 'tutti', label: 'Tutti gli Ordini' },
             { id: 'confermato', label: 'Confermati (Da Lanciare)' },
             { id: 'in_produzione', label: 'In Produzione (OdP Attivo)' },
-            { id: 'evaso', label: 'Evasi' }
+            { id: 'pronto_spedizione', label: 'Pronti per Spedizione' },
+            { id: 'parzialmente_evaso', label: 'Parzialmente Evasi' },
+            { id: 'evaso', label: 'Evasi Completi' }
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1026,12 +1095,24 @@ export default function OrdiniPage() {
                         className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
                           ordine.stato === 'in_produzione'
                             ? 'bg-blue-950 text-blue-300 border border-blue-800'
+                            : ordine.stato === 'pronto_spedizione'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-600 animate-pulse'
+                            : ordine.stato === 'parzialmente_pronto'
+                            ? 'bg-teal-950 text-teal-300 border border-teal-700'
+                            : ordine.stato === 'parzialmente_evaso'
+                            ? 'bg-purple-950 text-purple-300 border border-purple-800'
                             : ordine.stato === 'evaso'
-                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                            ? 'bg-slate-800 text-slate-300 border border-slate-700'
                             : 'bg-amber-950 text-amber-300 border border-amber-800'
                         }`}
                       >
-                        {ordine.stato.replace('_', ' ')}
+                        {ordine.stato === 'pronto_spedizione'
+                          ? '📦 PRONTO PER SPEDIZIONE'
+                          : ordine.stato === 'parzialmente_pronto'
+                          ? '⏳ PARZIALMENTE PRONTO'
+                          : ordine.stato === 'parzialmente_evaso'
+                          ? '🚚 PARZIALMENTE EVASO'
+                          : ordine.stato.replace('_', ' ')}
                       </span>
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Calendar className="w-3.5 h-3.5" />
@@ -1084,6 +1165,17 @@ export default function OrdiniPage() {
                         <span>Lancia Tutti gli OdP ({righeSenzaOdP.length})</span>
                       </button>
                     )}
+
+                    {/* Pulsante rapido per emissione DDT Cliente se ci sono pezzi finiti */}
+                    {(ordine.stato === 'pronto_spedizione' || ordine.stato === 'parzialmente_pronto' || ordine.stato === 'parzialmente_evaso') && (
+                      <Link
+                        href={`/spedizioni?clienteId=${ordine.cliente_id}`}
+                        className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm shadow-emerald-600/30 transition-all"
+                      >
+                        <Truck className="w-3.5 h-3.5" />
+                        <span>Emetti DDT Consegna Merci</span>
+                      </Link>
+                    )}
                   </div>
                 </div>
 
@@ -1107,9 +1199,26 @@ export default function OrdiniPage() {
 
                   <div className="divide-y divide-slate-800/50">
                     {righeDaVisualizzare.map((riga) => {
-                      const odpEsistente = odpList.find((o) => o.riga_ordine_cliente_id === riga.id)
+                      // Trova tutti gli OdP associati a questa riga (inclusi sdoppiati /A, /B o ripristini /R)
+                      const odpTrovatiPerRiga = odpList.filter((o) => {
+                        if (o.riga_ordine_cliente_id === riga.id) return true
+                        // Fallback per sotto-lotti sdoppiati che condividono il codice base
+                        if (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id) return true
+                        return false
+                      })
+                      const odpEsistente = odpTrovatiPerRiga[0] || null
                       const importoRiga = (riga.quantita || 0) * (riga.prezzo_unitario || 0)
                       const isSelected = righeSelezionate.includes(riga.id)
+
+                      // Calcolo stato avanzamento e spedizione per la riga
+                      let quantitaSpeditaRiga = 0
+                      ddtClienti.forEach((doc) => {
+                        doc.righe?.forEach((dr) => {
+                          if (dr.riga_ordine_cliente_id === riga.id || (dr.ordine_cliente_id === ordine.id && dr.articolo_id === riga.articolo_id)) {
+                            quantitaSpeditaRiga += dr.quantita_spedita
+                          }
+                        })
+                      })
 
                       return (
                         <div
@@ -1155,16 +1264,55 @@ export default function OrdiniPage() {
                             </div>
                           </div>
 
-                          <div className="shrink-0 flex items-center gap-2 pl-7 sm:pl-0">
-                            {odpEsistente ? (
-                              <Link
-                                href={`/produzione/${odpEsistente.id}`}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-xs font-semibold border border-blue-500/30 transition-all"
-                              >
-                                <Factory className="w-3.5 h-3.5 text-blue-400" />
-                                <span>OdP: {odpEsistente.codice_odp}</span>
-                                <ArrowRight className="w-3 h-3" />
-                              </Link>
+                          <div className="shrink-0 flex flex-col items-stretch sm:items-end gap-1.5 pl-7 sm:pl-0">
+                            {odpTrovatiPerRiga.length > 0 ? (
+                              odpTrovatiPerRiga.map((currOdp) => {
+                                const fasiOdp = currOdp.fasi || []
+                                const fasiChiuse = fasiOdp.filter((f) => f.stato === 'completata').length
+                                const totFasi = fasiOdp.length
+                                const tutteChiuse = totFasi > 0 && fasiChiuse === totFasi
+                                const isSpedito = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
+
+                                let stileBadge = 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30'
+                                let testoStato = 'In Lavorazione'
+                                let iconaStato = '⚙️'
+
+                                if (isSpedito) {
+                                  stileBadge = 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-600/50'
+                                  testoStato = 'Spedito (DDT)'
+                                  iconaStato = '✓'
+                                } else if (tutteChiuse || currOdp.stato === 'completato') {
+                                  stileBadge = 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40 shadow-xs shadow-emerald-500/20'
+                                  testoStato = 'Pronto Spedizione'
+                                  iconaStato = '✨'
+                                } else if (fasiChiuse > 0 || currOdp.stato === 'in_lavorazione') {
+                                  stileBadge = 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border-amber-500/30'
+                                  testoStato = totFasi > 0 ? `In Lav. (${fasiChiuse}/${totFasi})` : 'In Lavorazione'
+                                  iconaStato = '⚙️'
+                                } else if (currOdp.stato === 'pianificato') {
+                                  stileBadge = 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700'
+                                  testoStato = 'Pianificato'
+                                  iconaStato = '⏳'
+                                }
+
+                                return (
+                                  <Link
+                                    key={currOdp.id}
+                                    href={`/produzione/${currOdp.id}`}
+                                    className={`inline-flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all shadow-xs w-full sm:w-auto min-w-[210px] ${stileBadge}`}
+                                    title={`Clicca per aprire la scheda di lavorazione di ${currOdp.codice_odp}`}
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{iconaStato}</span>
+                                      <span className="font-mono">{currOdp.codice_odp}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-semibold text-[11px] opacity-90">{testoStato}</span>
+                                      <ArrowRight className="w-3 h-3 opacity-60" />
+                                    </div>
+                                  </Link>
+                                )
+                              })
                             ) : (
                               <button
                                 onClick={() => handleGeneraOdP(ordine, riga)}
@@ -1289,10 +1437,26 @@ export default function OrdiniPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {righePaginateTabella.map(({ ordine, riga, indexInOrdine }) => {
-                    const odpEsistente = odpList.find((o) => o.riga_ordine_cliente_id === riga.id)
+                    // Trova tutti gli OdP associati a questa riga (inclusi sdoppiati /A, /B o ripristini /R)
+                    const odpTrovatiPerRiga = odpList.filter((o) => {
+                      if (o.riga_ordine_cliente_id === riga.id) return true
+                      if (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id) return true
+                      return false
+                    })
+                    const odpEsistente = odpTrovatiPerRiga[0] || null
                     const totaleImportoRiga = (riga.quantita || 0) * (riga.prezzo_unitario || 0)
                     const isFirstRowOfOrder = indexInOrdine === 0
                     const isSelected = righeSelezionate.includes(riga.id)
+
+                    // Calcolo quantità spedita per la riga
+                    let quantitaSpeditaRiga = 0
+                    ddtClienti.forEach((doc) => {
+                      doc.righe?.forEach((dr) => {
+                        if (dr.riga_ordine_cliente_id === riga.id || (dr.ordine_cliente_id === ordine.id && dr.articolo_id === riga.articolo_id)) {
+                          quantitaSpeditaRiga += dr.quantita_spedita
+                        }
+                      })
+                    })
 
                     return (
                       <tr
@@ -1417,15 +1581,56 @@ export default function OrdiniPage() {
 
                         {/* Azione OdP */}
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          {odpEsistente ? (
-                            <Link
-                              href={`/produzione/${odpEsistente.id}`}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-xs font-semibold border border-blue-500/30 transition-all"
-                            >
-                              <Factory className="w-3.5 h-3.5 text-blue-400" />
-                              <span>{odpEsistente.codice_odp}</span>
-                              <ArrowRight className="w-3 h-3" />
-                            </Link>
+                          {odpTrovatiPerRiga.length > 0 ? (
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              {odpTrovatiPerRiga.map((currOdp) => {
+                                const fasiOdp = currOdp.fasi || []
+                                const fasiChiuse = fasiOdp.filter((f) => f.stato === 'completata').length
+                                const totFasi = fasiOdp.length
+                                const tutteChiuse = totFasi > 0 && fasiChiuse === totFasi
+                                const isSpedito = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
+
+                                let stileBadge = 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30'
+                                let testoStato = 'In Lavorazione'
+                                let iconaStato = '⚙️'
+
+                                if (isSpedito) {
+                                  stileBadge = 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-600/50'
+                                  testoStato = 'Spedito'
+                                  iconaStato = '✓'
+                                } else if (tutteChiuse || currOdp.stato === 'completato') {
+                                  stileBadge = 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40'
+                                  testoStato = 'Pronto'
+                                  iconaStato = '✨'
+                                } else if (fasiChiuse > 0 || currOdp.stato === 'in_lavorazione') {
+                                  stileBadge = 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border-amber-500/30'
+                                  testoStato = totFasi > 0 ? `${fasiChiuse}/${totFasi}` : 'In corso'
+                                  iconaStato = '⚙️'
+                                } else if (currOdp.stato === 'pianificato') {
+                                  stileBadge = 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700'
+                                  testoStato = 'Pianificato'
+                                  iconaStato = '⏳'
+                                }
+
+                                return (
+                                  <Link
+                                    key={currOdp.id}
+                                    href={`/produzione/${currOdp.id}`}
+                                    className={`inline-flex items-center justify-between gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all min-w-[170px] ${stileBadge}`}
+                                    title={`OdP: ${currOdp.codice_odp} - ${testoStato}`}
+                                  >
+                                    <div className="flex items-center gap-1">
+                                      <span>{iconaStato}</span>
+                                      <span className="font-mono">{currOdp.codice_odp}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-semibold text-[10px] opacity-85">{testoStato}</span>
+                                      <ArrowRight className="w-3 h-3 opacity-60" />
+                                    </div>
+                                  </Link>
+                                )
+                              })}
+                            </div>
                           ) : (
                             <button
                               onClick={() => handleGeneraOdP(ordine, riga)}

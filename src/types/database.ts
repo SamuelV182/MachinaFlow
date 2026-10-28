@@ -27,11 +27,11 @@ export interface InvitoAzienda {
 
 export type TipoArticolo = 'prodotto_finito' | 'semilavorato' | 'materia_prima'
 
-export type StatoOrdineCliente = 'bozza' | 'confermato' | 'in_produzione' | 'evaso' | 'annullato'
+export type StatoOrdineCliente = 'bozza' | 'confermato' | 'in_produzione' | 'parzialmente_pronto' | 'pronto_spedizione' | 'parzialmente_evaso' | 'evaso' | 'annullato'
 
-export type StatoOdP = 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso'
+export type StatoOdP = 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso' | 'scartato' | 'spedito'
 
-export type StatoFase = 'non_iniziata' | 'in_corso' | 'completata' | 'bloccata'
+export type StatoFase = 'non_iniziata' | 'in_corso' | 'completata' | 'bloccata' | 'scartata'
 
 export interface ProfiloUtente {
   id: string
@@ -173,9 +173,17 @@ export interface OrdineProduzione {
   id: string
   codice_odp: string
   riga_ordine_cliente_id?: string
+  ordine_cliente_id?: string
+  codice_ordine_cliente?: string
+  cliente_id?: string
+  cliente_nome?: string
+  numero_riga_ordine?: number // Item #1, #2, #3 nella commessa d'acquisto cliente
   articolo_id: string
   quantita_da_produrre: number
   quantita_prodotta: number
+  quantita_scarto?: number
+  odp_origine_scarto_id?: string // se generato da rimpiazzo di uno scarto
+  odp_rimpiazzo_id?: string // riferimento al lotto /R che lo ha rimpiazzato
   data_inizio_pianificata?: string
   data_fine_pianificata?: string
   stato: StatoOdP
@@ -259,5 +267,45 @@ export interface DocumentoTrasportoEsterno {
   note_trasporto?: string
   stato: 'spedito' | 'rientrato_parziale' | 'rientrato_totale'
   righe: RigaDDTContoTerzi[]
+  creato_il: string
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENTO DI TRASPORTO (DDT) DI VENDITA / CONSEGNA AL CLIENTE FINALE
+// ---------------------------------------------------------------------------
+export interface RigaDDTCliente {
+  id: string
+  ordine_cliente_id?: string
+  riga_ordine_cliente_id?: string
+  codice_ordine_cliente?: string
+  odp_id?: string
+  codice_odp?: string
+  articolo_id: string
+  articolo_codice: string
+  articolo_descrizione: string
+  quantita_ordinata?: number
+  quantita_spedita: number
+  unita_misura: string
+  peso_kg_riga?: number
+  note_riga?: string
+}
+
+export interface DocumentoTrasportoCliente {
+  id: string
+  numero_ddt: string
+  data_emissione: string
+  cliente_id: string
+  cliente_nome: string
+  cliente_indirizzo?: string
+  cliente_piva?: string
+  destinazione_diversa?: string
+  causale_trasporto: string // es: 'Vendita', 'Conto Lavorazione', 'Omaggio'
+  porto: 'Franco' | 'Assegnato'
+  aspetto_beni: string // es: 'Scatole su bancale', 'Casse di legno', 'A vista'
+  numero_colli: number
+  peso_totale_kg: number
+  vettore_nome: string // es: 'Mittente (Mezzo proprio)', 'Corriere BRT', 'Ritiro Cliente'
+  note_trasporto?: string
+  righe: RigaDDTCliente[]
   creato_il: string
 }

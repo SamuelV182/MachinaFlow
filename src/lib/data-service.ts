@@ -9,7 +9,8 @@ import {
   RigaOrdineCliente,
   OrdineProduzione,
   FaseOdP,
-  FornitoreTerzista
+  FornitoreTerzista,
+  DocumentoTrasportoCliente
 } from '@/types/database'
 
 // 0. Anagrafica Fornitori Terzisti Specializzati
@@ -75,6 +76,9 @@ export const SEED_FORNITORI_TERZISTI: FornitoreTerzista[] = [
     specialita: 'Brunitura Chimica a Caldo & Fosfatazione'
   }
 ]
+
+// 0.bis Esempio di DDT di Consegna / Vendita ai Clienti Finali (Inizialmente vuoto per collaudo reale)
+export const SEED_DDT_CLIENTI: DocumentoTrasportoCliente[] = []
 
 // 1. Centri di Lavoro Reali Officina Meccanica di Precisione (10 Macchine)
 export const SEED_CENTRI_LAVORO: CentroLavoro[] = [
