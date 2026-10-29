@@ -718,6 +718,20 @@ export const syncService = {
           suAggiornamento()
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ordini_fornitori' },
+        () => {
+          suAggiornamento()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'articoli' },
+        () => {
+          suAggiornamento()
+        }
+      )
       .subscribe()
 
     return () => {

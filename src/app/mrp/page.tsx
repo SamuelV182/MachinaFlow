@@ -113,7 +113,12 @@ export default function MRPPage() {
     setCodiceDocStampa(`MRP-${oggi.getFullYear()}-${String(oggi.getMonth() + 1).padStart(2, '0')}`)
   }, [])
 
-  const ricalcolaMrp = (articoliList: Articolo[], distinteList: ComponenteDistintaBase[], odpCaricati: (OrdineProduzione & { fasi: FaseOdP[] })[]) => {
+  const ricalcolaMrp = (
+    articoliList: Articolo[],
+    distinteList: ComponenteDistintaBase[],
+    odpCaricati: (OrdineProduzione & { fasi: FaseOdP[] })[],
+    ordiniFornitoreList?: OrdineFornitore[]
+  ) => {
     // =========================================================================
     // CALCOLO MRP (FABBISOGNO MATERIALI)
     // Esclude OdP completati, spediti o con MATERIA PRIMA GIÀ SCARICATA da magazzino
@@ -152,7 +157,7 @@ export default function MRPPage() {
     })
 
     const materiePrime = articoliList.filter((a) => a.tipo !== 'prodotto_finito')
-    const ordiniFornitoreSalvati: OrdineFornitore[] = (() => {
+    const ordiniFornitoreSalvati: OrdineFornitore[] = ordiniFornitoreList || (() => {
       try {
         const item = localStorage.getItem('machinaflow_ordini_fornitori')
         return item ? JSON.parse(item) : []
@@ -261,15 +266,26 @@ export default function MRPPage() {
 
       // 2. Allinea con Supabase Cloud in background
       try {
-        const [articoliCloud, odpCloud] = await Promise.all([
+        const [articoliCloud, odpCloud, fornitoriCloud] = await Promise.all([
           syncService.getArticoli(),
-          syncService.getOrdiniProduzione()
+          syncService.getOrdiniProduzione(),
+          syncService.getOrdiniFornitori()
         ])
         const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : articoliLocali
         const odpEffettivi = odpCloud && odpCloud.length > 0 ? (odpCloud as (OrdineProduzione & { fasi: FaseOdP[] })[]) : odpLocali
+        
+        // Unisci ordini fornitore cloud e locali
+        const mappaForn = new Map<string, OrdineFornitore>()
+        ordiniFornitoreCaricati.forEach((o) => mappaForn.set(o.id, o))
+        ;(fornitoriCloud || []).forEach((o) => mappaForn.set(o.id, o))
+        const fornitoriEffettivi = Array.from(mappaForn.values())
+
         setArticoli(articoliEffettivi)
         setOdpList(odpEffettivi)
-        ricalcolaMrp(articoliEffettivi, distinteList, odpEffettivi)
+        setOrdiniFornitori(fornitoriEffettivi)
+        localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(fornitoriEffettivi))
+
+        ricalcolaMrp(articoliEffettivi, distinteList, odpEffettivi, fornitoriEffettivi)
       } catch (err) {
         console.warn('Sync cloud MRP fallback locale:', err)
       }
@@ -338,8 +354,11 @@ export default function MRPPage() {
     setOrdiniFornitori(aggiornati)
     localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(aggiornati))
 
+    // Salva immediatamente su Supabase Cloud (condivisione istantanea tra dispositivi)
+    syncService.salvaOrdineFornitore(nuovoOrdine)
+
     setModaleOrdineAperta(false)
-    ricalcolaMrp(articoli, distinte, odpList)
+    ricalcolaMrp(articoli, distinte, odpList, aggiornati)
   }
 
   // Apertura modale Ricezione Merce da Ordine Fornitore con Tracciabilità DDT
@@ -387,20 +406,29 @@ export default function MRPPage() {
 
     setArticoli(articoliAggiornati)
     localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
+    const artDaSalvare = articoliAggiornati.find((a) => a.id === artTarget.id)
+    if (artDaSalvare) {
+      syncService.salvaArticolo(artDaSalvare)
+    }
 
     // Se il carico è legato a un ordine fornitore aperto, chiudilo come 'ricevuto'
     let ordiniAggiornati = ordiniFornitori
     if (ordineFornitoreInRicezioneId) {
-      ordiniAggiornati = ordiniFornitori.map((o) =>
-        o.id === ordineFornitoreInRicezioneId ? { ...o, stato: 'ricevuto' as const } : o
-      )
+      ordiniAggiornati = ordiniFornitori.map((o) => {
+        if (o.id === ordineFornitoreInRicezioneId) {
+          const ordRicevuto = { ...o, stato: 'ricevuto' as const }
+          syncService.salvaOrdineFornitore(ordRicevuto)
+          return ordRicevuto
+        }
+        return o
+      })
       setOrdiniFornitori(ordiniAggiornati)
       localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(ordiniAggiornati))
       setOrdineFornitoreInRicezioneId(null)
     }
 
     // Ricalcola subito MRP con la nuova giacenza e ordini fornitori aggiornati
-    ricalcolaMrp(articoliAggiornati, distinte, odpList)
+    ricalcolaMrp(articoliAggiornati, distinte, odpList, ordiniAggiornati)
 
     setModaleCaricoAperta(false)
     const ddtInfo = formCarico.ddt_riferimento ? ` (DDT: ${formCarico.ddt_riferimento})` : ''
