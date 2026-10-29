@@ -262,7 +262,7 @@ export default function MRPPage() {
       const odpLocali = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
       setArticoli(articoliLocali)
       setOdpList(odpLocali)
-      ricalcolaMrp(articoliLocali, distinteList, odpLocali)
+      ricalcolaMrp(articoliLocali, distinteList, odpLocali, ordiniFornitoreCaricati)
 
       // 2. Allinea con Supabase Cloud in background
       try {
@@ -274,6 +274,15 @@ export default function MRPPage() {
         const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : articoliLocali
         const odpEffettivi = odpCloud && odpCloud.length > 0 ? (odpCloud as (OrdineProduzione & { fasi: FaseOdP[] })[]) : odpLocali
         
+        // Auto-push verso Cloud per eventuali ordini fornitore creati offline o in locale
+        const idCloud = new Set((fornitoriCloud || []).map((f) => f.id))
+        const localiDaInviare = ordiniFornitoreCaricati.filter((f) => !idCloud.has(f.id))
+        if (localiDaInviare.length > 0) {
+          for (const ord of localiDaInviare) {
+            syncService.salvaOrdineFornitore(ord)
+          }
+        }
+
         // Unisci ordini fornitore cloud e locali
         const mappaForn = new Map<string, OrdineFornitore>()
         ordiniFornitoreCaricati.forEach((o) => mappaForn.set(o.id, o))
