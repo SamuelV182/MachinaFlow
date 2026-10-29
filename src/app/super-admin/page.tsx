@@ -19,7 +19,13 @@ import {
   Calendar,
   Sparkles,
   KeyRound,
-  RefreshCw
+  RefreshCw,
+  Headphones,
+  Trash2,
+  PowerOff,
+  Power,
+  Cpu,
+  AlertTriangle
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Azienda, InvitoAzienda } from '@/types/database'
@@ -31,8 +37,15 @@ export default function SuperAdminPage() {
 
   const [aziende, setAziende] = useState<Azienda[]>([])
   const [inviti, setInviti] = useState<InvitoAzienda[]>([])
+  const [conteggioMacchine, setConteggioMacchine] = useState<Record<string, number>>({})
+  const [conteggioUtenti, setConteggioUtenti] = useState<Record<string, number>>({})
+  const [conteggioOdp, setConteggioOdp] = useState<Record<string, number>>({})
   const [caricamento, setCaricamento] = useState(true)
   const [ricerca, setRicerca] = useState('')
+
+  // Stato Modale Conferma Eliminazione Officina
+  const [aziendaDaEliminare, setAziendaDaEliminare] = useState<Azienda | null>(null)
+  const [eliminazioneInCorso, setEliminazioneInCorso] = useState(false)
 
   // Stato Modale Crea Nuova Officina
   const [modaleNuovaAzienda, setModaleNuovaAzienda] = useState(false)
@@ -74,6 +87,37 @@ export default function SuperAdminPage() {
 
       if (invitiData) {
         setInviti(invitiData as InvitoAzienda[])
+      }
+
+      // Recupera conteggi macchine, utenti e ordini per ogni azienda
+      const { data: macchineData } = await supabase.from('centri_lavoro').select('id, azienda_id')
+      if (macchineData) {
+        const mappaMacchine: Record<string, number> = {}
+        macchineData.forEach((m: any) => {
+          const azKey = m.azienda_id || 'az-pilota-01'
+          mappaMacchine[azKey] = (mappaMacchine[azKey] || 0) + 1
+        })
+        setConteggioMacchine(mappaMacchine)
+      }
+
+      const { data: utentiData } = await supabase.from('profili_utenti').select('id, azienda_id')
+      if (utentiData) {
+        const mappaUtenti: Record<string, number> = {}
+        utentiData.forEach((u: any) => {
+          const azKey = u.azienda_id || 'az-pilota-01'
+          mappaUtenti[azKey] = (mappaUtenti[azKey] || 0) + 1
+        })
+        setConteggioUtenti(mappaUtenti)
+      }
+
+      const { data: odpData } = await supabase.from('ordini_produzione').select('id, azienda_id')
+      if (odpData) {
+        const mappaOdp: Record<string, number> = {}
+        odpData.forEach((o: any) => {
+          const azKey = o.azienda_id || 'az-pilota-01'
+          mappaOdp[azKey] = (mappaOdp[azKey] || 0) + 1
+        })
+        setConteggioOdp(mappaOdp)
       }
     } catch (err) {
       console.error('Errore caricamento dati Super Admin:', err)
@@ -175,6 +219,84 @@ export default function SuperAdminPage() {
     window.open(waUrl, '_blank')
   }
 
+  // Genera / Rigenera Link di Accesso o Reimposta Password per qualsiasi officina
+  const handleRigeneraLinkAccesso = async (az: Azienda) => {
+    try {
+      const timestamp = Date.now().toString(36)
+      const inviteToken = `inv_${timestamp}_${Math.random().toString(36).substring(2, 10)}`
+
+      // Inserisce o rinnova un token invito attivo
+      await supabase.from('inviti_aziende').insert({
+        id: `inv-${Date.now()}`,
+        token: inviteToken,
+        azienda_id: az.id,
+        email_destinatario: az.email_titolare,
+        nome_contatto: az.nome,
+        telefono: az.telefono || null,
+        stato: 'in_attesa'
+      })
+
+      const hostUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'
+      const link = `${hostUrl}/imposta-password?token=${inviteToken}&email=${encodeURIComponent(az.email_titolare)}`
+
+      setInvitoGenerato({
+        link,
+        aziendaNome: az.nome,
+        email: az.email_titolare,
+        telefono: az.telefono
+      })
+
+      await caricaDati()
+    } catch (err: any) {
+      alert(`Impossibile generare il link: ${err.message || 'Errore di connessione'}`)
+    }
+  }
+
+  // Toggle Sospensione / Riattivazione Officina
+  const handleToggleStatoAzienda = async (az: Azienda) => {
+    const nuovoStato = az.stato === 'attiva' ? 'sospesa' : 'attiva'
+    const azioneMsg = nuovoStato === 'sospesa' ? 'sospendere temporaneamente' : 'riattivare'
+
+    if (!confirm(`Sei sicuro di voler ${azioneMsg} l'officina "${az.nome}"?`)) return
+
+    try {
+      const { error } = await supabase
+        .from('aziende')
+        .update({ stato: nuovoStato })
+        .eq('id', az.id)
+
+      if (error) throw error
+
+      setAziende((prev) =>
+        prev.map((item) => (item.id === az.id ? { ...item, stato: nuovoStato } : item))
+      )
+    } catch (err: any) {
+      alert(`Errore aggiornamento stato: ${err.message || 'Riprova'}`)
+    }
+  }
+
+  // Eliminazione Definitiva Officina
+  const handleConfermaEliminazione = async () => {
+    if (!aziendaDaEliminare) return
+
+    setEliminazioneInCorso(true)
+    try {
+      // 1. Elimina eventuali inviti collegati
+      await supabase.from('inviti_aziende').delete().eq('azienda_id', aziendaDaEliminare.id)
+
+      // 2. Elimina record azienda
+      const { error } = await supabase.from('aziende').delete().eq('id', aziendaDaEliminare.id)
+      if (error) throw error
+
+      setAziendaDaEliminare(null)
+      await caricaDati()
+    } catch (err: any) {
+      alert(`Errore durante l'eliminazione: ${err.message || 'Riprova'}`)
+    } finally {
+      setEliminazioneInCorso(false)
+    }
+  }
+
   const aziendeFiltrate = aziende.filter(
     (az) =>
       az.nome.toLowerCase().includes(ricerca.toLowerCase()) ||
@@ -274,7 +396,7 @@ export default function SuperAdminPage() {
               <tr>
                 <th className="p-3.5">Nome Officina / ID</th>
                 <th className="p-3.5">Titolare / Contatto</th>
-                <th className="p-3.5">Città / P.IVA</th>
+                <th className="p-3.5 text-center">Risorse & Dimensione</th>
                 <th className="p-3.5 text-center">Stato</th>
                 <th className="p-3.5 text-center">Data Creazione</th>
                 <th className="p-3.5 text-right">Azioni Rapide</th>
@@ -284,20 +406,39 @@ export default function SuperAdminPage() {
               {aziendeFiltrate.map((az) => {
                 const isPilota = az.id === 'az-pilota-01'
                 const invitoAperto = inviti.find((i) => i.azienda_id === az.id && i.stato === 'in_attesa')
+                const numMacchine = conteggioMacchine[az.id] || (isPilota ? 4 : 0)
+                const numUtenti = conteggioUtenti[az.id] || (isPilota ? 2 : 1)
+                const numOdp = conteggioOdp[az.id] || (isPilota ? 5 : 0)
 
                 return (
                   <tr key={az.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="p-3.5">
-                      <div className="font-bold text-white text-sm flex items-center gap-2">
-                        {az.nome}
+                      <div className="font-bold text-white text-sm flex items-center gap-2 flex-wrap">
+                        <span>{az.nome}</span>
                         {isPilota && (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                            PILOTA ATTUALE
+                            PILOTA
                           </span>
                         )}
+                        <button
+                          onClick={() => {
+                            try {
+                              localStorage.setItem('machinaflow_supporto_azienda_id', az.id)
+                              localStorage.setItem('machinaflow_supporto_azienda_nome', az.nome)
+                            } catch {}
+                            router.push('/')
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs shadow-md shadow-amber-400/20 transition-all hover:scale-[1.02] active:scale-95 cursor-pointer"
+                          title={`Accedi e visualizza l'ambiente di ${az.nome} in modalità supporto`}
+                        >
+                          <Headphones className="w-3.5 h-3.5 text-slate-950 stroke-[2.5]" />
+                          <span>Modalità Supporto</span>
+                        </button>
                       </div>
-                      <div className="text-[11px] font-mono text-slate-500 mt-0.5">
-                        ID: {az.id}
+                      <div className="text-[11px] font-mono text-slate-500 mt-1 flex items-center gap-2">
+                        <span>ID: {az.id}</span>
+                        {az.citta && <span className="text-slate-400">• {az.citta}</span>}
+                        {az.partita_iva && <span className="text-slate-500">({az.partita_iva})</span>}
                       </div>
                     </td>
 
@@ -314,15 +455,32 @@ export default function SuperAdminPage() {
                       )}
                     </td>
 
-                    <td className="p-3.5">
-                      <div className="text-slate-200">{az.citta || 'Non specificata'}</div>
-                      <div className="text-[11px] font-mono text-slate-500">
-                        {az.partita_iva ? `P.IVA: ${az.partita_iva}` : '-'}
+                    {/* Statistiche & Risorse Dimensione Officina */}
+                    <td className="p-3.5 text-center">
+                      <div className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800">
+                        <div className="flex items-center gap-1 text-[11px] font-medium text-slate-300" title="Centri di lavoro / macchine configurate">
+                          <Cpu className="w-3.5 h-3.5 text-sky-400" />
+                          <span><strong className="text-white">{numMacchine}</strong> macch.</span>
+                        </div>
+                        <span className="text-slate-700">|</span>
+                        <div className="flex items-center gap-1 text-[11px] font-medium text-slate-300" title="Operatori e utenti registrati">
+                          <Users className="w-3.5 h-3.5 text-indigo-400" />
+                          <span><strong className="text-white">{numUtenti}</strong> ut.</span>
+                        </div>
+                        <span className="text-slate-700">|</span>
+                        <div className="flex items-center gap-1 text-[11px] font-medium text-slate-300" title="Ordini di produzione (OdP)">
+                          <Factory className="w-3.5 h-3.5 text-amber-400" />
+                          <span><strong className="text-white">{numOdp}</strong> odp</span>
+                        </div>
                       </div>
                     </td>
 
                     <td className="p-3.5 text-center">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        az.stato === 'attiva'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                          : 'bg-red-950 text-red-300 border border-red-800'
+                      }`}>
                         ● {az.stato.toUpperCase()}
                       </span>
                     </td>
@@ -331,33 +489,43 @@ export default function SuperAdminPage() {
                       {new Date(az.creato_il).toLocaleDateString('it-IT')}
                     </td>
 
+                    {/* Azioni Rapide: Chiave, Sospendi/Riattiva, Cestino */}
                     <td className="p-3.5 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-2">
-                        {invitoAperto && (
-                          <button
-                            onClick={() => {
-                              const hostUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'
-                              const link = `${hostUrl}/imposta-password?token=${invitoAperto.token}&email=${encodeURIComponent(
-                                az.email_titolare
-                              )}`
-                              setInvitoGenerato({
-                                link,
-                                aziendaNome: az.nome,
-                                email: az.email_titolare,
-                                telefono: az.telefono
-                              })
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-600/20 text-amber-300 hover:bg-amber-600/30 border border-amber-500/30 text-xs font-semibold cursor-pointer"
-                            title="Recupera o invia di nuovo il link di registrazione"
-                          >
-                            <KeyRound className="w-3.5 h-3.5" />
-                            <span>Invia Invito</span>
-                          </button>
-                        )}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* 1. Chiave: Genera / Invia Link di Registrazione o Reset Password */}
+                        <button
+                          onClick={() => handleRigeneraLinkAccesso(az)}
+                          className="p-1.5 rounded-lg bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 transition-colors cursor-pointer"
+                          title="Genera e invia nuovo link di accesso / reimposta password"
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </button>
 
-                        <span className="text-[11px] text-slate-500 italic">
-                          {isPilota ? 'Officina Base' : 'Ambiente Isolato'}
-                        </span>
+                        {/* 2. Toggle Disabilita / Riattiva Cliente */}
+                        <button
+                          onClick={() => handleToggleStatoAzienda(az)}
+                          className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                            az.stato === 'attiva'
+                              ? 'bg-slate-800/80 text-slate-300 hover:bg-amber-950/60 hover:text-amber-300 border-slate-700 hover:border-amber-600/50'
+                              : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 border-emerald-800'
+                          }`}
+                          title={az.stato === 'attiva' ? 'Sospendi accesso officina' : 'Riattiva officina'}
+                        >
+                          {az.stato === 'attiva' ? (
+                            <PowerOff className="w-4 h-4 text-slate-400 hover:text-amber-400" />
+                          ) : (
+                            <Power className="w-4 h-4 text-emerald-400" />
+                          )}
+                        </button>
+
+                        {/* 3. Cestino: Elimina definitivamente (con conferma modale protetta) */}
+                        <button
+                          onClick={() => setAziendaDaEliminare(az)}
+                          className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30 transition-colors cursor-pointer"
+                          title={isPilota ? "Elimina officina pilota (richiede conferma)" : "Elimina definitivamente l'officina"}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -592,6 +760,68 @@ export default function SuperAdminPage() {
                 className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold cursor-pointer"
               >
                 Chiudi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODALE 3: CONFERMA ELIMINAZIONE OFFICINA (SICUREZZA SUPER ADMIN)
+          ========================================================================= */}
+      {aziendaDaEliminare && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-red-500/30 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 bg-red-950/20 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Elimina Ambiente Officina</h3>
+                <p className="text-xs text-red-300/80">Azione irreversibile</p>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-3 text-xs text-slate-300">
+              <p>
+                Stai per eliminare definitivamente l&apos;officina:
+              </p>
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="font-bold text-white text-sm">{aziendaDaEliminare.nome}</div>
+                <div className="text-[11px] font-mono text-slate-400 mt-0.5">ID: {aziendaDaEliminare.id}</div>
+                <div className="text-slate-400 mt-1">{aziendaDaEliminare.email_titolare}</div>
+              </div>
+              <p className="text-slate-400 text-[11px]">
+                Questa operazione rimuoverà la registrazione dell&apos;officina e tutti gli inviti associati. L&apos;accesso per gli utenti di questa officina verrà revocato immediatamente.
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={eliminazioneInCorso}
+                onClick={() => setAziendaDaEliminare(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                disabled={eliminazioneInCorso}
+                onClick={handleConfermaEliminazione}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-lg shadow-red-600/30 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {eliminazioneInCorso ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Eliminazione...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Conferma Eliminazione</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

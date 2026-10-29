@@ -92,12 +92,6 @@ const menuSuperAdminItems = [
     badge: 'SaaS'
   },
   {
-    name: 'Accedi ad Officina Pilota',
-    href: '/',
-    icon: Eye,
-    badge: 'Supporto'
-  },
-  {
     name: 'Manuale Utente',
     href: '/manuale',
     icon: FileText,
@@ -118,6 +112,15 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
 
   useEffect(() => {
     const verificaRuolo = async () => {
+      // Se è attiva la modalità supporto impersonando un'officina cliente, mostra il menu completo dell'officina
+      try {
+        const modalitaSupporto = localStorage.getItem('machinaflow_supporto_azienda_id')
+        if (modalitaSupporto) {
+          setIsSuperAdmin(false)
+          return
+        }
+      } catch {}
+
       try {
         const {
           data: { user }
@@ -143,7 +146,7 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
     }
 
     verificaRuolo()
-  }, [supabase])
+  }, [supabase, pathname])
 
   // Seleziona il menu appropriato
   const items = isSuperAdmin ? menuSuperAdminItems : menuOfficinaItems
