@@ -256,11 +256,15 @@ export default function SpedizioniDdtPage() {
       setOdpList(odpLocali)
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
 
-      // Carica e sincronizza in parallelo OdP e DDT Clienti da Supabase Cloud per dati freschi e coerenti
+      // Carica e sincronizza in parallelo OdP, DDT Clienti e Ordini Clienti da Supabase Cloud
       Promise.all([
         syncService.getDdtClienti(),
-        syncService.getOrdiniProduzione()
-      ]).then(async ([ddtCliCloud, odpCloud]) => {
+        syncService.getOrdiniProduzione(),
+        syncService.getOrdiniClienti()
+      ]).then(async ([ddtCliCloud, odpCloud, ordiniCloud]) => {
+        if (ordiniCloud && ordiniCloud.length > 0) {
+          setOrdiniClienti(ordiniCloud as any)
+        }
         // Allinea DDT Clienti Cloud
         const idCloud = new Set((ddtCliCloud || []).map((d) => d.id))
         const ddtDaCaricare = ddtCliReali.filter((d) => !idCloud.has(d.id))
@@ -315,6 +319,16 @@ export default function SpedizioniDdtPage() {
       setListaDdt(SEED_DDT_ESTERNI)
       setListaDdtClienti(SEED_DDT_CLIENTI)
       setTerzisti(SEED_FORNITORI_TERZISTI)
+    }
+
+    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
+      syncService.getDdtClienti().then((d) => d && setListaDdtClienti(d))
+      syncService.getOrdiniProduzione().then((o) => o && setOdpList(o))
+      syncService.getOrdiniClienti().then((ord) => ord && setOrdiniClienti(ord as any))
+    })
+
+    return () => {
+      if (disiscrivi && typeof disiscrivi === 'function') disiscrivi()
     }
   }, [])
 

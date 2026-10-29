@@ -315,6 +315,62 @@ export const syncService = {
   },
 
   // 3. ORDINI CLIENTI
+  async getOrdiniClienti(): Promise<(OrdineCliente & { righe: RigaOrdineCliente[] })[]> {
+    try {
+      const { data: ordiniData, error: errOrdini } = await supabase
+        .from('ordini_clienti')
+        .select('*')
+        .order('numero_ordine', { ascending: false })
+
+      if (errOrdini || !ordiniData) {
+        console.warn('Lettura ordini_clienti da Supabase fallita o vuota:', errOrdini?.message)
+        const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+        return salvati ? JSON.parse(salvati) : SEED_ORDINI_CLIENTI
+      }
+
+      // Leggi tutte le righe associate agli ordini da Supabase
+      const { data: righeData } = await supabase
+        .from('righe_ordine_cliente')
+        .select('*')
+
+      const mappaRighe = new Map<string, RigaOrdineCliente[]>()
+      ;(righeData || []).forEach((r: any) => {
+        const arr = mappaRighe.get(r.ordine_cliente_id) || []
+        arr.push(r)
+        mappaRighe.set(r.ordine_cliente_id, arr)
+      })
+
+      const ordiniCompletiCloud = ordiniData.map((ord: any) => ({
+        ...ord,
+        righe: mappaRighe.get(ord.id) || ord.righe || []
+      }))
+
+      // Unisci con i seed per garantire la presenza degli ordini storici
+      const mappa = new Map<string, any>()
+      SEED_ORDINI_CLIENTI.forEach((o) => mappa.set(o.id, o))
+      ordiniCompletiCloud.forEach((o: any) => mappa.set(o.id, o))
+
+      // Se in locale c'erano ordini ancora non su cloud, includili
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      if (salvati) {
+        try {
+          const loc: any[] = JSON.parse(salvati)
+          loc.forEach((o) => {
+            if (!mappa.has(o.id)) mappa.set(o.id, o)
+          })
+        } catch {}
+      }
+
+      const finale = Array.from(mappa.values())
+      localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(finale))
+      return finale
+    } catch (e) {
+      console.error('Errore getOrdiniClienti:', e)
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      return salvati ? JSON.parse(salvati) : SEED_ORDINI_CLIENTI
+    }
+  },
+
   async salvaOrdineCliente(ordine: OrdineCliente & { righe?: RigaOrdineCliente[] }) {
     try {
       await supabase.from('ordini_clienti').upsert({
@@ -629,8 +685,8 @@ export const syncService = {
   },
 
   // 6. REAL-TIME SUBSCRIPTIONS
-  // Permette ai terminali a bordo macchina e al pannello supervisore di ricevere aggiornamenti
-  // in tempo reale istantanei (sub-secondo) quando un'altra postazione cambia o completa una fase
+  // Permette a tutti i client (desktop, cellulari, postazioni) di ricevere aggiornamenti
+  // istantanei in tempo reale quando qualsiasi postazione aggiorna OdP, Fasi, Ordini Clienti o DDT
   sottoscriviAvanzamentoProduzione(suAggiornamento: () => void) {
     const channel = supabase
       .channel('officina-realtime-changes')
@@ -644,6 +700,20 @@ export const syncService = {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ordini_produzione' },
+        () => {
+          suAggiornamento()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ordini_clienti' },
+        () => {
+          suAggiornamento()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ddt_clienti' },
         () => {
           suAggiornamento()
         }

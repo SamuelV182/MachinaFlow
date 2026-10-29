@@ -183,12 +183,8 @@ export default function OrdiniPage() {
       const odpCaricati = await syncService.getOrdiniProduzione()
       setOdpList(odpCaricati)
 
-      // Unisci ordini salvati con seed (garantisce la presenza di ord-11)
-      const ordiniSalvati = parseSicuro<(OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })[]>('machinaflow_ordini_clienti', [])
-      const mappaOrdini = new Map<string, (OrdineCliente & { cliente?: Cliente; righe: (RigaOrdineCliente & { articolo?: Articolo })[] })>()
-      SEED_ORDINI_CLIENTI.forEach((o) => mappaOrdini.set(o.id, o))
-      ordiniSalvati.forEach((o) => mappaOrdini.set(o.id, o))
-      const ordiniCaricati = Array.from(mappaOrdini.values())
+      // Carica ordini clienti sincronizzati da Supabase Cloud + fallback locale e seed
+      const ordiniCaricati = await syncService.getOrdiniClienti()
 
       // Carica DDT Clienti per calcolo esatto delle quantità già consegnate e saldi (Cloud Supabase + Locale)
       const ddtCloud = await syncService.getDdtClienti()
@@ -289,6 +285,18 @@ export default function OrdiniPage() {
     }
 
     caricaDati()
+
+    // Sottoscrizione Real-Time nativa Supabase:
+    // Riceve gli aggiornamenti istantanei da qualsiasi terminale (deploy, tablet, altri PC)
+    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
+      caricaDati()
+    })
+
+    return () => {
+      if (disiscrivi && typeof disiscrivi === 'function') {
+        disiscrivi()
+      }
+    }
   }, [])
 
   // SIMULATORE CAPABLE-TO-PROMISE (CTP) DATA DI CONSEGNA
