@@ -19,7 +19,10 @@ import {
   LayoutGrid,
   List,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Scale,
+  History,
+  RotateCcw
 } from 'lucide-react'
 import { Articolo, TipoArticolo, ComponenteDistintaBase, FaseCicloStandard } from '@/types/database'
 import { SEED_ARTICOLI, SEED_DISTINTA_BASE, SEED_FASI_CICLO } from '@/lib/data-service'
@@ -52,6 +55,15 @@ export default function ArticoliPage() {
     prezzo_riferimento: 0
   })
 
+  // Modale Rettifica / Inventario Giacenza Magazzino
+  const [articoloDaRettificare, setArticoloDaRettificare] = useState<Articolo | null>(null)
+  const [formRettifica, setFormRettifica] = useState({
+    nuova_giacenza: 0,
+    causale: 'Inventario periodico / Conteggio fisico',
+    note: ''
+  })
+  const [notifica, setNotifica] = useState<string | null>(null)
+
   useEffect(() => {
     const parseSicuro = <T,>(chiave: string, fallback: T): T => {
       try {
@@ -63,11 +75,29 @@ export default function ArticoliPage() {
       }
     }
 
-    // Carica articoli e se presenti nuovi articoli di seed uniscili a quelli salvati
+    // Carica articoli sincronizzandoli con Supabase Cloud
+    syncService.getArticoli().then((articoliCloud) => {
+      if (articoliCloud && articoliCloud.length > 0) {
+        const mappa = new Map<string, Articolo>()
+        SEED_ARTICOLI.forEach((a) => mappa.set(a.id, a))
+        articoliCloud.forEach((a) => mappa.set(a.id, a))
+        const listaFinale = Array.from(mappa.values())
+        setArticoli(listaFinale)
+        localStorage.setItem('machinaflow_articoli', JSON.stringify(listaFinale))
+      }
+    })
+
     const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
     const mappaArticoli = new Map<string, Articolo>()
     SEED_ARTICOLI.forEach((a) => mappaArticoli.set(a.id, a))
-    articoliSalvati.forEach((a) => mappaArticoli.set(a.id, a))
+    articoliSalvati.forEach((a) => {
+      // Se è un prodotto finito, la giacenza è resettata a 0 come da inventario
+      if (a.tipo === 'prodotto_finito') {
+        mappaArticoli.set(a.id, { ...a, giacenza_attuale: 0 })
+      } else {
+        mappaArticoli.set(a.id, a)
+      }
+    })
     const listaUnitaArticoli = Array.from(mappaArticoli.values())
     setArticoli(listaUnitaArticoli)
     localStorage.setItem('machinaflow_articoli', JSON.stringify(listaUnitaArticoli))
@@ -153,6 +183,59 @@ export default function ArticoliPage() {
       prezzo_riferimento: a.prezzo_riferimento || 0
     })
     setModaleAperta(true)
+  }
+
+  // Apertura Modale Rettifica Magazzino
+  const handleApriRettifica = (a: Articolo) => {
+    setArticoloDaRettificare(a)
+    setFormRettifica({
+      nuova_giacenza: a.giacenza_attuale,
+      causale: 'Inventario periodico / Conteggio fisico',
+      note: ''
+    })
+  }
+
+  // Conferma Rettifica e Sincronizzazione Cloud
+  const handleConfermaRettifica = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!articoloDaRettificare) return
+
+    const nuovaQta = Number(formRettifica.nuova_giacenza)
+    const delta = nuovaQta - articoloDaRettificare.giacenza_attuale
+
+    const articoloAggiornato: Articolo = {
+      ...articoloDaRettificare,
+      giacenza_attuale: nuovaQta
+    }
+
+    const aggiornati = articoli.map((a) => (a.id === articoloDaRettificare.id ? articoloAggiornato : a))
+    setArticoli(aggiornati)
+    localStorage.setItem('machinaflow_articoli', JSON.stringify(aggiornati))
+
+    // Sincronizza subito su Supabase Cloud per aggiornare tutti i computer
+    syncService.salvaArticolo(articoloAggiornato)
+
+    // Salva record nello storico movimenti locale
+    try {
+      const storicoKey = `machinaflow_movimenti_magazzino_${articoloDaRettificare.id}`
+      const movPrecedenti = JSON.parse(localStorage.getItem(storicoKey) || '[]')
+      const nuovoMov = {
+        id: `mov-${Date.now()}`,
+        data: new Date().toISOString(),
+        tipo: delta >= 0 ? 'rettifica_positiva' : 'rettifica_negativa',
+        quantita_precedente: articoloDaRettificare.giacenza_attuale,
+        nuova_quantita: nuovaQta,
+        differenza: delta,
+        causale: formRettifica.causale,
+        note: formRettifica.note.trim() || undefined
+      }
+      localStorage.setItem(storicoKey, JSON.stringify([nuovoMov, ...movPrecedenti].slice(0, 30)))
+    } catch {}
+
+    const segno = delta >= 0 ? `+${delta}` : `${delta}`
+    setNotifica(`✓ Giacenza di ${articoloDaRettificare.codice_articolo} rettificata a ${nuovaQta} ${articoloDaRettificare.unita_misura} (${segno})`)
+    setArticoloDaRettificare(null)
+    setTimeout(() => setNotifica(null), 4500)
   }
 
   const chiudiModale = () => {
@@ -338,9 +421,19 @@ export default function ArticoliPage() {
                   {/* Giacenza vs Scorta */}
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-400">Giacenza Magazzino:</span>
-                    <span className={`font-semibold ${isSottoScorta ? 'text-rose-400 font-bold' : 'text-slate-200'}`}>
-                      {art.giacenza_attuale} {art.unita_misura} (min. {art.scorta_minima})
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`font-semibold ${isSottoScorta ? 'text-rose-400 font-bold' : 'text-slate-200'}`}>
+                        {art.giacenza_attuale} {art.unita_misura} (min. {art.scorta_minima})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleApriRettifica(art)}
+                        className="p-1 rounded bg-slate-800 hover:bg-amber-600/30 text-slate-400 hover:text-amber-300 border border-slate-700/80 hover:border-amber-500/40 transition-colors cursor-pointer"
+                        title="Rettifica manuale giacenza / inventario"
+                      >
+                        <Scale className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Prezzo Riferimento */}
@@ -513,11 +606,21 @@ export default function ArticoliPage() {
                         )}
                       </td>
 
-                      {/* Giacenza */}
+                      {/* Giacenza con pulsante rettifica rapida */}
                       <td className="py-2.5 px-2 text-center whitespace-nowrap">
-                        <span className={`font-bold ${isSottoScorta ? 'text-rose-400' : 'text-slate-100'}`}>
-                          {art.giacenza_attuale} <span className="text-[10px] text-slate-400">{art.unita_misura}</span>
-                        </span>
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className={`font-bold ${isSottoScorta ? 'text-rose-400' : 'text-slate-100'}`}>
+                            {art.giacenza_attuale} <span className="text-[10px] text-slate-400">{art.unita_misura}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleApriRettifica(art)}
+                            className="p-1 rounded bg-slate-800 hover:bg-amber-600/30 text-slate-400 hover:text-amber-300 border border-slate-700/80 hover:border-amber-500/40 transition-colors cursor-pointer"
+                            title="Rettifica manuale giacenza / inventario"
+                          >
+                            <Scale className="w-3 h-3" />
+                          </button>
+                        </div>
                       </td>
 
                       {/* Scorta Minima */}
@@ -796,6 +899,186 @@ export default function ArticoliPage() {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODALE RETTIFICA MANUALE / INVENTARIO GIACENZA MAGAZZINO
+          ========================================================================= */}
+      {articoloDaRettificare && (() => {
+        const delta = Number(formRettifica.nuova_giacenza) - articoloDaRettificare.giacenza_attuale
+        const storicoKey = `machinaflow_movimenti_magazzino_${articoloDaRettificare.id}`
+        let ultimiMovimenti: any[] = []
+        try {
+          ultimiMovimenti = JSON.parse(localStorage.getItem(storicoKey) || '[]')
+        } catch {}
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-amber-950/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <Scale className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-white flex items-center gap-2">
+                      Rettifica Giacenza & Inventario
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Aggiornamento manuale del saldo fisico a magazzino
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setArticoloDaRettificare(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleConfermaRettifica} className="p-5 space-y-4 text-xs">
+                {/* Riquadro Articolo */}
+                <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <span className="font-mono font-bold text-orange-400 text-sm block">
+                      {articoloDaRettificare.codice_articolo}
+                    </span>
+                    <span className="text-slate-300 font-medium text-xs block mt-0.5">
+                      {articoloDaRettificare.descrizione}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Giacenza a Sistema</span>
+                    <span className="text-base font-black text-white font-mono">
+                      {articoloDaRettificare.giacenza_attuale} {articoloDaRettificare.unita_misura}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Input Nuova Giacenza e Calcolo Differenza */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Nuova Giacenza Fisica Rilevata ({articoloDaRettificare.unita_misura}) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={formRettifica.nuova_giacenza}
+                      onChange={(e) => setFormRettifica({ ...formRettifica, nuova_giacenza: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm font-mono font-bold text-slate-100 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <span className="block text-xs font-semibold text-slate-300 mb-1">
+                      Variazione Risultante (Delta)
+                    </span>
+                    <div className={`px-3 py-2 rounded-xl border font-mono font-bold text-sm flex items-center justify-between ${
+                      delta > 0
+                        ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400'
+                        : delta < 0
+                        ? 'bg-rose-950/40 border-rose-800/60 text-rose-400'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}>
+                      <span>{delta > 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2)} {articoloDaRettificare.unita_misura}</span>
+                      <span className="text-[10px] font-sans font-semibold uppercase">
+                        {delta > 0 ? 'Carico' : delta < 0 ? 'Scarico' : 'Invariato'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Causale di Rettifica */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Causale della Rettifica *
+                  </label>
+                  <select
+                    value={formRettifica.causale}
+                    onChange={(e) => setFormRettifica({ ...formRettifica, causale: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Inventario periodico / Conteggio fisico">📋 Inventario periodico / Conteggio fisico</option>
+                    <option value="Rottura / Scarto non registrato a bordo macchina">⚠️ Rottura / Scarto non registrato a bordo macchina</option>
+                    <option value="Campione gratuito consegnato a cliente">📦 Campione gratuito consegnato a cliente</option>
+                    <option value="Reso cliente o rientro merce">↩️ Reso cliente o rientro merce</option>
+                    <option value="Correzione errore inserimento precedente">🔍 Correzione errore inserimento precedente</option>
+                    <option value="Altro">✍️ Altro (specificare nelle note)</option>
+                  </select>
+                </div>
+
+                {/* Note Operative */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Note / Dettagli aggiuntivi (Opzionale)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="es: Verificato conteggio su cassa 3 dallo scaffale B"
+                    value={formRettifica.note}
+                    onChange={(e) => setFormRettifica({ ...formRettifica, note: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Mini Storico Ultime Rettifiche */}
+                {ultimiMovimenti.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mb-2">
+                      <History className="w-3.5 h-3.5 text-amber-400" />
+                      Ultime Rettifiche Registrate ({ultimiMovimenti.length})
+                    </span>
+                    <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1">
+                      {ultimiMovimenti.slice(0, 3).map((mov: any) => (
+                        <div key={mov.id} className="p-2 bg-slate-950/80 rounded-lg border border-slate-800/60 flex items-center justify-between text-[11px]">
+                          <div>
+                            <span className="font-semibold text-slate-300">{mov.causale}</span>
+                            <span className="text-[10px] text-slate-500 block">
+                              {new Date(mov.data).toLocaleDateString('it-IT')} ore {new Date(mov.data).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <span className={`font-mono font-bold ${mov.differenza >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {mov.differenza >= 0 ? `+${mov.differenza}` : mov.differenza} {articoloDaRettificare.unita_misura}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">
+                  <button
+                    type="button"
+                    onClick={() => setArticoloDaRettificare(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    Annulla
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md shadow-amber-500/30 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>Conferma Rettifica</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Notifica Toast */}
+      {notifica && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 border border-amber-500/40 text-amber-300 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+            <CheckCircle className="w-4 h-4" />
+          </div>
+          <span className="text-xs font-semibold text-white">{notifica}</span>
         </div>
       )}
     </div>

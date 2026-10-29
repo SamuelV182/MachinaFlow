@@ -296,7 +296,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Spalla di Supporto Gruppo Taglio da Sagoma Pantografata sp.40',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 3,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 820.00,
     creato_il: new Date().toISOString()
@@ -307,7 +307,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Piastra Guida Lineare Spianata e Forata per Slitta Portalama',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 6,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 340.00,
     creato_il: new Date().toISOString()
@@ -318,7 +318,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Traversa Saldata Gruppo Taglio Longitudinale Tubolare+Piatti',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 2,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 1650.00,
     creato_il: new Date().toISOString()
@@ -329,7 +329,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Blocco Monolitico di Connessione Spalle Cilindro Goffratore',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 4,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 680.00,
     creato_il: new Date().toISOString()
@@ -340,7 +340,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Braccio Mobile per Sollevamento Bobina Madre da Sagoma Sp.50',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 2,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 1150.00,
     creato_il: new Date().toISOString()
@@ -351,7 +351,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Corpo Porta-Lama Pneumatico Slitter Unit Fresato 5 Assi',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 10,
+    giacenza_attuale: 0,
     scorta_minima: 5,
     prezzo_riferimento: 420.00,
     creato_il: new Date().toISOString()
@@ -362,7 +362,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Basamento Elettrosaldato Braccio Tendifilm Ribobinatrice',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 2,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 1950.00,
     creato_il: new Date().toISOString()
@@ -373,7 +373,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Supporto Quadro Spianato con Sede Alesata H7 per Cuscinetto Rullo',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 8,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 390.00,
     creato_il: new Date().toISOString()
@@ -384,7 +384,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Piastra di Ancoraggio Cilindro Pressore con Asolature di Registro',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 5,
+    giacenza_attuale: 0,
     scorta_minima: 3,
     prezzo_riferimento: 290.00,
     creato_il: new Date().toISOString()
@@ -395,7 +395,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Montante Laterale a C con Piani Rettificati per Calandra Carta',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 2,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 2400.00,
     creato_il: new Date().toISOString()
@@ -406,7 +406,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Slitta a Coda di Rondine Regolazione Registro Velo Carta',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 7,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 510.00,
     creato_il: new Date().toISOString()
@@ -417,7 +417,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Blocco Distributore Pneumatico Circuiti Soffiatori Taglierina',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 6,
+    giacenza_attuale: 0,
     scorta_minima: 3,
     prezzo_riferimento: 460.00,
     creato_il: new Date().toISOString()
@@ -428,7 +428,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Cavalletto Saldato per Supporto Motore Traino Ribobinatrice',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 3,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 980.00,
     creato_il: new Date().toISOString()
@@ -439,7 +439,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Settore Sagomato Curvo Scanalato per Angolo Ingresso Carta',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 8,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 330.00,
     creato_il: new Date().toISOString()
@@ -450,7 +450,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Corpo Pinza Freno Pneumatico Asse Svolgitore Bobina',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 5,
+    giacenza_attuale: 0,
     scorta_minima: 3,
     prezzo_riferimento: 580.00,
     creato_il: new Date().toISOString()
@@ -461,7 +461,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Piastra Fresata Supporto Cella di Carico Misura Tiro Nastro',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 12,
+    giacenza_attuale: 0,
     scorta_minima: 6,
     prezzo_riferimento: 185.00,
     creato_il: new Date().toISOString()
@@ -472,7 +472,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Traversa Superiore Portagruppi Perforatori L=2400 Saldata',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 2,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 2850.00,
     creato_il: new Date().toISOString()
@@ -483,7 +483,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Supporto Oscillante a Forchetta per Rullo Ballerino',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 4,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 720.00,
     creato_il: new Date().toISOString()
@@ -494,7 +494,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Cuneo Inclinato Fresato a 5 Assi per Guida Espulsione Rotolo',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 6,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 430.00,
     creato_il: new Date().toISOString()
@@ -505,7 +505,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Piastra Collettore Vuoto Rullo Aspirante Goffratura Tissue',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 5,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 870.00,
     creato_il: new Date().toISOString()
@@ -516,7 +516,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Carrello Mobile Elettrosaldato Ribobinatrice per Cambio Formato',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 2,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 1780.00,
     creato_il: new Date().toISOString()
@@ -527,7 +527,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Staffa di Reazione Rinforzata per Martinetto Idraulico Svolgitore',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 10,
+    giacenza_attuale: 0,
     scorta_minima: 5,
     prezzo_riferimento: 220.00,
     creato_il: new Date().toISOString()
@@ -538,7 +538,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Corpo Devia-Nastro Sagomato 3D con Fori Lubrificazione',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 6,
+    giacenza_attuale: 0,
     scorta_minima: 3,
     prezzo_riferimento: 560.00,
     creato_il: new Date().toISOString()
@@ -549,7 +549,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Piastra di Chiusura e Centraggi Frontale Calandra Carta',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 4,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 490.00,
     creato_il: new Date().toISOString()
@@ -560,7 +560,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Traversa Inferiore di Collegamento Spalle Strutturali L=2000',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 3,
+    giacenza_attuale: 0,
     scorta_minima: 1,
     prezzo_riferimento: 1550.00,
     creato_il: new Date().toISOString()
@@ -571,7 +571,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Blocco di Scorrimento per Slitte Slitter Unit Fresato 4 Assi',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 8,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 370.00,
     creato_il: new Date().toISOString()
@@ -582,7 +582,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Piastra Spianata di Allineamento Rulli Folli Carta con Cave a T',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 6,
+    giacenza_attuale: 0,
     scorta_minima: 3,
     prezzo_riferimento: 310.00,
     creato_il: new Date().toISOString()
@@ -593,7 +593,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Supporto Saldato Bracci Espulsori Rotoli Finiti Linea Tissue',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 3,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 1120.00,
     creato_il: new Date().toISOString()
@@ -604,7 +604,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Flangia Rettangolare di Attacco Motoriduttore su Spalla Macchina',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 8,
+    giacenza_attuale: 0,
     scorta_minima: 4,
     prezzo_riferimento: 260.00,
     creato_il: new Date().toISOString()
@@ -615,7 +615,7 @@ export const SEED_ARTICOLI: Articolo[] = [
     descrizione: 'Carter di Protezione Strutturale con Fessura Passaggio Nastro',
     tipo: 'prodotto_finito',
     unita_misura: 'pz',
-    giacenza_attuale: 4,
+    giacenza_attuale: 0,
     scorta_minima: 2,
     prezzo_riferimento: 640.00,
     creato_il: new Date().toISOString()

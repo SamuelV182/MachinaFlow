@@ -172,7 +172,9 @@ export const syncService = {
         stato: nuovoOdp.stato || 'pianificato',
         priorita: nuovoOdp.priorita || 2,
         qr_code_token: nuovoOdp.qr_code_token,
-        note: nuovoOdp.note || null
+        note: nuovoOdp.note || null,
+        materia_prima_scaricata: nuovoOdp.materia_prima_scaricata ?? false,
+        data_scarico_materia_prima: nuovoOdp.data_scarico_materia_prima || null
       }
       const { error: errOdp } = await supabase
         .from('ordini_produzione')
@@ -280,6 +282,38 @@ export const syncService = {
     }
   },
 
+  async segnaMateriaPrimaScaricata(odpId: string) {
+    const adesso = new Date().toISOString()
+    try {
+      // 1. Aggiorna sempre istantaneamente in localStorage
+      const salvati = localStorage.getItem('machinaflow_odp')
+      if (salvati) {
+        const lista: (OrdineProduzione & { fasi: FaseOdP[] })[] = JSON.parse(salvati)
+        const odp = lista.find((o) => o.id === odpId)
+        if (odp) {
+          odp.materia_prima_scaricata = true
+          odp.data_scarico_materia_prima = adesso
+          localStorage.setItem('machinaflow_odp', JSON.stringify(lista))
+        }
+      }
+
+      // 2. Tenta aggiornamento su Supabase Cloud (con catch sicuro)
+      try {
+        await supabase
+          .from('ordini_produzione')
+          .update({
+            materia_prima_scaricata: true,
+            data_scarico_materia_prima: adesso
+          })
+          .eq('id', odpId)
+      } catch (errDb) {
+        console.warn('Nota: sync cloud materia_prima_scaricata:', errDb)
+      }
+    } catch (e) {
+      console.error('Errore segnaMateriaPrimaScaricata:', e)
+    }
+  },
+
   // 3. ORDINI CLIENTI
   async salvaOrdineCliente(ordine: OrdineCliente & { righe?: RigaOrdineCliente[] }) {
     try {
@@ -320,6 +354,31 @@ export const syncService = {
   },
 
   // 4. ARTICOLI E GIACENZE
+  async getArticoli(): Promise<Articolo[]> {
+    try {
+      const { data, error } = await supabase
+        .from('articoli')
+        .select('*')
+        .order('codice_articolo')
+
+      if (error) {
+        console.warn('Errore lettura articoli da Supabase:', error.message)
+        const salvati = localStorage.getItem('machinaflow_articoli')
+        return salvati ? JSON.parse(salvati) : []
+      }
+
+      if (data && data.length > 0) {
+        localStorage.setItem('machinaflow_articoli', JSON.stringify(data))
+        return data as Articolo[]
+      }
+      return []
+    } catch (e) {
+      console.error('Errore getArticoli:', e)
+      const salvati = localStorage.getItem('machinaflow_articoli')
+      return salvati ? JSON.parse(salvati) : []
+    }
+  },
+
   async salvaArticolo(articolo: Articolo) {
     try {
       await supabase.from('articoli').upsert({

@@ -190,8 +190,13 @@ export default function OrdiniPage() {
       ordiniSalvati.forEach((o) => mappaOrdini.set(o.id, o))
       const ordiniCaricati = Array.from(mappaOrdini.values())
 
-      // Carica DDT Clienti per calcolo esatto delle quantità già consegnate e saldi
-      const ddtCaricati = parseSicuro<DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', SEED_DDT_CLIENTI)
+      // Carica DDT Clienti per calcolo esatto delle quantità già consegnate e saldi (Cloud Supabase + Locale)
+      const ddtCloud = await syncService.getDdtClienti()
+      const ddtLocali = parseSicuro<DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', SEED_DDT_CLIENTI)
+      const mappaDdt = new Map<string, DocumentoTrasportoCliente>()
+      ddtLocali.forEach((d) => mappaDdt.set(d.id, d))
+      ;(ddtCloud || []).forEach((d) => mappaDdt.set(d.id, d))
+      const ddtCaricati = Array.from(mappaDdt.values())
       setDdtClienti(ddtCaricati)
 
       // Arricchisci con oggetti collegati e determina lo stato reale in base agli OdP e ai DDT
@@ -231,15 +236,32 @@ export default function OrdiniPage() {
           })
         })
 
+        // Verifica se ci sono OdP completati ma non ancora interamente spediti
+        const haOdpProntiNonSpediti = odpDellOrdine.some((o) => {
+          const tutteChiuse = o.fasi && o.fasi.length > 0 && o.fasi.every((f) => f.stato === 'completata')
+          const isCompletato = o.stato === 'completato' || tutteChiuse
+          if (!isCompletato || o.stato === 'spedito') return false
+
+          // Verifica se è presente in un DDT
+          let qtaSpeditaOdp = 0
+          ddtCaricati.forEach((doc) => {
+            doc.righe?.forEach((r) => {
+              if (r.odp_id === o.id || r.codice_odp === o.codice_odp) {
+                qtaSpeditaOdp += r.quantita_spedita
+              }
+            })
+          })
+          return qtaSpeditaOdp < (o.quantita_da_produrre || 0)
+        })
+
         let statoReale = ord.stato
         if (totalePezziSpediti >= totalePezziOrdinati && totalePezziOrdinati > 0) {
           statoReale = 'evaso'
         } else if (totalePezziSpediti > 0) {
-          statoReale = 'parzialmente_evaso'
-        } else if (righeCoperteECompletate && odpDellOrdine.length > 0) {
+          // Se ha spedito parzialmente e non ci sono altri OdP completati in attesa di DDT, rimane parzialmente evaso (o in produzione)
+          statoReale = haOdpProntiNonSpediti ? 'pronto_spedizione' : 'parzialmente_evaso'
+        } else if (haOdpProntiNonSpediti) {
           statoReale = 'pronto_spedizione'
-        } else if (almenoUnOdpCompletato) {
-          statoReale = 'pronto_spedizione' // Mostra anche gli ordini con pezzi già pronti per spedizione (parziali o totali)
         } else if (odpDellOrdine.length > 0) {
           statoReale = 'in_produzione'
         }
@@ -1166,16 +1188,68 @@ export default function OrdiniPage() {
                       </button>
                     )}
 
-                    {/* Pulsante rapido per emissione DDT Cliente se ci sono pezzi finiti */}
-                    {(ordine.stato === 'pronto_spedizione' || ordine.stato === 'parzialmente_pronto' || ordine.stato === 'parzialmente_evaso') && (
-                      <Link
-                        href={`/spedizioni?clienteId=${ordine.cliente_id}`}
-                        className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm shadow-emerald-600/30 transition-all"
-                      >
-                        <Truck className="w-3.5 h-3.5" />
-                        <span>Emetti DDT Consegna Merci</span>
-                      </Link>
-                    )}
+                    {/* Calcola se questa commessa ha almeno un articolo con pezzi effettivamente pronti o stock da poter spedire */}
+                    {(() => {
+                      // Verifica se c'è almeno un pezzo pronto da OdP o da stock non ancora interamente spedito
+                      const haPezziSpedibili = ordine.righe.some((riga) => {
+                        // Calcola quanto già spedito per questa riga
+                        let giaSpedito = 0
+                        ddtClienti.forEach((doc) => {
+                          doc.righe?.forEach((dr) => {
+                            if (dr.riga_ordine_cliente_id === riga.id || (dr.ordine_cliente_id === ordine.id && dr.articolo_id === riga.articolo_id)) {
+                              giaSpedito += dr.quantita_spedita
+                            }
+                          })
+                        })
+
+                        const residuoOrdine = Math.max(0, (riga.quantita || 0) - giaSpedito)
+                        if (residuoOrdine <= 0) return false
+
+                        // Trova OdP della riga
+                        const odpDellaRiga = odpList.filter((o) =>
+                          o.riga_ordine_cliente_id === riga.id ||
+                          (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id)
+                        )
+
+                        // Pezzi finiti da OdP non ancora inclusi in DDT (spedibili SOLO se l'OdP ha concluso tutte le fasi)
+                        const pezziProntiOdp = odpDellaRiga.reduce((acc, o) => {
+                          const tutteChiuse = o.fasi && o.fasi.length > 0 && o.fasi.every((f) => f.stato === 'completata')
+                          const isCompletato = o.stato === 'completato' || tutteChiuse
+                          
+                          // Se l'OdP è ancora in lavorazione o pianificato, i pezzi non sono pronti per la spedizione
+                          if (!isCompletato || o.stato === 'spedito') return acc
+
+                          const qtaProdotta = o.quantita_da_produrre || o.quantita_prodotta || 0
+                          
+                          // Calcola quanto di questo specifico OdP è già stato spedito in DDT
+                          let qtaGiaSpeditaQuestoOdp = 0
+                          ddtClienti.forEach((doc) => {
+                            doc.righe?.forEach((dr) => {
+                              if (dr.odp_id === o.id || dr.codice_odp === o.codice_odp) {
+                                qtaGiaSpeditaQuestoOdp += dr.quantita_spedita
+                              }
+                            })
+                          })
+
+                          const rimanenzaQuestoOdp = Math.max(0, qtaProdotta - qtaGiaSpeditaQuestoOdp)
+                          return acc + rimanenzaQuestoOdp
+                        }, 0)
+
+                        return pezziProntiOdp > 0
+                      })
+
+                      if (!haPezziSpedibili) return null
+
+                      return (
+                        <Link
+                          href={`/spedizioni?clienteId=${ordine.cliente_id}`}
+                          className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm shadow-emerald-600/30 transition-all"
+                        >
+                          <Truck className="w-3.5 h-3.5" />
+                          <span>Emetti DDT Consegna Merci</span>
+                        </Link>
+                      )
+                    })()}
                   </div>
                 </div>
 
@@ -1271,7 +1345,36 @@ export default function OrdiniPage() {
                                 const fasiChiuse = fasiOdp.filter((f) => f.stato === 'completata').length
                                 const totFasi = fasiOdp.length
                                 const tutteChiuse = totFasi > 0 && fasiChiuse === totFasi
-                                const isSpedito = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
+
+                                // Trova il numero di DDT in cui è stato inserito questo OdP specifico o riga commessa
+                                const ddtAssociati = ddtClienti.filter((doc) =>
+                                  doc.righe?.some(
+                                    (dr) =>
+                                      dr.odp_id === currOdp.id ||
+                                      dr.codice_odp === currOdp.codice_odp ||
+                                      dr.riga_ordine_cliente_id === riga.id ||
+                                      (dr.ordine_cliente_id === ordine.id && dr.articolo_id === riga.articolo_id)
+                                  )
+                                )
+                                const numeriDdt = Array.from(new Set(ddtAssociati.map((d) => d.numero_ddt)))
+                                const etichettaDdt = numeriDdt.length > 0 ? numeriDdt.join(', ') : 'DDT'
+
+                                // Calcola quantità spedita specifica per questo OdP
+                                let quantitaSpeditaQuestoOdp = 0
+                                ddtClienti.forEach((doc) => {
+                                  doc.righe?.forEach((dr) => {
+                                    if (dr.odp_id === currOdp.id || dr.codice_odp === currOdp.codice_odp) {
+                                      quantitaSpeditaQuestoOdp += dr.quantita_spedita
+                                    }
+                                  })
+                                })
+
+                                const isSpeditoQuestoOdp =
+                                  currOdp.stato === 'spedito' ||
+                                  (quantitaSpeditaQuestoOdp >= currOdp.quantita_da_produrre && quantitaSpeditaQuestoOdp > 0) ||
+                                  (ddtAssociati.length > 0 && currOdp.codice_odp && ddtAssociati.some((d) => d.righe?.some((dr) => dr.codice_odp === currOdp.codice_odp)))
+                                const isSpeditoRiga = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
+                                const isSpedito = isSpeditoQuestoOdp || isSpeditoRiga
 
                                 let stileBadge = 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30'
                                 let testoStato = 'In Lavorazione'
@@ -1279,7 +1382,7 @@ export default function OrdiniPage() {
 
                                 if (isSpedito) {
                                   stileBadge = 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-600/50'
-                                  testoStato = 'Spedito (DDT)'
+                                  testoStato = `Spedito (${etichettaDdt})`
                                   iconaStato = '✓'
                                 } else if (tutteChiuse || currOdp.stato === 'completato') {
                                   stileBadge = 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40 shadow-xs shadow-emerald-500/20'
@@ -1588,7 +1691,36 @@ export default function OrdiniPage() {
                                 const fasiChiuse = fasiOdp.filter((f) => f.stato === 'completata').length
                                 const totFasi = fasiOdp.length
                                 const tutteChiuse = totFasi > 0 && fasiChiuse === totFasi
-                                const isSpedito = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
+
+                                // Trova il numero di DDT per la vista tabellare
+                                const ddtAssociatiTab = ddtClienti.filter((doc) =>
+                                  doc.righe?.some(
+                                    (dr) =>
+                                      dr.odp_id === currOdp.id ||
+                                      dr.codice_odp === currOdp.codice_odp ||
+                                      dr.riga_ordine_cliente_id === riga.id ||
+                                      (dr.ordine_cliente_id === ordine.id && dr.articolo_id === riga.articolo_id)
+                                  )
+                                )
+                                const numeriDdtTab = Array.from(new Set(ddtAssociatiTab.map((d) => d.numero_ddt)))
+                                const etichettaDdtTab = numeriDdtTab.length > 0 ? numeriDdtTab.join(', ') : 'DDT'
+
+                                // Calcola quantità spedita specifica per questo OdP
+                                let quantitaSpeditaQuestoOdpTab = 0
+                                ddtClienti.forEach((doc) => {
+                                  doc.righe?.forEach((dr) => {
+                                    if (dr.odp_id === currOdp.id || dr.codice_odp === currOdp.codice_odp) {
+                                      quantitaSpeditaQuestoOdpTab += dr.quantita_spedita
+                                    }
+                                  })
+                                })
+
+                                const isSpeditoQuestoOdpTab =
+                                  currOdp.stato === 'spedito' ||
+                                  (quantitaSpeditaQuestoOdpTab >= currOdp.quantita_da_produrre && quantitaSpeditaQuestoOdpTab > 0) ||
+                                  (ddtAssociatiTab.length > 0 && currOdp.codice_odp && ddtAssociatiTab.some((d) => d.righe?.some((dr) => dr.codice_odp === currOdp.codice_odp)))
+                                const isSpeditoRigaTab = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
+                                const isSpedito = isSpeditoQuestoOdpTab || isSpeditoRigaTab
 
                                 let stileBadge = 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30'
                                 let testoStato = 'In Lavorazione'
@@ -1596,7 +1728,7 @@ export default function OrdiniPage() {
 
                                 if (isSpedito) {
                                   stileBadge = 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-600/50'
-                                  testoStato = 'Spedito'
+                                  testoStato = `Spedito (${etichettaDdtTab})`
                                   iconaStato = '✓'
                                 } else if (tutteChiuse || currOdp.stato === 'completato') {
                                   stileBadge = 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40'

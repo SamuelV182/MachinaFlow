@@ -20,11 +20,14 @@ import {
   LayoutGrid,
   List,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Truck,
+  FileText
 } from 'lucide-react'
-import { OrdineProduzione, FaseOdP, Articolo } from '@/types/database'
+import { OrdineProduzione, FaseOdP, Articolo, DocumentoTrasportoCliente } from '@/types/database'
 import { SEED_ODP, SEED_ARTICOLI } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
+import SchedaDDTStampabile from '@/components/SchedaDDTStampabile'
 
 type OdPConFasi = OrdineProduzione & {
   fasi: FaseOdP[]
@@ -34,6 +37,8 @@ type OdPConFasi = OrdineProduzione & {
 export default function ProduzionePage() {
   const [odpList, setOdpList] = useState<OdPConFasi[]>([])
   const [articoli, setArticoli] = useState<Articolo[]>([])
+  const [ddtClientiList, setDdtClientiList] = useState<DocumentoTrasportoCliente[]>([])
+  const [ddtDaStampare, setDdtDaStampare] = useState<DocumentoTrasportoCliente | null>(null)
   const [termineRicerca, setTermineRicerca] = useState('')
   const [filtroStato, setFiltroStato] = useState<string>('tutti')
   const [modalitaVista, setModalitaVista] = useState<'cards' | 'tabella'>('cards')
@@ -74,6 +79,7 @@ export default function ProduzionePage() {
       ddtClientiLocali.forEach((d) => ddtMappa.set(d.id, d))
       ddtClientiCloud.forEach((d) => ddtMappa.set(d.id, d))
       const ddtClienti = Array.from(ddtMappa.values())
+      setDdtClientiList(ddtClienti)
       const odpSpeditiSet = new Set<string>()
       ddtClienti.forEach((ddt) => {
         ddt.righe?.forEach((r) => {
@@ -388,13 +394,40 @@ export default function ProduzionePage() {
                 </div>
 
                 {/* Azioni */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-4 lg:pt-0 border-t lg:border-t-0 border-slate-800">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-4 lg:pt-0 border-t lg:border-t-0 border-slate-800">
+                  {/* Se l'OdP è spedito, mostra primario il pulsante Stampa DDT */}
+                  {(() => {
+                    const ddtTrovato = ddtClientiList.find((d) =>
+                      d.righe?.some((r) => r.odp_id === odp.id || r.codice_odp === odp.codice_odp)
+                    )
+
+                    if (odp.stato === 'spedito' && ddtTrovato) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setDdtDaStampare(ddtTrovato)}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer group"
+                          title={`Visualizza e Stampa Documento di Trasporto ${ddtTrovato.numero_ddt}`}
+                        >
+                          <Truck className="w-4 h-4 text-emerald-100" />
+                          <span>Stampa DDT ({ddtTrovato.numero_ddt})</span>
+                          <Printer className="w-3.5 h-3.5 opacity-80" />
+                        </button>
+                      )
+                    }
+                    return null
+                  })()}
+
                   <Link
                     href={`/produzione/${odp.id}`}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/30 transition-all group"
+                    className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all group ${
+                      odp.stato === 'spedito'
+                        ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                        : 'bg-orange-600 hover:bg-orange-500 text-white shadow-md shadow-orange-600/30'
+                    }`}
                   >
                     <Printer className="w-4 h-4" />
-                    <span>Stampa Scheda Lavoro (QR)</span>
+                    <span>Scheda Lavoro (QR)</span>
                     <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                   </Link>
                 </div>
@@ -529,15 +562,36 @@ export default function ProduzionePage() {
                         {Math.round(tempoTotaleMin / 60)}h {tempoTotaleMin % 60}m
                       </td>
 
-                      {/* Azione Stampa Scheda */}
+                      {/* Azione Stampa Scheda & Stampa DDT */}
                       <td className="py-2.5 px-2 text-center whitespace-nowrap">
-                        <Link
-                          href={`/produzione/${odp.id}`}
-                          className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 hover:bg-orange-600 text-slate-300 hover:text-white transition-all cursor-pointer border border-slate-700/80 hover:border-orange-500 shadow-sm"
-                          title="Apri e Stampa Scheda Lavoro A4 (QR Code)"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                        </Link>
+                        <div className="flex items-center justify-center gap-1.5">
+                          {(() => {
+                            const ddtTrovato = ddtClientiList.find((d) =>
+                              d.righe?.some((r) => r.odp_id === odp.id || r.codice_odp === odp.codice_odp)
+                            )
+                            if (odp.stato === 'spedito' && ddtTrovato) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setDdtDaStampare(ddtTrovato)}
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white transition-all cursor-pointer border border-emerald-500/40 shadow-sm"
+                                  title={`Stampa DDT ${ddtTrovato.numero_ddt}`}
+                                >
+                                  <Truck className="w-3.5 h-3.5" />
+                                </button>
+                              )
+                            }
+                            return null
+                          })()}
+
+                          <Link
+                            href={`/produzione/${odp.id}`}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 hover:bg-orange-600 text-slate-300 hover:text-white transition-all cursor-pointer border border-slate-700/80 hover:border-orange-500 shadow-sm"
+                            title="Apri e Stampa Scheda Lavoro A4 (QR Code)"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -591,6 +645,15 @@ export default function ProduzionePage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modale Anteprima Stampa A4 del DDT Cliente per OdP Spediti */}
+      {ddtDaStampare && (
+        <SchedaDDTStampabile
+          ddt={ddtDaStampare}
+          tipo="cliente"
+          onChiudi={() => setDdtDaStampare(null)}
+        />
       )}
     </div>
   )

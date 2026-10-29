@@ -189,6 +189,8 @@ export interface OrdineProduzione {
   stato: StatoOdP
   qr_code_token: string
   priorita: number // 1: Bassa, 2: Media, 3: Alta, 4: Urgente
+  materia_prima_scaricata?: boolean // true quando la materia prima è stata prelevata e scalata a magazzino
+  data_scarico_materia_prima?: string
   note?: string
   articolo?: Articolo
   riga_ordine?: RigaOrdineCliente

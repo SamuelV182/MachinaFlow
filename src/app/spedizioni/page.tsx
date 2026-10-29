@@ -246,22 +246,6 @@ export default function SpedizioniDdtPage() {
       const ddtCliReali = salvatiDdtCli.filter((d) => d.id !== 'ddt-cli-demo-01' && d.numero_ddt !== 'DDT-2026/054')
       setListaDdtClienti(ddtCliReali)
 
-      // Se ci sono DDT creati localmente che non sono ancora sul Cloud, inviali a Supabase (auto-migrazione senza perdita dati)
-      syncService.getDdtClienti().then(async (ddtCliCloud) => {
-        const idCloud = new Set((ddtCliCloud || []).map((d) => d.id))
-        const ddtDaCaricare = ddtCliReali.filter((d) => !idCloud.has(d.id))
-        if (ddtDaCaricare.length > 0) {
-          for (const ddt of ddtDaCaricare) {
-            await syncService.salvaDdtCliente(ddt)
-          }
-        }
-
-        const mappa = new Map<string, DocumentoTrasportoCliente>()
-        ddtCliReali.forEach((d) => mappa.set(d.id, d))
-        ;(ddtCliCloud || []).forEach((d) => mappa.set(d.id, d))
-        setListaDdtClienti(Array.from(mappa.values()))
-      })
-
       // 3. Clienti, Ordini, OdP e Articoli
       const cList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
       const ordList = parseSicuro<typeof ordiniClienti>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
@@ -272,22 +256,42 @@ export default function SpedizioniDdtPage() {
       setOdpList(odpLocali)
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
 
-      // Carica e sincronizza in parallelo OdP da Supabase Cloud per essere sempre allineati
-      syncService.getOrdiniProduzione().then((odpCloud) => {
-        if (odpCloud && odpCloud.length > 0) {
-          const mappa = new Map<string, OrdineProduzione & { fasi?: FaseOdP[] }>()
-          odpLocali.forEach((o) => mappa.set(o.id, o))
-          odpCloud.forEach((o) => mappa.set(o.id, o))
-          const listaFinale = Array.from(mappa.values())
-          setOdpList(listaFinale)
+      // Carica e sincronizza in parallelo OdP e DDT Clienti da Supabase Cloud per dati freschi e coerenti
+      Promise.all([
+        syncService.getDdtClienti(),
+        syncService.getOrdiniProduzione()
+      ]).then(async ([ddtCliCloud, odpCloud]) => {
+        // Allinea DDT Clienti Cloud
+        const idCloud = new Set((ddtCliCloud || []).map((d) => d.id))
+        const ddtDaCaricare = ddtCliReali.filter((d) => !idCloud.has(d.id))
+        if (ddtDaCaricare.length > 0) {
+          for (const ddt of ddtDaCaricare) {
+            await syncService.salvaDdtCliente(ddt)
+          }
+        }
 
-          // Se la modale è già aperta su un cliente da query param, rinfresca la lista candidate con gli OdP cloud
-          if (typeof window !== 'undefined') {
-            const params = new URLSearchParams(window.location.search)
-            const paramClienteId = params.get('clienteId')
-            if (paramClienteId) {
-              handleSelezionaClientePerDDT(paramClienteId, listaFinale, cList, ordList)
-            }
+        const mappaDdtCli = new Map<string, DocumentoTrasportoCliente>()
+        ddtCliReali.forEach((d) => mappaDdtCli.set(d.id, d))
+        ;(ddtCliCloud || []).forEach((d) => mappaDdtCli.set(d.id, d))
+        const listaDdtAggiornata = Array.from(mappaDdtCli.values())
+        setListaDdtClienti(listaDdtAggiornata)
+
+        // Allinea OdP Cloud
+        let listaOdpAggiornata = odpLocali
+        if (odpCloud && odpCloud.length > 0) {
+          const mappaOdp = new Map<string, OrdineProduzione & { fasi?: FaseOdP[] }>()
+          odpLocali.forEach((o) => mappaOdp.set(o.id, o))
+          odpCloud.forEach((o) => mappaOdp.set(o.id, o))
+          listaOdpAggiornata = Array.from(mappaOdp.values())
+          setOdpList(listaOdpAggiornata)
+        }
+
+        // Controllo se nella query string è specificato un clienteId (es. arrivo da /ordini)
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search)
+          const paramClienteId = params.get('clienteId')
+          if (paramClienteId) {
+            handleApriModaleDdtCliente(paramClienteId, listaOdpAggiornata, cList, ordList, listaDdtAggiornata)
           }
         }
       })
@@ -307,17 +311,6 @@ export default function SpedizioniDdtPage() {
           setTerzisti(Array.from(mappa.values()))
         }
       })
-
-      // Controllo se nella query string è specificato un clienteId (es. da /ordini)
-      if (typeof window !== 'undefined') {
-        const params = new URLSearchParams(window.location.search)
-        const paramClienteId = params.get('clienteId')
-        if (paramClienteId) {
-          setTimeout(() => {
-            handleApriModaleDdtCliente(paramClienteId, odpLocali, cList, ordList)
-          }, 50)
-        }
-      }
     } catch {
       setListaDdt(SEED_DDT_ESTERNI)
       setListaDdtClienti(SEED_DDT_CLIENTI)
@@ -434,10 +427,11 @@ export default function SpedizioniDdtPage() {
   }, [listaDdt, ricerca, filtroStato])
 
   // Calcolo pezzi pronti a magazzino per cliente (per emissione DDT consegna)
-  const handleSelezionaClientePerDDT = (clienteId: string, currentOdpList?: (OrdineProduzione & { fasi?: FaseOdP[] })[], currentClienti?: Cliente[], currentOrdini?: typeof ordiniClienti) => {
+  const handleSelezionaClientePerDDT = (clienteId: string, currentOdpList?: (OrdineProduzione & { fasi?: FaseOdP[] })[], currentClienti?: Cliente[], currentOrdini?: typeof ordiniClienti, currentDdtClienti?: DocumentoTrasportoCliente[]) => {
     const elencoClienti = currentClienti || clienti
     const elencoOdp = currentOdpList || odpList
     const elencoOrdini = currentOrdini || ordiniClienti
+    const elencoDdtCli = currentDdtClienti || listaDdtClienti
 
     const clienteTrovato = elencoClienti.find((c) => c.id === clienteId)
     if (!clienteTrovato) return
@@ -455,7 +449,7 @@ export default function SpedizioniDdtPage() {
 
         // Calcola quanto già spedito in precedenti DDT clienti per questa riga
         let qtaGiaSpedita = 0
-        listaDdtClienti.forEach((doc) => {
+        elencoDdtCli.forEach((doc) => {
           doc.righe.forEach((r) => {
             if (r.riga_ordine_cliente_id === riga.id || (r.ordine_cliente_id === ord.id && r.articolo_id === riga.articolo_id)) {
               qtaGiaSpedita += r.quantita_spedita
@@ -489,7 +483,19 @@ export default function SpedizioniDdtPage() {
         let trovatiOdpValidi = false
 
         odpCandidati.forEach((odp) => {
-          if (odp.stato === 'scartato') return
+          // Escludi OdP scartati o già interamente spediti
+          if (odp.stato === 'scartato' || odp.stato === 'spedito') return
+
+          // Escludi OdP che sono già stati interamente inclusi in un DDT cliente emesso
+          let qtaSpeditaQuestoOdp = 0
+          elencoDdtCli.forEach((doc) => {
+            doc.righe.forEach((r) => {
+              if (r.odp_id === odp.id || (r.codice_odp === odp.codice_odp && r.articolo_id === odp.articolo_id)) {
+                qtaSpeditaQuestoOdp += r.quantita_spedita
+              }
+            })
+          })
+          if (qtaSpeditaQuestoOdp >= odp.quantita_da_produrre) return
 
           const eLottoRimpiazzatoDaScarto = lottiRimpiazzo.length > 0 && 
             odp.codice_odp.endsWith('/B') && 
@@ -499,9 +505,8 @@ export default function SpedizioniDdtPage() {
 
           const tutteFasiCompletate = odp.fasi && odp.fasi.length > 0 && odp.fasi.every((f) => f.stato === 'completata')
           const isCompletato = odp.stato === 'completato' || tutteFasiCompletate
-          const qtaFisicaFinita = isCompletato
-            ? odp.quantita_da_produrre
-            : (odp.quantita_prodotta || 0)
+          // Pezzi pronti considerati SOLO se l'OdP è interamente completato
+          const qtaFisicaFinita = isCompletato ? Math.max(0, odp.quantita_da_produrre - qtaSpeditaQuestoOdp) : 0
 
           // Proponiamo la riga se l'OdP ha pezzi finiti OPPURE se c'è giacenza a magazzino
           if (qtaFisicaFinita > 0 || giacenzaStock > 0) {
@@ -512,6 +517,9 @@ export default function SpedizioniDdtPage() {
               const qtaDaSpedireDefault = qtaFisicaFinita > 0
                 ? Math.min(residuoDaSpedire, qtaFisicaFinita)
                 : Math.min(residuoDaSpedire, giacenzaStock)
+
+              // Selezionato per default SOLO se ci sono pezzi effettivamente pronti da OdP (qtaFisicaFinita > 0)
+              const haPezziProntiOdp = qtaFisicaFinita > 0
 
               righeCandidati.push({
                 riga_ordine_id: riga.id,
@@ -529,13 +537,13 @@ export default function SpedizioniDdtPage() {
                 quantita_da_spedire: qtaDaSpedireDefault,
                 unita_misura: art?.unita_misura || 'pz',
                 peso_unitario: art?.peso_kg_unitario || 1.5,
-                selezionato: qtaDaSpedireDefault > 0
+                selezionato: haPezziProntiOdp
               })
             }
           }
         })
 
-        // Se non ci sono OdP ma c'è giacenza a magazzino, consenti la spedizione diretta da stock
+        // Se non ci sono OdP ma c'è giacenza a magazzino, consenti la spedizione diretta da stock (NON preselezionata, decide l'operatore)
         if (!trovatiOdpValidi && giacenzaStock > 0) {
           const qtaDaSpedireDefault = Math.min(residuoDaSpedire, giacenzaStock)
           righeCandidati.push({
@@ -554,7 +562,7 @@ export default function SpedizioniDdtPage() {
             quantita_da_spedire: qtaDaSpedireDefault,
             unita_misura: art?.unita_misura || 'pz',
             peso_unitario: art?.peso_kg_unitario || 1.5,
-            selezionato: true
+            selezionato: false
           })
         }
       })
@@ -579,10 +587,10 @@ export default function SpedizioniDdtPage() {
   }
 
   // Apertura Modale DDT Cliente da zero
-  const handleApriModaleDdtCliente = (clientePreselezionatoId?: string, listaOdpAttuale?: (OrdineProduzione & { fasi?: FaseOdP[] })[], listaClientiAttuale?: Cliente[], listaOrdiniAttuale?: typeof ordiniClienti) => {
+  const handleApriModaleDdtCliente = (clientePreselezionatoId?: string, listaOdpAttuale?: (OrdineProduzione & { fasi?: FaseOdP[] })[], listaClientiAttuale?: Cliente[], listaOrdiniAttuale?: typeof ordiniClienti, listaDdtAttuale?: DocumentoTrasportoCliente[]) => {
     const elencoClienti = listaClientiAttuale || clienti
     const targetClienteId = clientePreselezionatoId || elencoClienti[0]?.id || ''
-    handleSelezionaClientePerDDT(targetClienteId, listaOdpAttuale, elencoClienti, listaOrdiniAttuale)
+    handleSelezionaClientePerDDT(targetClienteId, listaOdpAttuale, elencoClienti, listaOrdiniAttuale, listaDdtAttuale)
     setModaleDdtClienteAperta(true)
   }
 

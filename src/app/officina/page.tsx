@@ -344,15 +344,46 @@ export default function TerminaleOfficinaPage() {
         const almenoUnaAvviata = fasiAggiornate.some((f) => f.stato === 'in_corso')
         const nuovoStatoOdp = tutteChiuse ? ('completato' as const) : almenoUnaAvviata ? ('in_lavorazione' as const) : odp.stato
 
+        // Se l'OdP viene avviato o avanza e la materia prima non era ancora stata scaricata:
+        const deveScaricareMateriaPrima = (nuovoStato === 'in_corso' || nuovoStato === 'completata') && !odp.materia_prima_scaricata
+
         return {
           ...odp,
           fasi: fasiAggiornate,
           stato: nuovoStatoOdp,
-          quantita_prodotta: tutteChiuse ? odp.quantita_da_produrre : odp.quantita_prodotta
+          quantita_prodotta: tutteChiuse ? odp.quantita_da_produrre : odp.quantita_prodotta,
+          materia_prima_scaricata: odp.materia_prima_scaricata || deveScaricareMateriaPrima,
+          data_scarico_materia_prima: odp.data_scarico_materia_prima || (deveScaricareMateriaPrima ? new Date().toISOString() : undefined)
         }
       }
       return odp
     })
+
+    // Scarico effettivo materia prima da magazzino per l'OdP avviato
+    const odpDaScaricare = odpList.find((o) => o.id === odpId)
+    if (odpDaScaricare && (nuovoStato === 'in_corso' || nuovoStato === 'completata') && !odpDaScaricare.materia_prima_scaricata) {
+      const componentiBom = distinte.filter((d) => d.articolo_padre_id === odpDaScaricare.articolo_id)
+      if (componentiBom.length > 0) {
+        let modificatoGiacenza = false
+        const articoliAggiornati = articoli.map((a) => {
+          const comp = componentiBom.find((c) => c.articolo_componente_id === a.id)
+          if (comp) {
+            modificatoGiacenza = true
+            const consumo = comp.quantita_necessaria * (odpDaScaricare.quantita_da_produrre || 1)
+            const nuovaGiacenza = Math.max(0, Number((a.giacenza_attuale - consumo).toFixed(3)))
+            const articoloScaricato = { ...a, giacenza_attuale: nuovaGiacenza }
+            syncService.salvaArticolo(articoloScaricato)
+            return articoloScaricato
+          }
+          return a
+        })
+        if (modificatoGiacenza) {
+          setArticoli(articoliAggiornati)
+          localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
+        }
+      }
+      syncService.segnaMateriaPrimaScaricata(odpDaScaricare.id)
+    }
 
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))

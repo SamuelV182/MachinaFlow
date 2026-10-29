@@ -33,17 +33,22 @@ import {
   SEED_DISTINTA_BASE,
   SEED_ODP
 } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 interface RigaMRP {
   componente: Articolo
   fabbisognoLordo: number
   giacenzaAttuale: number
   scortaMinima: number
-  fabbisognoNetto: number // Mancante se > 0
+  fabbisognoNetto: number // Mancante totale (inclusa scorta minima)
+  mancanteProduzione: number // Mancante effettivo per gli OdP (esclusa scorta minima)
   quantitaInArrivo: number // Ordini aperti verso fornitori
   ordiniFornitoreAperti: OrdineFornitore[]
   stato: 'critico' | 'in_arrivo' | 'attenzione' | 'sufficiente'
   ordiniCoinvolti: string[]
+  dataLimiteProduzione?: string // Data primo avvio OdP in officina (Per Quando)
+  giorniRimanenti?: number // Giorni rimasti per negoziare e ricevere il materiale
+  valoreStimatoAcquisto?: number // Stima economica (€) per trattativa
 }
 
 export default function MRPPage() {
@@ -53,14 +58,19 @@ export default function MRPPage() {
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
   const [ordiniFornitori, setOrdiniFornitori] = useState<OrdineFornitore[]>([])
 
-  // Stato Modale Ordine a Fornitore (Anti-Doppio Ordine)
+  // Stato Modale Ordine a Fornitore (Anti-Doppio Ordine & Trattativa)
   const [modaleOrdineAperta, setModaleOrdineAperta] = useState(false)
   const [formOrdineFornitore, setFormOrdineFornitore] = useState({
     articolo_id: '',
     nome_materiale: '',
+    unita_misura: 'm',
+    prezzo_unitario: 0,
     quantita_ordinata: 10,
+    quantita_teorica: 10,
     fornitore_nome: 'Rodacciai S.p.A.',
     data_arrivo_prevista: '',
+    data_limite_richiesta: '',
+    odp_coinvolti_stringa: '',
     note: ''
   })
 
@@ -106,22 +116,38 @@ export default function MRPPage() {
   const ricalcolaMrp = (articoliList: Articolo[], distinteList: ComponenteDistintaBase[], odpCaricati: (OrdineProduzione & { fasi: FaseOdP[] })[]) => {
     // =========================================================================
     // CALCOLO MRP (FABBISOGNO MATERIALI)
+    // Esclude OdP completati, spediti o con MATERIA PRIMA GIÀ SCARICATA da magazzino
     // =========================================================================
-    const odpAperti = odpCaricati.filter((o) => o.stato !== 'completato')
-    const accumulatoreFabbisogni: Record<string, { qtaLorda: number; odpCodes: Set<string> }> = {}
+    const odpConFabbisogno = odpCaricati.filter((o) => {
+      if (o.stato === 'completato' || o.stato === 'spedito' || o.stato === 'scartato') return false
+      // Se la materia prima è già stata scaricata/prelevata, l'OdP NON ha più fabbisogno aperto
+      if (o.materia_prima_scaricata) return false
+      return true
+    })
 
-    odpAperti.forEach((odp) => {
+    const accumulatoreFabbisogni: Record<
+      string,
+      { qtaLorda: number; odpCodes: Set<string>; dateInizio: string[] }
+    > = {}
+
+    odpConFabbisogno.forEach((odp) => {
       const componentiBom = distinteList.filter((d) => d.articolo_padre_id === odp.articolo_id)
+      const dataOdP = odp.data_inizio_pianificata || odp.data_fine_pianificata || null
+
       componentiBom.forEach((comp) => {
         const fabbisognoOdP = comp.quantita_necessaria * odp.quantita_da_produrre
         if (!accumulatoreFabbisogni[comp.articolo_componente_id]) {
           accumulatoreFabbisogni[comp.articolo_componente_id] = {
             qtaLorda: 0,
-            odpCodes: new Set()
+            odpCodes: new Set(),
+            dateInizio: []
           }
         }
         accumulatoreFabbisogni[comp.articolo_componente_id].qtaLorda += fabbisognoOdP
         accumulatoreFabbisogni[comp.articolo_componente_id].odpCodes.add(odp.codice_odp)
+        if (dataOdP) {
+          accumulatoreFabbisogni[comp.articolo_componente_id].dateInizio.push(dataOdP)
+        }
       })
     })
 
@@ -136,10 +162,24 @@ export default function MRPPage() {
     })()
 
     const risultatiMrp: RigaMRP[] = materiePrime.map((materia) => {
-      const infoFabbisogno = accumulatoreFabbisogni[materia.id] || { qtaLorda: 0, odpCodes: new Set() }
+      const infoFabbisogno = accumulatoreFabbisogni[materia.id] || { qtaLorda: 0, odpCodes: new Set(), dateInizio: [] }
       const fabbisognoLordo = Number(infoFabbisogno.qtaLorda.toFixed(3))
       const giacenzaAttuale = materia.giacenza_attuale
       const scortaMinima = materia.scorta_minima
+
+      // Data limite: la data più ravvicinata tra gli OdP che richiedono questo materiale
+      const dateInizioValide = (infoFabbisogno.dateInizio || []).filter(Boolean).sort()
+      const dataLimite = dateInizioValide.length > 0 ? dateInizioValide[0] : undefined
+
+      let giorniRimanenti: number | undefined = undefined
+      if (dataLimite) {
+        const oggi = new Date()
+        oggi.setHours(0, 0, 0, 0)
+        const target = new Date(dataLimite)
+        target.setHours(0, 0, 0, 0)
+        const diffMs = target.getTime() - oggi.getTime()
+        giorniRimanenti = Math.round(diffMs / (1000 * 60 * 60 * 24))
+      }
 
       // Calcola gli ordini fornitore già aperti (in arrivo) per questa materia prima
       const aperti = ordiniFornitoreSalvati.filter(
@@ -149,22 +189,25 @@ export default function MRPPage() {
 
       // Formula MRP reale: Fabbisogno Netto = Fabbisogno Lordo + Scorta Minima - Giacenza - Quantità già ordinata
       const nettoCalcolato = Math.max(0, fabbisognoLordo + scortaMinima - giacenzaAttuale - quantitaInArrivo)
+      // Mancante effettivo per la sola produzione degli OdP attivi
+      const mancanteProduzione = Math.max(0, fabbisognoLordo - giacenzaAttuale - quantitaInArrivo)
 
       let stato: 'critico' | 'in_arrivo' | 'attenzione' | 'sufficiente' = 'sufficiente'
-      if (giacenzaAttuale < fabbisognoLordo) {
-        // Se manca materiale ma è già stato interamente ordinato dal fornitore, passa a "in_arrivo"
-        if (quantitaInArrivo >= (fabbisognoLordo - giacenzaAttuale)) {
-          stato = 'in_arrivo'
-        } else {
-          stato = 'critico'
-        }
-      } else if (giacenzaAttuale - fabbisognoLordo < scortaMinima) {
-        if (quantitaInArrivo > 0) {
-          stato = 'in_arrivo'
-        } else {
-          stato = 'attenzione'
-        }
+      if (mancanteProduzione > 0) {
+        // Manca materiale indispensabile per produrre gli OdP
+        stato = 'critico'
+      } else if (quantitaInArrivo > 0 && giacenzaAttuale < fabbisognoLordo) {
+        // La produzione era scoperta ma il materiale in arrivo la copre per intero
+        stato = 'in_arrivo'
+      } else if (nettoCalcolato > 0) {
+        // La produzione è coperta, ma si scende sotto la scorta minima di sicurezza
+        stato = quantitaInArrivo > 0 ? 'in_arrivo' : 'attenzione'
       }
+
+      // Valore economico stimato per trattativa acquisto (€)
+      const prezzoUnitario = materia.prezzo_riferimento || 0
+      const qtaDaComprare = nettoCalcolato > 0 ? nettoCalcolato : 0
+      const valoreStimatoAcquisto = Number((qtaDaComprare * prezzoUnitario).toFixed(2))
 
       return {
         componente: materia,
@@ -172,10 +215,14 @@ export default function MRPPage() {
         giacenzaAttuale,
         scortaMinima,
         fabbisognoNetto: Number(nettoCalcolato.toFixed(3)),
+        mancanteProduzione: Number(mancanteProduzione.toFixed(3)),
         quantitaInArrivo,
         ordiniFornitoreAperti: aperti,
         stato,
-        ordiniCoinvolti: Array.from(infoFabbisogno.odpCodes)
+        ordiniCoinvolti: Array.from(infoFabbisogno.odpCodes),
+        dataLimiteProduzione: dataLimite,
+        giorniRimanenti,
+        valoreStimatoAcquisto
       }
     })
 
@@ -198,34 +245,74 @@ export default function MRPPage() {
       }
     }
 
-    const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
-    setArticoli(articoliList)
-
     const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
     setDistinte(distinteList)
-
-    const odpCaricati = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
-    setOdpList(odpCaricati)
 
     const ordiniFornitoreCaricati = parseSicuro<OrdineFornitore[]>('machinaflow_ordini_fornitori', [])
     setOrdiniFornitori(ordiniFornitoreCaricati)
 
-    ricalcolaMrp(articoliList, distinteList, odpCaricati)
+    const caricaDatiRealtime = async () => {
+      // 1. Carica prima dalla cache locale per reattività immediata
+      const articoliLocali = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
+      const odpLocali = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
+      setArticoli(articoliLocali)
+      setOdpList(odpLocali)
+      ricalcolaMrp(articoliLocali, distinteList, odpLocali)
+
+      // 2. Allinea con Supabase Cloud in background
+      try {
+        const [articoliCloud, odpCloud] = await Promise.all([
+          syncService.getArticoli(),
+          syncService.getOrdiniProduzione()
+        ])
+        const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : articoliLocali
+        const odpEffettivi = odpCloud && odpCloud.length > 0 ? (odpCloud as (OrdineProduzione & { fasi: FaseOdP[] })[]) : odpLocali
+        setArticoli(articoliEffettivi)
+        setOdpList(odpEffettivi)
+        ricalcolaMrp(articoliEffettivi, distinteList, odpEffettivi)
+      } catch (err) {
+        console.warn('Sync cloud MRP fallback locale:', err)
+      }
+    }
+
+    caricaDatiRealtime()
+
+    // 3. Sottoscrizione Real-Time nativa Supabase:
+    // Quando qualsiasi postazione in officina avvia un OdP e scarica la materia prima,
+    // l'MRP di tutte le postazioni si aggiorna istantaneamente in tempo reale.
+    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
+      caricaDatiRealtime()
+    })
+
+    return () => {
+      if (disiscrivi && typeof disiscrivi === 'function') {
+        disiscrivi()
+      }
+    }
   }, [])
 
-  // Apertura modale rapida ordine fornitore (Anti-Doppio Ordine)
+  // Apertura modale rapida ordine fornitore (Anti-Doppio Ordine & Negoziazione)
   const apriModaleOrdineFornitore = (riga: RigaMRP) => {
     const leadTime = riga.componente.lead_time_giorni_fornitore || 3
     const dataArrivo = new Date()
     dataArrivo.setDate(dataArrivo.getDate() + leadTime)
 
+    // Data limite richiesta (se presente dagli OdP, altrimenti data arrivo prevista standard)
+    const dataTarget = riga.dataLimiteProduzione || dataArrivo.toISOString().split('T')[0]
+    const qtaDefault = riga.fabbisognoNetto > 0 ? riga.fabbisognoNetto : 10
+
     setFormOrdineFornitore({
       articolo_id: riga.componente.id,
       nome_materiale: `${riga.componente.codice_articolo} - ${riga.componente.descrizione}`,
-      quantita_ordinata: riga.fabbisognoNetto > 0 ? riga.fabbisognoNetto : 10,
+      unita_misura: riga.componente.unita_misura || 'm',
+      prezzo_unitario: riga.componente.prezzo_riferimento || 0,
+      quantita_ordinata: qtaDefault,
+      quantita_teorica: qtaDefault,
       fornitore_nome: riga.componente.codice_articolo.includes('ALL') ? 'Eural Gnutti S.p.A.' : 'Rodacciai S.p.A.',
-      data_arrivo_prevista: dataArrivo.toISOString().split('T')[0],
-      note: `Ordine fornitore per copertura OdP: ${riga.ordiniCoinvolti.join(', ')}`
+      data_arrivo_prevista: dataTarget,
+      data_limite_richiesta: riga.dataLimiteProduzione || '',
+      odp_coinvolti_stringa: riga.ordiniCoinvolti.join(', '),
+      note: `Copertura fabbisogno OdP: ${riga.ordiniCoinvolti.join(', ')}`
     })
     setModaleOrdineAperta(true)
   }
@@ -512,12 +599,20 @@ export default function MRPPage() {
                       {riga.scortaMinima} {mat.unita_misura}
                     </td>
                     <td className="p-2 border-r border-gray-300 text-center font-mono font-black text-xs bg-gray-100">
-                      {riga.fabbisognoNetto > 0 ? (
-                        <span className={isCritico ? 'text-red-700 font-bold' : 'text-gray-900'}>
-                          {riga.fabbisognoNetto} {mat.unita_misura}
+                      {riga.mancanteProduzione > 0 ? (
+                        <span className="text-red-700 font-bold">
+                          + {riga.mancanteProduzione} {mat.unita_misura} (OdP)
+                        </span>
+                      ) : riga.fabbisognoNetto > 0 && riga.quantitaInArrivo > 0 ? (
+                        <span className="text-sky-700 font-semibold">
+                          Coperto (In Arrivo)
+                        </span>
+                      ) : riga.fabbisognoNetto > 0 ? (
+                        <span className="text-amber-800 font-semibold">
+                          + {riga.fabbisognoNetto} {mat.unita_misura} (Scorta)
                         </span>
                       ) : (
-                        '0'
+                        <span className="text-emerald-700">0</span>
                       )}
                     </td>
                     <td className="p-2 border-r border-gray-300 text-[10px] font-mono text-gray-700">
@@ -661,21 +756,17 @@ export default function MRPPage() {
             </span>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+              <thead className="bg-slate-950/90 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                 <tr>
-                  <th className="p-3.5">Codice Materia Prima</th>
-                  <th className="p-3.5">Descrizione</th>
-                  <th className="p-3.5 text-center">Lead Time</th>
-                  <th className="p-3.5 text-center">Giacenza</th>
-                  <th className="p-3.5 text-center">Fabbisogno Lordo</th>
-                  <th className="p-3.5 text-center">Scorta Min.</th>
-                  <th className="p-3.5 text-center">Fabbisogno Netto</th>
-                  <th className="p-3.5 text-center">Già Ordinato (In Arrivo)</th>
-                  <th className="p-3.5 text-center">Stato Approvvigionamento</th>
-                  <th className="p-3.5">OdP Coinvolti</th>
-                  <th className="p-3.5 text-right">Azioni Anti-Doppio Ordine</th>
+                  <th className="py-3 px-3.5">Materiale / Dimensione</th>
+                  <th className="py-3 px-3 text-center">Tempi & Urgenza</th>
+                  <th className="py-3 px-3 text-center">Giacenza / Scorta</th>
+                  <th className="py-3 px-3 text-center">Fabb. Lordo (OdP)</th>
+                  <th className="py-3 px-3.5 text-center">Fabbisogno Netto</th>
+                  <th className="py-3 px-3.5 text-center">In Arrivo & Stato</th>
+                  <th className="py-3 px-3.5 text-right">Azioni Acquisti</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -692,90 +783,156 @@ export default function MRPPage() {
                         isCritico ? 'bg-rose-950/20' : isAttenzione ? 'bg-amber-950/10' : ''
                       }`}
                     >
-                      <td className="p-3.5 font-mono font-bold text-orange-400">
-                        {mat.codice_articolo}
-                      </td>
-                      <td className="p-3.5 font-medium text-white max-w-xs">
-                        {mat.descrizione}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800/80 border border-slate-700 text-slate-300">
-                          <Clock className="w-3 h-3 text-cyan-400" />
-                          {leadTime} gg
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-center font-semibold text-slate-200">
-                        {riga.giacenzaAttuale} {mat.unita_misura}
-                      </td>
-                      <td className="p-3.5 text-center font-bold text-amber-400">
-                        {riga.fabbisognoLordo} {mat.unita_misura}
-                      </td>
-                      <td className="p-3.5 text-center text-slate-400">
-                        {riga.scortaMinima} {mat.unita_misura}
-                      </td>
-                      <td className="p-3.5 text-center">
-                        {riga.fabbisognoNetto > 0 ? (
-                          <span className="font-mono font-black text-sm text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800/60">
-                            + {riga.fabbisognoNetto} {mat.unita_misura}
+                      {/* 1. Materiale & Descrizione */}
+                      <td className="py-3 px-3.5 align-middle">
+                        <div className="flex flex-col">
+                          <span className="font-mono font-bold text-orange-400 text-xs">
+                            {mat.codice_articolo}
                           </span>
-                        ) : (
-                          <span className="text-emerald-400 font-semibold text-xs">0 (Coperto)</span>
-                        )}
+                          <span className="font-medium text-slate-200 text-[11px] line-clamp-1 max-w-[240px]" title={mat.descrizione}>
+                            {mat.descrizione}
+                          </span>
+                          {mat.prezzo_riferimento ? (
+                            <span className="text-[10px] text-slate-500 mt-0.5">
+                              Listino: € {mat.prezzo_riferimento.toFixed(2)} / {mat.unita_misura}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
 
-                      {/* Colonna Già Ordinato (In Arrivo) */}
-                      <td className="p-3.5 text-center">
-                        {riga.quantitaInArrivo > 0 ? (
-                          <div className="inline-flex flex-col items-center">
-                            <span className="font-mono font-bold text-xs text-sky-400 bg-sky-950/70 px-2 py-0.5 rounded border border-sky-800">
-                              📦 {riga.quantitaInArrivo} {mat.unita_misura}
-                            </span>
-                            <span className="text-[10px] text-slate-400 mt-0.5">
-                              {riga.ordiniFornitoreAperti[0]?.fornitore_nome?.split(' ')[0]} ({riga.ordiniFornitoreAperti[0]?.data_arrivo_prevista})
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-slate-600 text-xs">-</span>
-                        )}
-                      </td>
-
-                      <td className="p-3.5 text-center whitespace-nowrap">
-                        <span
-                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border whitespace-nowrap inline-flex items-center justify-center gap-1 ${
-                            riga.stato === 'in_arrivo'
-                              ? 'bg-sky-950/80 text-sky-300 border-sky-700 font-black'
-                              : isCritico
-                              ? 'bg-rose-950 text-rose-300 border-rose-800'
-                              : isAttenzione
-                              ? 'bg-amber-950 text-amber-300 border-amber-800'
-                              : 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                          }`}
-                        >
-                          {riga.stato === 'in_arrivo'
-                            ? '🔒 IN ARRIVO (ORDINATO)'
-                            : isCritico
-                            ? 'ORDINA SUBITO'
-                            : isAttenzione
-                            ? 'SOTTO SCORTA'
-                            : 'OK DISPONIBILE'}
-                        </span>
-                      </td>
-                      <td className="p-3.5">
-                        <div className="flex flex-wrap gap-1">
-                          {riga.ordiniCoinvolti.map((code) => (
-                            <span
-                              key={code}
-                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300"
-                            >
-                              {code}
-                            </span>
-                          ))}
-                          {riga.ordiniCoinvolti.length === 0 && (
-                            <span className="text-slate-500 text-[10px]">-</span>
+                      {/* 2. Tempi & Urgenza */}
+                      <td className="py-3 px-3 text-center align-middle">
+                        <div className="flex flex-col items-center justify-center min-h-[44px] gap-1">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/80 border border-slate-700 text-slate-300">
+                            <Clock className="w-2.5 h-2.5 text-cyan-400" />
+                            {leadTime} gg cons.
+                          </span>
+                          {riga.dataLimiteProduzione ? (
+                            riga.mancanteProduzione > 0 ? (
+                              <span
+                                className={`text-[10px] font-mono font-bold tracking-tight px-1.5 py-0.5 rounded ${
+                                  riga.giorniRimanenti !== undefined && riga.giorniRimanenti <= leadTime
+                                    ? 'bg-rose-950/80 text-rose-300 border border-rose-800/80 animate-pulse'
+                                    : 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
+                                }`}
+                                title={`Materia prima mancante! Inizio produzione OdP previsto per il ${riga.dataLimiteProduzione}`}
+                              >
+                                ⏳ {riga.dataLimiteProduzione.split('-').slice(1).reverse().join('/')}{' '}
+                                {riga.giorniRimanenti !== undefined && `(${riga.giorniRimanenti >= 0 ? `${riga.giorniRimanenti}gg` : 'urgente'})`}
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[10px] font-mono text-slate-400"
+                                title={`Pezzi già a terra. Produzione prevista il ${riga.dataLimiteProduzione}`}
+                              >
+                                Prev. {riga.dataLimiteProduzione.split('-').slice(1).reverse().join('/')}
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-[10px] text-slate-600">A scorta</span>
                           )}
                         </div>
                       </td>
-                      <td className="p-3.5 text-right whitespace-nowrap">
+
+                      {/* 3. Giacenza & Scorta */}
+                      <td className="py-3 px-3 text-center align-middle">
+                        <div className="flex flex-col items-center justify-center min-h-[44px]">
+                          <span className="font-semibold text-slate-100 text-xs font-mono">
+                            {riga.giacenzaAttuale} {mat.unita_misura}
+                          </span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">
+                            Scorta: {riga.scortaMinima} {mat.unita_misura}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 4. Fabbisogno Lordo & OdP Coinvolti */}
+                      <td className="py-3 px-3 text-center align-middle">
+                        <div className="flex flex-col items-center justify-center min-h-[44px] gap-1">
+                          <span className="font-bold text-amber-400 text-xs font-mono">
+                            {riga.fabbisognoLordo} {mat.unita_misura}
+                          </span>
+                          <div className="flex flex-wrap justify-center gap-1 max-w-[140px]">
+                            {riga.ordiniCoinvolti.map((code) => (
+                              <span
+                                key={code}
+                                className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700/80"
+                                title="OdP in lavorazione che richiede questa barra"
+                              >
+                                {code}
+                              </span>
+                            ))}
+                            {riga.ordiniCoinvolti.length === 0 && (
+                              <span className="text-slate-600 text-[10px]">-</span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* 5. Fabbisogno Netto */}
+                      <td className="py-3 px-3.5 text-center align-middle">
+                        <div className="flex flex-col items-center justify-center min-h-[44px] gap-1">
+                          {riga.mancanteProduzione > 0 ? (
+                            <>
+                              <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-xs font-mono font-black text-rose-300 bg-rose-950/80 border border-rose-800/80 shadow-xs">
+                                + {riga.mancanteProduzione} {mat.unita_misura}
+                              </span>
+                              <span className="text-[10px] text-rose-400 font-semibold tracking-tight">Deficit Produzione OdP</span>
+                            </>
+                          ) : riga.fabbisognoNetto > 0 && riga.quantitaInArrivo > 0 ? (
+                            <>
+                              <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-xs font-bold text-sky-200 bg-sky-950/80 border border-sky-700/80">
+                                ✓ OdP Coperti
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium tracking-tight">+{riga.fabbisognoNetto} {mat.unita_misura} p/ Scorta</span>
+                            </>
+                          ) : riga.fabbisognoNetto > 0 ? (
+                            <>
+                              <span className="inline-flex items-center justify-center px-2.5 py-1 rounded-md text-xs font-bold text-amber-200 bg-amber-950/80 border border-amber-700/80">
+                                + {riga.fabbisognoNetto} {mat.unita_misura}
+                              </span>
+                              <span className="text-[10px] text-amber-400/90 font-medium tracking-tight">Reintegro Scorta</span>
+                            </>
+                          ) : (
+                            <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-md text-xs font-semibold text-emerald-300 bg-emerald-950/60 border border-emerald-800/60">
+                              0 (Coperto)
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 6. In Arrivo & Stato */}
+                      <td className="py-3 px-3.5 text-center align-middle">
+                        <div className="flex flex-col items-center justify-center min-h-[44px] gap-1">
+                          {riga.quantitaInArrivo > 0 ? (
+                            <span className="inline-flex items-center justify-center font-mono font-bold text-xs text-sky-300 bg-sky-950/80 px-2 py-0.5 rounded-md border border-sky-700/80">
+                              📦 {riga.quantitaInArrivo} {mat.unita_misura}
+                            </span>
+                          ) : null}
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap inline-flex items-center justify-center gap-1 ${
+                              riga.stato === 'in_arrivo'
+                                ? 'bg-sky-950/80 text-sky-300 border-sky-700 font-black'
+                                : isCritico
+                                ? 'bg-rose-950 text-rose-300 border-rose-800'
+                                : isAttenzione
+                                ? 'bg-amber-950 text-amber-300 border-amber-800'
+                                : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                            }`}
+                          >
+                            {riga.stato === 'in_arrivo'
+                              ? '🔒 IN ARRIVO'
+                              : isCritico
+                              ? 'ORDINA SUBITO'
+                              : isAttenzione
+                              ? 'SOTTO SCORTA'
+                              : 'OK DISPONIBILE'}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 7. Azioni Acquisti */}
+                      <td className="py-3 px-3.5 text-right align-middle">
                         <div className="flex items-center justify-end gap-1.5">
                           {/* CASO 1: Materiale già ordinato -> Mostra UN SOLO pulsante verde per registrare il DDT */}
                           {riga.stato === 'in_arrivo' && riga.ordiniFornitoreAperti.length > 0 ? (
@@ -793,17 +950,17 @@ export default function MRPPage() {
                               {riga.fabbisognoNetto > 0 && (
                                 <button
                                   onClick={() => apriModaleOrdineFornitore(riga)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
                                   title="Segna come ordinato per evitare doppi acquisti"
                                 >
                                   <ShoppingCart className="w-3.5 h-3.5" />
-                                  <span>Segna Ordinato</span>
+                                  <span>Ordina</span>
                                 </button>
                               )}
 
                               <button
                                 onClick={() => apriCaricoPerArticolo(mat.id)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all cursor-pointer"
                                 title={`Carico manuale DDT ${mat.codice_articolo}`}
                               >
                                 <Truck className="w-3.5 h-3.5" />
@@ -1044,8 +1201,33 @@ export default function MRPPage() {
             </div>
 
             <form onSubmit={handleConfermaOrdineFornitore} id="form-ordine-fornitore" className="p-5 space-y-4 overflow-y-auto no-scrollbar flex-1">
-              <div className="p-3 bg-sky-950/40 rounded-xl border border-sky-800/60 text-xs text-sky-200">
-                🔒 <strong>Protezione Anti-Doppio Ordine:</strong> Appena confermi, questo materiale verrà contrassegnato come <strong>"In Arrivo"</strong> nell'MRP per tutto il team, evitando che altri colleghi ordinino per errore lo stesso pezzo.
+              {/* Box Info Negoziazione Ufficio Acquisti */}
+              <div className="p-3.5 bg-gradient-to-r from-sky-950/60 to-slate-900 border border-sky-800/60 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sky-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-sky-400" />
+                    Data Limite Officina (Per Quando):
+                  </span>
+                  <span className="font-mono font-bold text-white bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                    {formOrdineFornitore.data_limite_richiesta ? formOrdineFornitore.data_limite_richiesta : 'Non vincolante (Scorta)'}
+                  </span>
+                </div>
+                {formOrdineFornitore.odp_coinvolti_stringa && (
+                  <div className="text-[11px] text-slate-300">
+                    <span className="text-slate-400">OdP in attesa di questo materiale:</span>{' '}
+                    <strong className="font-mono text-orange-400">{formOrdineFornitore.odp_coinvolti_stringa}</strong>
+                  </div>
+                )}
+                {formOrdineFornitore.prezzo_unitario > 0 && (
+                  <div className="pt-1.5 border-t border-sky-900/40 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-400">
+                      Prezzo listino rif.: € {formOrdineFornitore.prezzo_unitario.toFixed(2)} / {formOrdineFornitore.unita_misura}
+                    </span>
+                    <span className="text-emerald-400 font-mono font-bold">
+                      Valore Stimato: € {(formOrdineFornitore.quantita_ordinata * formOrdineFornitore.prezzo_unitario).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1062,9 +1244,27 @@ export default function MRPPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Quantità da Ordinare *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      Quantità da Ordinare *
+                    </label>
+                    {formOrdineFornitore.unita_misura === 'm' && formOrdineFornitore.quantita_teorica > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const verghe = Math.ceil(formOrdineFornitore.quantita_teorica / 6)
+                          setFormOrdineFornitore({
+                            ...formOrdineFornitore,
+                            quantita_ordinata: verghe * 6
+                          })
+                        }}
+                        className="text-[10px] text-sky-400 hover:text-sky-300 underline font-semibold cursor-pointer"
+                        title="Arrotonda a verghe standard da 6 metri"
+                      >
+                        ⚡ Verghe da 6m ({Math.ceil(formOrdineFornitore.quantita_teorica / 6) * 6}m)
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.01"
