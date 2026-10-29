@@ -9,7 +9,11 @@ import {
   OrdineCliente,
   RigaOrdineCliente,
   OrdineProduzione,
-  FaseOdP
+  FaseOdP,
+  DocumentoTrasportoCliente,
+  DocumentoTrasportoEsterno,
+  FornitoreTerzista,
+  OrdineFornitore
 } from '@/types/database'
 import {
   SEED_CENTRI_LAVORO,
@@ -347,6 +351,221 @@ export const syncService = {
       await supabase.from('tipi_processo').upsert(processo)
     } catch (e) {
       console.error('Errore salvataggio tipo processo su Supabase:', e)
+    }
+  },
+
+  // 6. DOCUMENTI DI TRASPORTO (DDT) CLIENTI
+  async getDdtClienti(): Promise<DocumentoTrasportoCliente[]> {
+    try {
+      const { data, error } = await supabase
+        .from('ddt_clienti')
+        .select('*')
+        .order('creato_il', { ascending: false })
+
+      if (error) {
+        console.warn('Errore lettura ddt_clienti da Supabase:', error.message)
+        const salvati = localStorage.getItem('machinaflow_ddt_clienti')
+        return salvati ? JSON.parse(salvati) : []
+      }
+
+      if (data) {
+        localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(data))
+        return data as DocumentoTrasportoCliente[]
+      }
+      return []
+    } catch (e) {
+      console.error('Errore getDdtClienti:', e)
+      const salvati = localStorage.getItem('machinaflow_ddt_clienti')
+      return salvati ? JSON.parse(salvati) : []
+    }
+  },
+
+  async salvaDdtCliente(ddt: DocumentoTrasportoCliente) {
+    try {
+      // Aggiorna cache locale
+      const salvati = localStorage.getItem('machinaflow_ddt_clienti')
+      const lista: DocumentoTrasportoCliente[] = salvati ? JSON.parse(salvati) : []
+      const idx = lista.findIndex((d) => d.id === ddt.id)
+      if (idx >= 0) {
+        lista[idx] = ddt
+      } else {
+        lista.unshift(ddt)
+      }
+      localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(lista))
+
+      // Salva nel Cloud Supabase
+      await supabase.from('ddt_clienti').upsert({
+        id: ddt.id,
+        numero_ddt: ddt.numero_ddt,
+        data_emissione: ddt.data_emissione,
+        cliente_id: ddt.cliente_id || null,
+        cliente_nome: ddt.cliente_nome,
+        cliente_indirizzo: ddt.cliente_indirizzo || null,
+        cliente_piva: ddt.cliente_piva || null,
+        destinazione_diversa: ddt.destinazione_diversa || null,
+        causale_trasporto: ddt.causale_trasporto || 'Vendita',
+        porto: ddt.porto || 'Franco',
+        aspetto_beni: ddt.aspetto_beni || 'A vista',
+        numero_colli: ddt.numero_colli || 1,
+        peso_totale_kg: ddt.peso_totale_kg || 0,
+        vettore_nome: ddt.vettore_nome || 'Mittente (Mezzo proprio)',
+        note_trasporto: ddt.note_trasporto || null,
+        righe: ddt.righe || [],
+        creato_il: ddt.creato_il || new Date().toISOString()
+      })
+    } catch (e) {
+      console.error('Errore salvaDdtCliente su Supabase:', e)
+    }
+  },
+
+  // 7. DOCUMENTI DI TRASPORTO (DDT) ESTERNI / TERZISTI
+  async getDdtEsterni(): Promise<DocumentoTrasportoEsterno[]> {
+    try {
+      const { data, error } = await supabase
+        .from('ddt_esterni')
+        .select('*')
+        .order('creato_il', { ascending: false })
+
+      if (error) {
+        console.warn('Errore lettura ddt_esterni da Supabase:', error.message)
+        const salvati = localStorage.getItem('machinaflow_ddt_esterni')
+        return salvati ? JSON.parse(salvati) : []
+      }
+
+      if (data) {
+        localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(data))
+        return data as DocumentoTrasportoEsterno[]
+      }
+      return []
+    } catch (e) {
+      console.error('Errore getDdtEsterni:', e)
+      const salvati = localStorage.getItem('machinaflow_ddt_esterni')
+      return salvati ? JSON.parse(salvati) : []
+    }
+  },
+
+  async salvaDdtEsterno(ddt: DocumentoTrasportoEsterno) {
+    try {
+      // Aggiorna cache locale
+      const salvati = localStorage.getItem('machinaflow_ddt_esterni')
+      const lista: DocumentoTrasportoEsterno[] = salvati ? JSON.parse(salvati) : []
+      const idx = lista.findIndex((d) => d.id === ddt.id)
+      if (idx >= 0) {
+        lista[idx] = ddt
+      } else {
+        lista.unshift(ddt)
+      }
+      localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(lista))
+
+      // Salva nel Cloud Supabase
+      await supabase.from('ddt_esterni').upsert({
+        id: ddt.id,
+        numero_ddt: ddt.numero_ddt,
+        data_emissione: ddt.data_emissione,
+        fornitore_nome: ddt.fornitore_nome,
+        fornitore_indirizzo: ddt.fornitore_indirizzo || null,
+        fornitore_piva: ddt.fornitore_piva || null,
+        causale_trasporto: ddt.causale_trasporto || 'Invio per Conto Lavorazione',
+        porto: ddt.porto || 'Franco',
+        aspetto_beni: ddt.aspetto_beni || 'A vista su pallet',
+        numero_colli: ddt.numero_colli || 1,
+        peso_totale_kg: ddt.peso_totale_kg || 0,
+        vettore_nome: ddt.vettore_nome || 'Mittente (Mezzo proprio)',
+        note_trasporto: ddt.note_trasporto || null,
+        stato: ddt.stato || 'spedito',
+        righe: ddt.righe || [],
+        creato_il: ddt.creato_il || new Date().toISOString()
+      })
+    } catch (e) {
+      console.error('Errore salvaDdtEsterno su Supabase:', e)
+    }
+  },
+
+  // 8. ANAGRAFICA FORNITORI TERZISTI
+  async getFornitoriTerzisti(): Promise<FornitoreTerzista[]> {
+    try {
+      const { data, error } = await supabase
+        .from('fornitori_terzisti')
+        .select('*')
+        .order('ragione_sociale')
+
+      if (error) {
+        console.warn('Errore lettura fornitori_terzisti:', error.message)
+        const salvati = localStorage.getItem('machinaflow_fornitori_terzisti')
+        return salvati ? JSON.parse(salvati) : []
+      }
+
+      if (data && data.length > 0) {
+        localStorage.setItem('machinaflow_fornitori_terzisti', JSON.stringify(data))
+        return data as FornitoreTerzista[]
+      }
+      return []
+    } catch (e) {
+      console.error('Errore getFornitoriTerzisti:', e)
+      const salvati = localStorage.getItem('machinaflow_fornitori_terzisti')
+      return salvati ? JSON.parse(salvati) : []
+    }
+  },
+
+  async salvaFornitoreTerzista(terzista: FornitoreTerzista) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_fornitori_terzisti')
+      const lista: FornitoreTerzista[] = salvati ? JSON.parse(salvati) : []
+      const idx = lista.findIndex((t) => t.id === terzista.id)
+      if (idx >= 0) {
+        lista[idx] = terzista
+      } else {
+        lista.push(terzista)
+      }
+      localStorage.setItem('machinaflow_fornitori_terzisti', JSON.stringify(lista))
+
+      await supabase.from('fornitori_terzisti').upsert(terzista)
+    } catch (e) {
+      console.error('Errore salvaFornitoreTerzista su Supabase:', e)
+    }
+  },
+
+  // 9. ORDINI FORNITORI (MRP)
+  async getOrdiniFornitori(): Promise<OrdineFornitore[]> {
+    try {
+      const { data, error } = await supabase
+        .from('ordini_fornitori')
+        .select('*')
+        .order('creato_il', { ascending: false })
+
+      if (error) {
+        console.warn('Errore lettura ordini_fornitori:', error.message)
+        const salvati = localStorage.getItem('machinaflow_ordini_fornitori')
+        return salvati ? JSON.parse(salvati) : []
+      }
+
+      if (data) {
+        localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(data))
+        return data as OrdineFornitore[]
+      }
+      return []
+    } catch (e) {
+      console.error('Errore getOrdiniFornitori:', e)
+      const salvati = localStorage.getItem('machinaflow_ordini_fornitori')
+      return salvati ? JSON.parse(salvati) : []
+    }
+  },
+
+  async salvaOrdineFornitore(ordine: OrdineFornitore) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_ordini_fornitori')
+      const lista: OrdineFornitore[] = salvati ? JSON.parse(salvati) : []
+      const idx = lista.findIndex((o) => o.id === ordine.id)
+      if (idx >= 0) {
+        lista[idx] = ordine
+      } else {
+        lista.unshift(ordine)
+      }
+      localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(lista))
+
+      await supabase.from('ordini_fornitori').upsert(ordine)
+    } catch (e) {
+      console.error('Errore salvaOrdineFornitore su Supabase:', e)
     }
   },
 

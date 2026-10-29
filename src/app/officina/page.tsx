@@ -802,6 +802,7 @@ export default function TerminaleOfficinaPage() {
       try {
         const ddtSalvati = JSON.parse(localStorage.getItem('machinaflow_ddt_esterni') || '[]')
         localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify([nuovoDdtDoc, ...ddtSalvati]))
+        syncService.salvaDdtEsterno(nuovoDdtDoc)
       } catch {}
 
       // Apri automaticamente l'anteprima di stampa del DDT A4 per consentire la stampa immediata all'operatore
@@ -908,6 +909,7 @@ export default function TerminaleOfficinaPage() {
     try {
       const ddtSalvati = JSON.parse(localStorage.getItem('machinaflow_ddt_esterni') || '[]')
       localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify([nuovoDdtCumulativo, ...ddtSalvati]))
+      syncService.salvaDdtEsterno(nuovoDdtCumulativo)
     } catch {}
 
     setFasiEsterneSelezionateIds([])

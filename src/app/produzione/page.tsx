@@ -67,8 +67,13 @@ export default function ProduzionePage() {
         }
       }
 
-      // Carica i DDT Clienti per identificare con precisione assoluta gli OdP già spediti
-      const ddtClienti = parseSicuro<import('@/types/database').DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', [])
+      // Carica i DDT Clienti per identificare con precisione assoluta gli OdP già spediti (sia cloud che locale)
+      const ddtClientiCloud = await syncService.getDdtClienti()
+      const ddtClientiLocali = parseSicuro<import('@/types/database').DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', [])
+      const ddtMappa = new Map<string, import('@/types/database').DocumentoTrasportoCliente>()
+      ddtClientiLocali.forEach((d) => ddtMappa.set(d.id, d))
+      ddtClientiCloud.forEach((d) => ddtMappa.set(d.id, d))
+      const ddtClienti = Array.from(ddtMappa.values())
       const odpSpeditiSet = new Set<string>()
       ddtClienti.forEach((ddt) => {
         ddt.righe?.forEach((r) => {

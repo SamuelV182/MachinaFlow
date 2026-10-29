@@ -231,11 +231,36 @@ export default function SpedizioniDdtPage() {
       salvatiDdt.forEach((d) => mappaDdt.set(d.id, d))
       setListaDdt(Array.from(mappaDdt.values()))
 
-      // 2. DDT Clienti: escludiamo ddt-cli-demo-01 se presente in cache per consentire il collaudo reale
+      // Sincronizza DDT Esterni da Supabase Cloud
+      syncService.getDdtEsterni().then((ddtEstCloud) => {
+        if (ddtEstCloud && ddtEstCloud.length > 0) {
+          const mappa = new Map<string, DocumentoTrasportoEsterno>()
+          SEED_DDT_ESTERNI.forEach((d) => mappa.set(d.id, d))
+          ddtEstCloud.forEach((d) => mappa.set(d.id, d))
+          setListaDdt(Array.from(mappa.values()))
+        }
+      })
+
+      // 2. DDT Clienti: carica da cache e sincronizza subito da Supabase Cloud
       const salvatiDdtCli = parseSicuro<DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', [])
       const ddtCliReali = salvatiDdtCli.filter((d) => d.id !== 'ddt-cli-demo-01' && d.numero_ddt !== 'DDT-2026/054')
       setListaDdtClienti(ddtCliReali)
-      localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(ddtCliReali))
+
+      // Se ci sono DDT creati localmente che non sono ancora sul Cloud, inviali a Supabase (auto-migrazione senza perdita dati)
+      syncService.getDdtClienti().then(async (ddtCliCloud) => {
+        const idCloud = new Set((ddtCliCloud || []).map((d) => d.id))
+        const ddtDaCaricare = ddtCliReali.filter((d) => !idCloud.has(d.id))
+        if (ddtDaCaricare.length > 0) {
+          for (const ddt of ddtDaCaricare) {
+            await syncService.salvaDdtCliente(ddt)
+          }
+        }
+
+        const mappa = new Map<string, DocumentoTrasportoCliente>()
+        ddtCliReali.forEach((d) => mappa.set(d.id, d))
+        ;(ddtCliCloud || []).forEach((d) => mappa.set(d.id, d))
+        setListaDdtClienti(Array.from(mappa.values()))
+      })
 
       // 3. Clienti, Ordini, OdP e Articoli
       const cList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
@@ -274,6 +299,15 @@ export default function SpedizioniDdtPage() {
       salvatiTerzisti.forEach((t) => mappaT.set(t.id, t))
       setTerzisti(Array.from(mappaT.values()))
 
+      syncService.getFornitoriTerzisti().then((terzCloud) => {
+        if (terzCloud && terzCloud.length > 0) {
+          const mappa = new Map<string, FornitoreTerzista>()
+          SEED_FORNITORI_TERZISTI.forEach((t) => mappa.set(t.id, t))
+          terzCloud.forEach((t) => mappa.set(t.id, t))
+          setTerzisti(Array.from(mappa.values()))
+        }
+      })
+
       // Controllo se nella query string è specificato un clienteId (es. da /ordini)
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search)
@@ -298,11 +332,11 @@ export default function SpedizioniDdtPage() {
 
     let aggiornati: FornitoreTerzista[]
     if (terzistaInModifica) {
+      const terzAggiornato = { ...terzistaInModifica, ...formTerzista, ragione_sociale: formTerzista.ragione_sociale.trim() }
       aggiornati = terzisti.map((t) =>
-        t.id === terzistaInModifica.id
-          ? { ...t, ...formTerzista, ragione_sociale: formTerzista.ragione_sociale.trim() }
-          : t
+        t.id === terzistaInModifica.id ? terzAggiornato : t
       )
+      syncService.salvaFornitoreTerzista(terzAggiornato)
       setNotifica(`✓ Fornitore "${formTerzista.ragione_sociale}" aggiornato con successo!`)
     } else {
       const nuovo: FornitoreTerzista = {
@@ -311,6 +345,7 @@ export default function SpedizioniDdtPage() {
         ragione_sociale: formTerzista.ragione_sociale.trim()
       }
       aggiornati = [nuovo, ...terzisti]
+      syncService.salvaFornitoreTerzista(nuovo)
       setNotifica(`✓ Nuovo fornitore terzista "${nuovo.ragione_sociale}" registrato in anagrafica!`)
     }
 
@@ -610,6 +645,9 @@ export default function SpedizioniDdtPage() {
     const aggiornatiDdtCli = [nuovoDdt, ...listaDdtClienti]
     setListaDdtClienti(aggiornatiDdtCli)
     localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(aggiornatiDdtCli))
+
+    // Salva DDT Cliente su Supabase Cloud (condivisione istantanea tra dispositivi)
+    syncService.salvaDdtCliente(nuovoDdt)
 
     // Aggiorna giacenza a magazzino per la quota eventualmente spedita da stock
     let articoliModificati = false
