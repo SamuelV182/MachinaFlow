@@ -323,6 +323,7 @@ export default function SpedizioniDdtPage() {
 
     const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
       syncService.getDdtClienti().then((d) => d && setListaDdtClienti(d))
+      syncService.getDdtEsterni().then((d) => d && setListaDdt(d))
       syncService.getOrdiniProduzione().then((o) => o && setOdpList(o))
       syncService.getOrdiniClienti().then((ord) => ord && setOrdiniClienti(ord as any))
     })
@@ -422,10 +423,33 @@ export default function SpedizioniDdtPage() {
     )
   }, [terzisti, ricercaTerzisti])
 
+
+  // Determina se un DDT esterno e effettivamente rientrato o fuori sede incrociando con gli OdP
+  const isDdtEsternoRientrato = (doc: DocumentoTrasportoEsterno): boolean => {
+    if (doc.stato === 'rientrato_totale') return true
+    if (!doc.righe || doc.righe.length === 0) return doc.stato !== 'spedito'
+    
+    // Controlla se tutte le righe del DDT corrispondono a fasi completate o rientrate
+    const tutteRientrate = doc.righe.every((r) => {
+      const odp = odpList.find((o) => o.id === r.odp_id || o.codice_odp === r.codice_odp)
+      if (!odp || !odp.fasi) return false
+      const fase = odp.fasi.find((f) => 
+        (r.fase_sequenza && f.sequenza === r.fase_sequenza) || 
+        f.nome_fase.toLowerCase().trim() === r.nome_fase.toLowerCase().trim()
+      )
+      if (!fase) return false
+      return fase.stato === 'completata' || fase.stato_esterna === 'rientrato'
+    })
+
+    return tutteRientrate
+  }
+
   // Filtro ricerca e stato
   const ddtFiltrati = useMemo(() => {
     return listaDdt.filter((doc) => {
-      const matchStato = filtroStato === 'tutti' || doc.stato === filtroStato
+      const rientrato = isDdtEsternoRientrato(doc)
+      const statoCalcolato = rientrato ? 'rientrato_totale' : doc.stato
+      const matchStato = filtroStato === 'tutti' || statoCalcolato === filtroStato
       const matchTesto =
         !ricerca.trim() ||
         doc.numero_ddt.toLowerCase().includes(ricerca.toLowerCase()) ||
@@ -1187,7 +1211,7 @@ export default function SpedizioniDdtPage() {
               <div>
                 <div className="text-xs text-pink-300 font-bold uppercase tracking-wider">Attualmente Fuori Sede</div>
                 <div className="text-2xl font-black text-pink-400 mt-1 font-mono">
-                  {listaDdt.filter((d) => d.stato === 'spedito').length}
+                  {listaDdt.filter((d) => !isDdtEsternoRientrato(d) && d.stato === 'spedito').length}
                 </div>
                 <div className="text-[11px] text-pink-200/60 mt-0.5">In attesa di rientro dai terzisti</div>
               </div>
@@ -1200,7 +1224,7 @@ export default function SpedizioniDdtPage() {
               <div>
                 <div className="text-xs text-emerald-300 font-bold uppercase tracking-wider">Lavorazioni Rientrate</div>
                 <div className="text-2xl font-black text-emerald-400 mt-1 font-mono">
-                  {listaDdt.filter((d) => d.stato === 'rientrato_totale').length}
+                  {listaDdt.filter((d) => isDdtEsternoRientrato(d)).length}
                 </div>
                 <div className="text-[11px] text-emerald-200/60 mt-0.5">Ciclo completato e verificato</div>
               </div>
@@ -1241,7 +1265,7 @@ export default function SpedizioniDdtPage() {
                   filtroStato === 'spedito' ? 'bg-pink-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-white'
                 }`}
               >
-                Fuori Sede ({listaDdt.filter((d) => d.stato === 'spedito').length})
+                Fuori Sede ({listaDdt.filter((d) => !isDdtEsternoRientrato(d) && d.stato === 'spedito').length})
               </button>
               <button
                 type="button"
@@ -1250,7 +1274,7 @@ export default function SpedizioniDdtPage() {
                   filtroStato === 'rientrato_totale' ? 'bg-pink-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-white'
                 }`}
               >
-                Rientrati ({listaDdt.filter((d) => d.stato === 'rientrato_totale').length})
+                Rientrati ({listaDdt.filter((d) => isDdtEsternoRientrato(d)).length})
               </button>
             </div>
           </div>
@@ -1274,7 +1298,7 @@ export default function SpedizioniDdtPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
                   {ddtFiltrati.map((doc) => {
-                    const isFuoriSede = doc.stato === 'spedito'
+                    const isFuoriSede = !isDdtEsternoRientrato(doc) && doc.stato === 'spedito'
 
                     return (
                       <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">

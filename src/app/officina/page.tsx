@@ -858,6 +858,40 @@ export default function TerminaleOfficinaPage() {
       setDdtStampabileCorrente(nuovoDdtDoc)
       setNotifica(`📦 Lavorazione inviata al terzista ${fase.fornitore_nome || ''}! (DDT: ${ddtNumero || 'N/D'}) - Aperta Scheda DDT A4`)
     } else {
+      // Aggiorna lo stato del DDT associato a questo OdP in "rientrato_totale"
+      try {
+        const ddtSalvati: DocumentoTrasportoEsterno[] = JSON.parse(localStorage.getItem('machinaflow_ddt_esterni') || '[]')
+        let ddtModificato: DocumentoTrasportoEsterno | null = null
+
+        const ddtAggiornati = ddtSalvati.map((d) => {
+          // Trova il DDT tramite numero DDT uscita oppure cercando l'OdP e la fase tra le righe del DDT
+          const haRigaCorrispondente = d.righe?.some(
+            (r) => r.odp_id === odp.id && (r.fase_sequenza === fase.sequenza || !r.fase_sequenza)
+          )
+          const corrispondeNumeroDdt = fase.ddt_uscita_numero && d.numero_ddt.trim().toLowerCase() === fase.ddt_uscita_numero.trim().toLowerCase()
+
+          if (haRigaCorrispondente || corrispondeNumeroDdt) {
+            const ddtAgg = {
+              ...d,
+              stato: 'rientrato_totale' as const,
+              note_trasporto: note.trim()
+                ? `${d.note_trasporto ? d.note_trasporto + ' | ' : ''}Rientrato il ${new Date().toLocaleDateString('it-IT')}${ddtNumero.trim() ? ' con DDT ' + ddtNumero.trim() : ''}: ${note.trim()}`
+                : d.note_trasporto
+            }
+            ddtModificato = ddtAgg
+            return ddtAgg
+          }
+          return d
+        })
+
+        if (ddtModificato) {
+          localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(ddtAggiornati))
+          syncService.salvaDdtEsterno(ddtModificato)
+        }
+      } catch (errDdt) {
+        console.warn('Errore aggiornamento stato DDT al rientro:', errDdt)
+      }
+
       setNotifica(`✓ Pezzi rientrati con successo dal terzista! Sbloccata la fase successiva.`)
     }
     setTimeout(() => setNotifica(null), 6000)
