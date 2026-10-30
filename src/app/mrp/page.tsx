@@ -48,6 +48,8 @@ interface RigaMRP {
   ordiniCoinvolti: string[]
   dataLimiteProduzione?: string // Data primo avvio OdP in officina (Per Quando)
   giorniRimanenti?: number // Giorni rimasti per negoziare e ricevere il materiale
+  inRitardoConsegna?: boolean // Vero se il materiale non è a terra e la data prevista di arrivo supera la data OdP o è scaduta
+  dataArrivoPrevistaFornitore?: string // Data promessa di consegna dal fornitore
   valoreStimatoAcquisto?: number // Stima economica (€) per trattativa
 }
 
@@ -74,6 +76,16 @@ export default function MRPPage() {
     note: ''
   })
 
+  // Stato Modale Modifica/Sollecito Ordine Fornitore
+  const [modaleSollecitoAperta, setModaleSollecitoAperta] = useState(false)
+  const [ordineInModifica, setOrdineInModifica] = useState<OrdineFornitore | null>(null)
+  const [formSollecito, setFormSollecito] = useState({
+    data_arrivo_prevista: '',
+    fornitore_nome: '',
+    quantita_ordinata: 0,
+    note: ''
+  })
+
   // Stato Modale Carico Merce Rapido
   const [modaleCaricoAperta, setModaleCaricoAperta] = useState(false)
   const [ordineFornitoreInRicezioneId, setOrdineFornitoreInRicezioneId] = useState<string | null>(null)
@@ -92,7 +104,7 @@ export default function MRPPage() {
 
   // Blocca lo scroll del body quando una modale è aperta
   useEffect(() => {
-    if (modaleCaricoAperta || modaleOrdineAperta) {
+    if (modaleCaricoAperta || modaleOrdineAperta || modaleSollecitoAperta) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = ''
@@ -100,7 +112,7 @@ export default function MRPPage() {
     return () => {
       document.body.style.overflow = ''
     }
-  }, [modaleCaricoAperta, modaleOrdineAperta])
+  }, [modaleCaricoAperta, modaleOrdineAperta, modaleSollecitoAperta])
 
   useEffect(() => {
     const oggi = new Date()
@@ -126,8 +138,18 @@ export default function MRPPage() {
     // =========================================================================
     const odpConFabbisogno = odpCaricati.filter((o) => {
       if (o.stato === 'completato' || o.stato === 'spedito' || o.stato === 'scartato') return false
-      // Se la materia prima è già stata scaricata/prelevata, l'OdP NON ha più fabbisogno aperto
-      if (o.materia_prima_scaricata) return false
+      // Se la materia prima è già stata scaricata/prelevata esplicitamente:
+      if (o.materia_prima_scaricata || o.data_scarico_materia_prima) return false
+
+      // Controllo di robustezza operativa: se l'OdP ha già avviato o completato la fase designata al prelievo
+      // (o una qualsiasi lavorazione fisica successiva al CAD/CAM), il materiale è già stato prelevato dal magazzino
+      const haAvviatoFaseFisica = o.fasi?.some((f) => {
+        const isCadCam = f.centro_lavoro_id === 'mc-cam-01' || f.nome_fase.toLowerCase().includes('cam')
+        const preleva = f.preleva_materia_prima === true || (!isCadCam && f.preleva_materia_prima === undefined)
+        return preleva && (f.stato === 'in_corso' || f.stato === 'completata')
+      })
+      if (haAvviatoFaseFisica) return false
+
       return true
     })
 
@@ -210,6 +232,25 @@ export default function MRPPage() {
         stato = quantitaInArrivo > 0 ? 'in_arrivo' : 'attenzione'
       }
 
+      // Data prevista di arrivo dal fornitore (la più imminente tra gli ordini aperti)
+      const dateArrivoValide = aperti.map((o) => o.data_arrivo_prevista).filter(Boolean).sort()
+      const dataArrivoPrevistaFornitore = dateArrivoValide.length > 0 ? dateArrivoValide[0] : undefined
+
+      // Verifica se c'è un ritardo rispetto alla produzione:
+      // Se il materiale a magazzino non basta a coprire gli OdP (giacenzaAttuale < fabbisognoLordo)
+      // e o la data di inizio OdP è già passata, oppure la data promessa dal fornitore è successiva alla data limite dell'OdP
+      let inRitardoConsegna = false
+      if (fabbisognoLordo > giacenzaAttuale) {
+        if (dataLimite) {
+          const oggiIso = new Date().toISOString().split('T')[0]
+          if (dataLimite < oggiIso) {
+            inRitardoConsegna = true // La produzione doveva già essere partita!
+          } else if (dataArrivoPrevistaFornitore && dataArrivoPrevistaFornitore > dataLimite) {
+            inRitardoConsegna = true // Il camion arriverà dopo la data in cui serve all'officina!
+          }
+        }
+      }
+
       // Valore economico stimato per trattativa acquisto (€)
       const prezzoUnitario = materia.prezzo_riferimento || 0
       const qtaDaComprare = nettoCalcolato > 0 ? nettoCalcolato : 0
@@ -228,6 +269,8 @@ export default function MRPPage() {
         ordiniCoinvolti: Array.from(infoFabbisogno.odpCodes),
         dataLimiteProduzione: dataLimite,
         giorniRimanenti,
+        inRitardoConsegna,
+        dataArrivoPrevistaFornitore,
         valoreStimatoAcquisto
       }
     })
@@ -369,6 +412,47 @@ export default function MRPPage() {
 
     setModaleOrdineAperta(false)
     ricalcolaMrp(articoli, distinte, odpList, aggiornati)
+  }
+
+  // Apertura modale per modificare data o sollecito di un ordine fornitore
+  const apriModificaOrdineFornitore = (ordine: OrdineFornitore) => {
+    setOrdineInModifica(ordine)
+    setFormSollecito({
+      data_arrivo_prevista: ordine.data_arrivo_prevista || '',
+      fornitore_nome: ordine.fornitore_nome || '',
+      quantita_ordinata: ordine.quantita_ordinata,
+      note: ordine.note || ''
+    })
+    setModaleSollecitoAperta(true)
+  }
+
+  // Salvataggio modifiche ordine fornitore (Nuova data / note sollecito)
+  const handleSalvaModificaOrdineFornitore = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!ordineInModifica) return
+
+    const ordineAggiornato: OrdineFornitore = {
+      ...ordineInModifica,
+      data_arrivo_prevista: formSollecito.data_arrivo_prevista,
+      fornitore_nome: formSollecito.fornitore_nome,
+      quantita_ordinata: Number(formSollecito.quantita_ordinata),
+      note: formSollecito.note
+    }
+
+    const ordiniAggiornati = ordiniFornitori.map((o) =>
+      o.id === ordineInModifica.id ? ordineAggiornato : o
+    )
+
+    setOrdiniFornitori(ordiniAggiornati)
+    localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(ordiniAggiornati))
+    syncService.salvaOrdineFornitore(ordineAggiornato)
+
+    setModaleSollecitoAperta(false)
+    setOrdineInModifica(null)
+    ricalcolaMrp(articoli, distinte, odpList, ordiniAggiornati)
+
+    setNotificaCarico(`✓ Ordine Fornitore aggiornato: nuova data arrivo prevista ${ordineAggiornato.data_arrivo_prevista || 'non definita'}`)
+    setTimeout(() => setNotificaCarico(null), 4000)
   }
 
   // Apertura modale Ricezione Merce da Ordine Fornitore con Tracciabilità DDT
@@ -885,10 +969,25 @@ export default function MRPPage() {
                                 ⏳ {riga.dataLimiteProduzione.split('-').slice(1).reverse().join('/')}{' '}
                                 {riga.giorniRimanenti !== undefined && `(${riga.giorniRimanenti >= 0 ? `${riga.giorniRimanenti}gg` : 'urgente'})`}
                               </span>
+                            ) : riga.inRitardoConsegna ? (
+                              /* Materiale ordinato ma in ritardo rispetto all'avvio produzione OdP: lampeggia in rosso per sollecitare! */
+                              <span
+                                className="text-[10px] font-mono font-black tracking-tight px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-600 animate-pulse"
+                                title={`SOLLECITARE FORNITORE! OdP richiedeva avvio il ${riga.dataLimiteProduzione}. Consegna stimata: ${
+                                  riga.dataArrivoPrevistaFornitore || 'N/D'
+                                }`}
+                              >
+                                ⚠️ RIT. {riga.dataLimiteProduzione.split('-').slice(1).reverse().join('/')}{' '}
+                                {riga.dataArrivoPrevistaFornitore && (
+                                  <span className="text-[9px] text-rose-200">
+                                    (Arr. {riga.dataArrivoPrevistaFornitore.split('-').slice(1).reverse().join('/')})
+                                  </span>
+                                )}
+                              </span>
                             ) : (
                               <span
                                 className="text-[10px] font-mono text-slate-400"
-                                title={`Pezzi già a terra. Produzione prevista il ${riga.dataLimiteProduzione}`}
+                                title={`Pezzi coperti. Produzione prevista il ${riga.dataLimiteProduzione}`}
                               >
                                 Prev. {riga.dataLimiteProduzione.split('-').slice(1).reverse().join('/')}
                               </span>
@@ -970,9 +1069,21 @@ export default function MRPPage() {
                       <td className="py-3 px-3.5 text-center align-middle">
                         <div className="flex flex-col items-center justify-center min-h-[44px] gap-1">
                           {riga.quantitaInArrivo > 0 ? (
-                            <span className="inline-flex items-center justify-center font-mono font-bold text-xs text-sky-300 bg-sky-950/80 px-2 py-0.5 rounded-md border border-sky-700/80">
-                              📦 {riga.quantitaInArrivo} {mat.unita_misura}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center justify-center font-mono font-bold text-xs text-sky-300 bg-sky-950/80 px-2 py-0.5 rounded-md border border-sky-700/80">
+                                📦 {riga.quantitaInArrivo} {mat.unita_misura}
+                              </span>
+                              {riga.ordiniFornitoreAperti.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => apriModificaOrdineFornitore(riga.ordiniFornitoreAperti[0])}
+                                  className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 hover:border-sky-500 transition-colors cursor-pointer"
+                                  title="Aggiorna data di arrivo prevista o note fornitore (Sollecito Uff. Acquisti)"
+                                >
+                                  <Clock className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
                           ) : null}
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap inline-flex items-center justify-center gap-1 ${
@@ -1537,6 +1648,112 @@ export default function MRPPage() {
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>Conferma e Blocca Riordini</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE MODIFICA ORDINE FORNITORE / SOLLECITO UFFICIO ACQUISTI */}
+      {modaleSollecitoAperta && ordineInModifica && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-sky-400" />
+                  Aggiorna Consegna / Sollecito
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Ufficio Acquisti: modifica data di arrivo prevista o annota solleciti fornitore
+                </p>
+              </div>
+              <button
+                onClick={() => setModaleSollecitoAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvaModificaOrdineFornitore} id="form-sollecito" className="p-5 space-y-4">
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs flex justify-between items-center">
+                <span className="text-slate-400">Articolo:</span>
+                <span className="font-mono font-bold text-orange-400">
+                  {articoli.find((a) => a.id === ordineInModifica.articolo_id)?.codice_articolo}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Nuova Data di Consegna Prevista *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formSollecito.data_arrivo_prevista}
+                  onChange={(e) => setFormSollecito({ ...formSollecito, data_arrivo_prevista: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-sky-300 font-bold focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Quantità Ordinata
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    value={formSollecito.quantita_ordinata}
+                    onChange={(e) => setFormSollecito({ ...formSollecito, quantita_ordinata: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 font-mono focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Fornitore
+                  </label>
+                  <input
+                    type="text"
+                    value={formSollecito.fornitore_nome}
+                    onChange={(e) => setFormSollecito({ ...formSollecito, fornitore_nome: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Note Sollecito / Chiamata Fornitore
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="es: Telefonato a Rodacciai, confermano carico camion giovedì mattina..."
+                  value={formSollecito.note}
+                  onChange={(e) => setFormSollecito({ ...formSollecito, note: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </form>
+
+            <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-950/80 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => setModaleSollecitoAperta(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Annulla
+              </button>
+              <button
+                type="submit"
+                form="form-sollecito"
+                className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-md shadow-sky-600/30 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Salva Aggiornamento</span>
               </button>
             </div>
           </div>

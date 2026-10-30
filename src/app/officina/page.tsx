@@ -53,6 +53,7 @@ import {
 } from '@/types/database'
 import { SEED_FORNITORI_TERZISTI, SEED_ORDINI_CLIENTI, SEED_CLIENTI } from '@/lib/data-service'
 import SchedaDDTStampabile from '@/components/SchedaDDTStampabile'
+import { stampaElementoIsolato } from '@/lib/print-helper'
 import {
   SEED_CENTRI_LAVORO,
   SEED_ODP,
@@ -344,8 +345,12 @@ export default function TerminaleOfficinaPage() {
         const almenoUnaAvviata = fasiAggiornate.some((f) => f.stato === 'in_corso')
         const nuovoStatoOdp = tutteChiuse ? ('completato' as const) : almenoUnaAvviata ? ('in_lavorazione' as const) : odp.stato
 
-        // Se l'OdP viene avviato o avanza e la materia prima non era ancora stata scaricata:
-        const deveScaricareMateriaPrima = (nuovoStato === 'in_corso' || nuovoStato === 'completata') && !odp.materia_prima_scaricata
+        // Verifica se QUESTA fase specifica preleva materia prima
+        const faseCorrente = odp.fasi.find((f) => f.id === faseId)
+        const isCadCamFase = faseCorrente ? (faseCorrente.centro_lavoro_id === 'mc-cam-01' || faseCorrente.nome_fase.toLowerCase().includes('cam')) : false
+        const haPrelievoConfigurato = faseCorrente?.preleva_materia_prima === true
+        const primaFaseFisica = odp.fasi.filter((f) => f.centro_lavoro_id !== 'mc-cam-01' && !f.nome_fase.toLowerCase().includes('cam'))[0]?.id === faseId
+        const deveScaricareMateriaPrima = (nuovoStato === 'in_corso' || nuovoStato === 'completata') && !odp.materia_prima_scaricata && !isCadCamFase && (haPrelievoConfigurato || (faseCorrente?.preleva_materia_prima === undefined && primaFaseFisica))
 
         return {
           ...odp,
@@ -361,7 +366,13 @@ export default function TerminaleOfficinaPage() {
 
     // Scarico effettivo materia prima da magazzino per l'OdP avviato
     const odpDaScaricare = odpList.find((o) => o.id === odpId)
-    if (odpDaScaricare && (nuovoStato === 'in_corso' || nuovoStato === 'completata') && !odpDaScaricare.materia_prima_scaricata) {
+    const faseDaScaricare = odpDaScaricare?.fasi.find((f) => f.id === faseId)
+    const isCadCamScaricare = faseDaScaricare ? (faseDaScaricare.centro_lavoro_id === 'mc-cam-01' || faseDaScaricare.nome_fase.toLowerCase().includes('cam')) : false
+    const haPrelievoScaricare = faseDaScaricare?.preleva_materia_prima === true
+    const primaFaseFisicaScaricare = odpDaScaricare?.fasi.filter((f) => f.centro_lavoro_id !== 'mc-cam-01' && !f.nome_fase.toLowerCase().includes('cam'))[0]?.id === faseId
+    const deveEseguireScaricoEffettivo = (nuovoStato === 'in_corso' || nuovoStato === 'completata') && !odpDaScaricare?.materia_prima_scaricata && !isCadCamScaricare && (haPrelievoScaricare || (faseDaScaricare?.preleva_materia_prima === undefined && primaFaseFisicaScaricare))
+
+    if (odpDaScaricare && deveEseguireScaricoEffettivo) {
       const componentiBom = distinte.filter((d) => d.articolo_padre_id === odpDaScaricare.articolo_id)
       if (componentiBom.length > 0) {
         let modificatoGiacenza = false
@@ -397,6 +408,9 @@ export default function TerminaleOfficinaPage() {
 
     if (odpModificato) {
       syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
+      if (odpModificato.materia_prima_scaricata) {
+        syncService.segnaMateriaPrimaScaricata(odpModificato.id)
+      }
     }
 
     const messaggio =
@@ -429,6 +443,8 @@ export default function TerminaleOfficinaPage() {
       codice_odp: codiceLottoA,
       quantita_da_produrre: quantitaDaSplittare,
       stato: 'in_lavorazione',
+      materia_prima_scaricata: true,
+      data_scarico_materia_prima: new Date().toISOString(),
       ordine_cliente_id: odp.ordine_cliente_id,
       codice_ordine_cliente: odp.codice_ordine_cliente,
       cliente_id: odp.cliente_id,
@@ -630,6 +646,8 @@ export default function TerminaleOfficinaPage() {
       codice_odp: codiceFatti,
       quantita_da_produrre: pezziBuoni,
       quantita_prodotta: pezziBuoni,
+      materia_prima_scaricata: true,
+      data_scarico_materia_prima: new Date().toISOString(),
       ordine_cliente_id: odp.ordine_cliente_id,
       codice_ordine_cliente: odp.codice_ordine_cliente,
       cliente_id: odp.cliente_id,
@@ -1021,12 +1039,16 @@ export default function TerminaleOfficinaPage() {
 
   // Estrai tutte le fasi da eseguire o in corso con metadati avanzati di sequenza e disponibilità materiale
   const fasiInOfficina = useMemo(() => {
-    // 1. Calcola il materiale già impegnato / prelevato dagli OdP in lavorazione attiva
+    // 1. Calcola il materiale già impegnato dagli OdP che hanno avviato una fase fisica MA non hanno ancora scaricato il magazzino
     const materialeGiaImpegnatoPerArticolo = new Map<string, number>()
     odpList.forEach((o) => {
-      // Se un OdP è già in corso (ha almeno una fase avviata o completata)
-      const haFasiAvviateOCompletate = o.fasi.some((f) => f.stato === 'in_corso' || f.stato === 'completata')
-      if (haFasiAvviateOCompletate && o.stato !== 'completato') {
+      // Considera impegnato solo se c'è una fase FISICA in corso che non ha ancora fatto lo scarico a magazzino
+      const haFaseFisicaInCorso = o.fasi.some((f) => 
+        (f.stato === 'in_corso') && 
+        f.centro_lavoro_id !== 'mc-cam-01' && 
+        !f.nome_fase.toLowerCase().includes('cam')
+      )
+      if (haFaseFisicaInCorso && !o.materia_prima_scaricata && o.stato !== 'completato') {
         const componenti = distinte.filter((d) => d.articolo_padre_id === o.articolo_id)
         componenti.forEach((comp) => {
           const consumo = comp.quantita_necessaria * o.quantita_da_produrre
@@ -1101,8 +1123,13 @@ export default function TerminaleOfficinaPage() {
         // ma impatta operativamente il Taglio e la lavorazione meccanica (Fresatura/Tornitura).
         // Per il CAD/CAM creiamo un avviso informativo trasparente che avvisa l'operatore senza impedirgli di programmare.
         const isCadCam = fase.centro_lavoro_id === 'mc-cam-01' || fase.nome_fase.toLowerCase().includes('cam')
-        const matMancanteSuQuestaFase = !isCadCam && materiaPrimaMancante
-        const matParzialeSuQuestaFase = !isCadCam && materiaPrimaParziale && !materiaPrimaMancante
+        // Una fase richiede il materiale a terra se è configurata per prelevarlo (o se è la prima fase fisica e non ancora prelevato)
+        const primaFaseFisicaOdp = odp.fasi.filter((f) => f.centro_lavoro_id !== 'mc-cam-01' && !f.nome_fase.toLowerCase().includes('cam'))[0]?.id === fase.id
+        const richiedeMaterialeFisico = !odp.materia_prima_scaricata && (fase.preleva_materia_prima === true || (fase.preleva_materia_prima === undefined && primaFaseFisicaOdp))
+        
+        // Se la materia prima è già stata scaricata a monte o la fase non preleva materiale, non è mai bloccata per stock!
+        const matMancanteSuQuestaFase = !isCadCam && richiedeMaterialeFisico && materiaPrimaMancante
+        const matParzialeSuQuestaFase = !isCadCam && richiedeMaterialeFisico && materiaPrimaParziale && !materiaPrimaMancante
 
         let avvisoMaterialeInformativo: string | undefined = undefined
         if (isCadCam && (materiaPrimaMancante || materiaPrimaParziale)) {
@@ -3414,7 +3441,7 @@ export default function TerminaleOfficinaPage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => { const el = document.getElementById('scheda-a4-foglio-stampa'); stampaElementoIsolato(el, 'Scheda Operativa OdP'); }}
                   className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
@@ -3432,7 +3459,7 @@ export default function TerminaleOfficinaPage() {
             </div>
 
             {/* Foglio Scheda Lavoro A4 Blindato in sola lettura */}
-            <div className="scheda-a4-foglio max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 print:p-0 print:border-none print:shadow-none print:rounded-none">
+            <div id="scheda-a4-foglio-stampa" className="scheda-a4-foglio max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 print:p-0 print:border-none print:shadow-none print:rounded-none">
               {/* Intestazione A4 */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
                 <div>
@@ -4470,7 +4497,7 @@ export default function TerminaleOfficinaPage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => { const el = document.getElementById('scheda-a4-foglio-stampa'); stampaElementoIsolato(el, 'Scheda Operativa OdP'); }}
                   className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
@@ -4488,7 +4515,7 @@ export default function TerminaleOfficinaPage() {
             </div>
 
             {/* Foglio Scheda Lavoro A4 Blindato in sola lettura */}
-            <div className="scheda-a4-foglio max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 print:p-0 print:border-none print:shadow-none print:rounded-none">
+            <div id="scheda-a4-foglio-stampa" className="scheda-a4-foglio max-w-5xl w-full mx-auto bg-white text-slate-950 rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 print:p-0 print:border-none print:shadow-none print:rounded-none">
               {/* Intestazione A4 */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
                 <div>

@@ -548,6 +548,7 @@ export default function OrdiniPage() {
             tempo_effettivo_min: 0,
             stato: 'non_iniziata',
             note_officina: faseStd.note_operative,
+            preleva_materia_prima: faseStd.preleva_materia_prima,
             // Campi lavorazione esterna c/terzi
             is_esterna: faseStd.is_esterna,
             fornitore_nome: faseStd.fornitore_nome,
@@ -644,6 +645,7 @@ export default function OrdiniPage() {
           tempo_effettivo_min: 0,
           stato: 'non_iniziata',
           note_officina: faseStd.note_operative,
+          preleva_materia_prima: faseStd.preleva_materia_prima,
           // Campi lavorazione esterna c/terzi
           is_esterna: faseStd.is_esterna,
           fornitore_nome: faseStd.fornitore_nome,
@@ -739,6 +741,7 @@ export default function OrdiniPage() {
         tempo_effettivo_min: 0,
         stato: 'non_iniziata',
         note_officina: faseStd.note_operative,
+        preleva_materia_prima: faseStd.preleva_materia_prima,
         // Campi lavorazione esterna c/terzi
         is_esterna: faseStd.is_esterna,
         fornitore_nome: faseStd.fornitore_nome,

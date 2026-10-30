@@ -126,6 +126,8 @@ export interface FaseCicloStandard {
   tempo_attrezzaggio_min: number
   tempo_ciclo_pezzo_min: number
   note_operative?: string
+  // Prelievo fisico materiale da magazzino per questa fase specifica
+  preleva_materia_prima?: boolean
   // Campi dedicati per Lavorazione Esterna / Conto Terzi (es. Zincatura, Trattamenti termici, Verniciatura)
   is_esterna?: boolean
   fornitore_nome?: string
@@ -213,6 +215,9 @@ export interface FaseOdP {
   data_inizio_reale?: string
   data_fine_reale?: string
   note_officina?: string
+  // Prelievo fisico materiale da magazzino per questa fase specifica
+  preleva_materia_prima?: boolean
+  materia_prima_scaricata_fase?: boolean
   // Campi dedicati per Lavorazione Esterna / Conto Terzi
   is_esterna?: boolean
   fornitore_nome?: string

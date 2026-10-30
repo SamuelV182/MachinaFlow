@@ -84,6 +84,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     tempo_attrezzaggio_min: '15',
     tempo_ciclo_pezzo_min: '5',
     note_operative: '',
+    preleva_materia_prima: false,
     // Gestione Lavorazione Esterna / Conto Terzi
     is_esterna: false,
     fornitore_nome: '',
@@ -107,6 +108,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       tempo_attrezzaggio_min: '15',
       tempo_ciclo_pezzo_min: '5',
       note_operative: '',
+      preleva_materia_prima: false,
       is_esterna: false,
       fornitore_nome: '',
       giorni_rientro_previsti: 5,
@@ -252,6 +254,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
       tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
       note_operative: formCiclo.note_operative,
+      preleva_materia_prima: formCiclo.preleva_materia_prima,
       is_esterna: formCiclo.is_esterna,
       fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
       giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
@@ -281,6 +284,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       tempo_attrezzaggio_min: '15',
       tempo_ciclo_pezzo_min: '5',
       note_operative: '',
+      preleva_materia_prima: false,
       is_esterna: false,
       fornitore_nome: '',
       giorni_rientro_previsti: 5,
@@ -513,6 +517,12 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                             style={{ backgroundColor: processo.colore_badge || '#3b82f6' }}
                           >
                             {processo.nome}
+                          </span>
+                        )}
+                        {fase.preleva_materia_prima && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            <Boxes className="w-3 h-3 text-amber-400" />
+                            PRELEVA MP
                           </span>
                         )}
                       </div>
@@ -1441,6 +1451,26 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                   </div>
                 </>
               )}
+
+              {/* Opzione Prelievo Fisico Materia Prima */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formCiclo.preleva_materia_prima}
+                    onChange={(e) => setFormCiclo({ ...formCiclo, preleva_materia_prima: e.target.checked })}
+                    className="mt-1 rounded bg-slate-900 border-slate-700 text-orange-600 focus:ring-orange-500 w-4 h-4 cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      📦 Questa fase preleva la materia prima / semilavorato da magazzino
+                    </span>
+                    <span className="text-[11px] text-slate-400 block mt-0.5">
+                      Attiva solo per le fasi fisiche (es. Taglio, Fresatura iniziale, Sgrossatura). Lascia disattivato per programmazione CAD/CAM, collaudi o trattamenti successivi.
+                    </span>
+                  </div>
+                </label>
+              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
