@@ -29,7 +29,9 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
         'DestinatarioCliente',
         'PartitaIVA',
         'Destinazione',
-        'RifOrdineCliente',
+        'CommessaCliente',
+        'ItemRigaCliente',
+        'NsOrdine',
         'CodiceOdP',
         'CodiceArticolo',
         'DescrizioneArticolo',
@@ -47,6 +49,8 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
         `"${clienteDdt.cliente_nome}"`,
         `"${clienteDdt.cliente_piva || ''}"`,
         `"${clienteDdt.destinazione_diversa || clienteDdt.cliente_indirizzo || ''}"`,
+        `"${r.riferimento_ordine_cliente || ''}"`,
+        `"${r.pos_riga_cliente || ''}"`,
         `"${r.codice_ordine_cliente || ''}"`,
         `"${r.codice_odp || ''}"`,
         `"${r.articolo_codice}"`,
@@ -251,7 +255,15 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900 text-white uppercase text-[10px] font-bold tracking-wider">
                 <tr>
-                  <th className="py-2.5 px-3">{isCliente ? '# Commessa / OdP' : '# OdP / Rif.'}</th>
+                  {isCliente ? (
+                    <>
+                      <th className="py-2.5 px-3">Commessa Cliente</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Pos. / Item</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Rif. Interno (OdP)</th>
+                    </>
+                  ) : (
+                    <th className="py-2.5 px-3"># OdP / Rif.</th>
+                  )}
                   <th className="py-2.5 px-3">Codice Particolare</th>
                   <th className="py-2.5 px-3">Descrizione Tecnica</th>
                   <th className="py-2.5 px-3">{isCliente ? 'Note Consegna / Rif.' : 'Trattamento Richiesto'}</th>
@@ -263,14 +275,34 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
                 {isCliente && clienteDdt
                   ? clienteDdt.righe.map((r, i) => (
                       <tr key={r.id || i} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-700 whitespace-nowrap">
-                          {r.codice_ordine_cliente || r.codice_odp || 'COMM-VENDITA'}
-                          {r.codice_odp && r.codice_ordine_cliente && (
-                            <span className="block text-[10px] text-slate-500 font-normal">
-                              OdP: {r.codice_odp}
+                        {/* Commessa Cliente */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className="font-mono font-black text-slate-900 text-xs block">
+                            {r.riferimento_ordine_cliente || r.codice_ordine_cliente || 'N/D'}
+                          </span>
+                          {r.riferimento_ordine_cliente && r.codice_ordine_cliente && (
+                            <span className="text-[10px] text-slate-500 block">
+                              Ord. Machina: {r.codice_ordine_cliente}
                             </span>
                           )}
                         </td>
+
+                        {/* Pos / Item Cliente */}
+                        <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                          {r.pos_riga_cliente ? (
+                            <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[11px] border border-slate-200">
+                              #{r.pos_riga_cliente}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">-</span>
+                          )}
+                        </td>
+
+                        {/* Rif OdP interno */}
+                        <td className="py-2.5 px-3 font-mono text-emerald-700 font-semibold text-xs whitespace-nowrap">
+                          {r.codice_odp || '-'}
+                        </td>
+
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
                           {r.articolo_codice}
                         </td>

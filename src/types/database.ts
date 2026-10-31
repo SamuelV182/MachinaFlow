@@ -156,6 +156,7 @@ export interface OrdineCliente {
   data_ordine: string
   data_consegna_concordata: string
   stato: StatoOrdineCliente
+  riferimento_ordine_cliente?: string // Codice commessa / rif. ordine cliente (es. BR2524)
   note?: string
   cliente?: Cliente
   righe?: RigaOrdineCliente[]
@@ -168,6 +169,7 @@ export interface RigaOrdineCliente {
   articolo_id: string
   quantita: number
   prezzo_unitario?: number
+  pos_riga_cliente?: string | number // Item/riga commessa cliente (es. 1, 10, Pos. A)
   articolo?: Articolo
 }
 
@@ -180,6 +182,8 @@ export interface OrdineProduzione {
   cliente_id?: string
   cliente_nome?: string
   numero_riga_ordine?: number // Item #1, #2, #3 nella commessa d'acquisto cliente
+  riferimento_ordine_cliente?: string // Commessa cliente ereditata (es. BR2524)
+  pos_riga_cliente?: string | number // Item cliente specifico
   articolo_id: string
   quantita_da_produrre: number
   quantita_prodotta: number
@@ -285,6 +289,8 @@ export interface RigaDDTCliente {
   ordine_cliente_id?: string
   riga_ordine_cliente_id?: string
   codice_ordine_cliente?: string
+  riferimento_ordine_cliente?: string // Commessa del cliente (es. BR2524)
+  pos_riga_cliente?: string | number // Item o riga d'ordine del cliente (es. Item 1)
   odp_id?: string
   codice_odp?: string
   articolo_id: string

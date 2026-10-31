@@ -166,6 +166,8 @@ export default function SpedizioniDdtPage() {
       riga_ordine_id: string
       ordine_id: string
       codice_ordine: string
+      riferimento_ordine_cliente?: string
+      pos_riga_cliente?: string | number
       odp_id: string
       codice_odp: string
       articolo_id: string
@@ -563,6 +565,8 @@ export default function SpedizioniDdtPage() {
                 riga_ordine_id: riga.id,
                 ordine_id: ord.id,
                 codice_ordine: ord.numero_ordine,
+                riferimento_ordine_cliente: ord.riferimento_ordine_cliente || odp.riferimento_ordine_cliente,
+                pos_riga_cliente: riga.pos_riga_cliente || odp.pos_riga_cliente || odp.numero_riga_ordine,
                 odp_id: odp.id,
                 codice_odp: odp.codice_odp,
                 articolo_id: riga.articolo_id,
@@ -588,6 +592,8 @@ export default function SpedizioniDdtPage() {
             riga_ordine_id: riga.id,
             ordine_id: ord.id,
             codice_ordine: ord.numero_ordine,
+            riferimento_ordine_cliente: ord.riferimento_ordine_cliente,
+            pos_riga_cliente: riga.pos_riga_cliente,
             odp_id: '',
             codice_odp: 'DA MAGAZZINO (STOCK)',
             articolo_id: riga.articolo_id,
@@ -673,6 +679,8 @@ export default function SpedizioniDdtPage() {
         ordine_cliente_id: r.ordine_id,
         riga_ordine_cliente_id: r.riga_ordine_id,
         codice_ordine_cliente: r.codice_ordine,
+        riferimento_ordine_cliente: r.riferimento_ordine_cliente,
+        pos_riga_cliente: r.pos_riga_cliente,
         odp_id: r.odp_id,
         codice_odp: r.codice_odp,
         articolo_id: r.articolo_id,
@@ -1124,10 +1132,12 @@ export default function SpedizioniDdtPage() {
 
                         <td className="py-3 px-3.5">
                           <div className="space-y-1">
-                            {Array.from(new Set(doc.righe.map((r) => r.codice_ordine_cliente).filter(Boolean))).map((c) => (
-                              <span key={c} className="inline-block px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-[11px] font-mono text-emerald-300 mr-1">
-                                {c}
-                              </span>
+                            {Array.from(new Set(doc.righe.map((r) => r.riferimento_ordine_cliente || r.codice_ordine_cliente).filter(Boolean))).map((comm) => (
+                              <div key={comm} className="flex items-center gap-1.5">
+                                <span className="inline-block px-2 py-0.5 bg-emerald-950/80 border border-emerald-600/40 rounded text-[11px] font-mono font-bold text-emerald-300">
+                                  {comm}
+                                </span>
+                              </div>
                             ))}
                           </div>
                         </td>
@@ -1873,7 +1883,9 @@ export default function SpedizioniDdtPage() {
                       <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold">
                         <tr>
                           <th className="py-2.5 px-3 text-center w-10">Includi</th>
-                          <th className="py-2.5 px-3">Commessa / OdP</th>
+                          <th className="py-2.5 px-3">Commessa Cliente</th>
+                          <th className="py-2.5 px-2 text-center whitespace-nowrap">Item #</th>
+                          <th className="py-2.5 px-3">Rif. Interno / OdP</th>
                           <th className="py-2.5 px-3">Codice Articolo</th>
                           <th className="py-2.5 px-3">Descrizione</th>
                           <th className="py-2.5 px-3 text-center">Ordinati</th>
@@ -1915,13 +1927,32 @@ export default function SpedizioniDdtPage() {
                                 />
                               </td>
 
-                              <td className="py-2.5 px-3 font-mono font-bold text-emerald-400">
-                                {r.codice_ordine}
-                                {r.codice_odp && (
-                                  <span className={`block text-[10px] font-normal ${r.codice_odp.includes('STOCK') ? 'text-amber-400 font-bold' : 'text-slate-500'}`}>
-                                    {r.codice_odp}
+                              {/* Commessa Cliente */}
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <span className="font-mono font-bold text-white block">
+                                  {r.riferimento_ordine_cliente || r.codice_ordine}
+                                </span>
+                                {r.riferimento_ordine_cliente && (
+                                  <span className="text-[10px] text-slate-500 block">
+                                    Ord: {r.codice_ordine}
                                   </span>
                                 )}
+                              </td>
+
+                              {/* Item / Pos. Cliente */}
+                              <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                                {r.pos_riga_cliente ? (
+                                  <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-emerald-300 border border-slate-700 text-[11px]">
+                                    #{r.pos_riga_cliente}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-600 text-[11px]">-</span>
+                                )}
+                              </td>
+
+                              {/* Rif Interno OdP */}
+                              <td className="py-2.5 px-3 font-mono text-emerald-400 font-semibold text-xs whitespace-nowrap">
+                                {r.codice_odp || '-'}
                               </td>
 
                               <td className="py-2.5 px-3 font-mono font-bold text-white">

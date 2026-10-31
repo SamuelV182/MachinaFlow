@@ -121,12 +121,14 @@ export default function OrdiniPage() {
   const [modaleAperta, setModaleAperta] = useState(false)
   const [formOrdine, setFormOrdine] = useState({
     numero_ordine: '',
+    riferimento_ordine_cliente: '',
     cliente_id: '',
     nuovo_cliente_nome: '',
     data_consegna_concordata: '',
     note: '',
     righe: [
       {
+        pos_riga_cliente: '1',
         articolo_id: '',
         quantita: 2,
         prezzo_unitario: 500
@@ -391,12 +393,14 @@ export default function OrdiniPage() {
     setDettaglioSimulazione(null)
     setFormOrdine({
       numero_ordine: `ORD-2026-${String(ordini.length + 1).padStart(3, '0')}`,
+      riferimento_ordine_cliente: '',
       cliente_id: '',
       nuovo_cliente_nome: '',
       data_consegna_concordata: dataDefault.toISOString().split('T')[0],
       note: '',
       righe: [
         {
+          pos_riga_cliente: '1',
           articolo_id: '',
           quantita: 2,
           prezzo_unitario: 500
@@ -447,6 +451,7 @@ export default function OrdiniPage() {
     const nuovoOrdine: OrdineCompleto = {
       id: nuovoId,
       numero_ordine: formOrdine.numero_ordine.trim().toUpperCase(),
+      riferimento_ordine_cliente: formOrdine.riferimento_ordine_cliente.trim() || undefined,
       cliente_id: finalClienteId,
       data_ordine: new Date().toISOString().split('T')[0],
       data_consegna_concordata: formOrdine.data_consegna_concordata,
@@ -457,6 +462,7 @@ export default function OrdiniPage() {
       righe: righeValide.map((r, idx) => ({
         id: `riga-${Date.now()}-${idx}`,
         ordine_cliente_id: nuovoId,
+        pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente).trim() : (idx + 1),
         articolo_id: r.articolo_id,
         quantita: Number(r.quantita),
         prezzo_unitario: Number(r.prezzo_unitario),
@@ -566,6 +572,8 @@ export default function OrdiniPage() {
           riga_ordine_cliente_id: riga.id,
           ordine_cliente_id: ord.id,
           codice_ordine_cliente: ord.numero_ordine,
+          riferimento_ordine_cliente: ord.riferimento_ordine_cliente,
+          pos_riga_cliente: riga.pos_riga_cliente,
           cliente_id: ord.cliente_id,
           cliente_nome: ord.cliente?.ragione_sociale,
           numero_riga_ordine: rigaIdx + 1,
@@ -663,6 +671,8 @@ export default function OrdiniPage() {
         riga_ordine_cliente_id: riga.id,
         ordine_cliente_id: ordine.id,
         codice_ordine_cliente: ordine.numero_ordine,
+        riferimento_ordine_cliente: ordine.riferimento_ordine_cliente,
+        pos_riga_cliente: riga.pos_riga_cliente,
         cliente_id: ordine.cliente_id,
         cliente_nome: ordine.cliente?.ragione_sociale,
         numero_riga_ordine: rigaIdx + 1,
@@ -761,6 +771,8 @@ export default function OrdiniPage() {
       riga_ordine_cliente_id: riga.id,
       ordine_cliente_id: ordine.id,
       codice_ordine_cliente: ordine.numero_ordine,
+      riferimento_ordine_cliente: ordine.riferimento_ordine_cliente,
+      pos_riga_cliente: riga.pos_riga_cliente,
       cliente_id: ordine.cliente_id,
       cliente_nome: ordine.cliente?.ragione_sociale,
       numero_riga_ordine: rigaIdx >= 0 ? rigaIdx + 1 : 1,
@@ -889,6 +901,7 @@ export default function OrdiniPage() {
     const combaciaStato = filtroStato === 'tutti' || o.stato === filtroStato
     const matchNumeroOCliente =
       o.numero_ordine.toLowerCase().includes(termineRicerca.toLowerCase()) ||
+      (o.riferimento_ordine_cliente && o.riferimento_ordine_cliente.toLowerCase().includes(termineRicerca.toLowerCase())) ||
       (o.cliente && o.cliente.ragione_sociale.toLowerCase().includes(termineRicerca.toLowerCase()))
     
     const matchArticolo = o.righe.some((r) =>
@@ -1124,6 +1137,12 @@ export default function OrdiniPage() {
                       <span className="text-sm font-mono font-bold text-orange-400 bg-orange-950/80 px-3 py-0.5 rounded-lg border border-orange-500/20">
                         {ordine.numero_ordine}
                       </span>
+                      {ordine.riferimento_ordine_cliente && (
+                        <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-lg border border-emerald-500/30 flex items-center gap-1" title="Commessa / Riferimento Ordine Cliente">
+                          <span className="text-[10px] text-emerald-300 font-sans uppercase">Rif. Cliente:</span>
+                          {ordine.riferimento_ordine_cliente}
+                        </span>
+                      )}
                       <span
                         className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
                           ordine.stato === 'in_produzione'
@@ -2092,10 +2111,10 @@ export default function OrdiniPage() {
             </div>
 
             <form onSubmit={handleCreaOrdine} className="p-5 space-y-4 overflow-y-auto flex-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Numero Ordine / Commessa *
+                    Ns. Ordine Interno *
                   </label>
                   <input
                     type="text"
@@ -2103,6 +2122,19 @@ export default function OrdiniPage() {
                     value={formOrdine.numero_ordine}
                     onChange={(e) => setFormOrdine({ ...formOrdine, numero_ordine: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 uppercase focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-emerald-400 mb-1 flex items-center justify-between">
+                    <span>Commessa Cliente (Rif. Esterno)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Es: BR2524, PO-9988..."
+                    value={formOrdine.riferimento_ordine_cliente}
+                    onChange={(e) => setFormOrdine({ ...formOrdine, riferimento_ordine_cliente: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-emerald-900/60 text-sm text-white font-mono focus:outline-none focus:border-emerald-500"
                   />
                 </div>
 
@@ -2220,7 +2252,7 @@ export default function OrdiniPage() {
                         ...formOrdine,
                         righe: [
                           ...formOrdine.righe,
-                          { articolo_id: '', quantita: 2, prezzo_unitario: 350 }
+                          { pos_riga_cliente: String(formOrdine.righe.length + 1), articolo_id: '', quantita: 2, prezzo_unitario: 350 }
                         ]
                       })
                     }}
@@ -2258,7 +2290,21 @@ export default function OrdiniPage() {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                        <div className="sm:col-span-6">
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] text-emerald-400 mb-0.5">Item/Pos. Cliente</label>
+                          <input
+                            type="text"
+                            placeholder="es. 1, 10"
+                            value={riga.pos_riga_cliente || ''}
+                            onChange={(e) => {
+                              const nuoveRighe = [...formOrdine.righe]
+                              nuoveRighe[index].pos_riga_cliente = e.target.value
+                              setFormOrdine({ ...formOrdine, righe: nuoveRighe })
+                            }}
+                            className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-emerald-900/70 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div className="sm:col-span-5">
                           <label className="block text-[10px] text-slate-400 mb-0.5">Articolo *</label>
                           <select
                             required
@@ -2302,8 +2348,8 @@ export default function OrdiniPage() {
                           />
                         </div>
 
-                        <div className="sm:col-span-3">
-                          <label className="block text-[10px] text-slate-400 mb-0.5">Prezzo Unit. (€)</label>
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Prezzo (€)</label>
                           <input
                             type="number"
                             step="0.01"
