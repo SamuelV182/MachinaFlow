@@ -119,6 +119,50 @@ export default function OrdiniPage() {
 
   // Modale Nuovo Ordine Multi-Riga
   const [modaleAperta, setModaleAperta] = useState(false)
+  const [ordineInModifica, setOrdineInModifica] = useState<OrdineCompleto | null>(null)
+  const [modalePinModificaAperta, setModalePinModificaAperta] = useState(false)
+  const [ordineTargetPerPin, setOrdineTargetPerPin] = useState<OrdineCompleto | null>(null)
+  const [pinInserito, setPinInserito] = useState("")
+  const [pinErrore, setPinErrore] = useState(false)
+
+  const handleRichiediModificaOrdine = (ordine: OrdineCompleto) => {
+    setOrdineTargetPerPin(ordine)
+    setPinInserito("")
+    setPinErrore(false)
+    setModalePinModificaAperta(true)
+  }
+
+  const handleConfermaPinModifica = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (pinInserito === '1234' || pinInserito === '2026') {
+      const ordine = ordineTargetPerPin
+      setModalePinModificaAperta(false)
+      if (ordine) {
+        handleApriModificaOrdine(ordine)
+      }
+    } else {
+      setPinErrore(true)
+    }
+  }
+
+  const handleApriModificaOrdine = (ordine: OrdineCompleto) => {
+    setOrdineInModifica(ordine)
+    setFormOrdine({
+      numero_ordine: ordine.numero_ordine,
+      riferimento_ordine_cliente: ordine.riferimento_ordine_cliente || '',
+      cliente_id: ordine.cliente_id,
+      nuovo_cliente_nome: '',
+      data_consegna_concordata: ordine.data_consegna_concordata ? ordine.data_consegna_concordata.split('T')[0] : '',
+      note: ordine.note || '',
+      righe: ordine.righe.map(r => ({
+        pos_riga_cliente: String(r.pos_riga_cliente || ''),
+        articolo_id: r.articolo_id,
+        quantita: r.quantita,
+        prezzo_unitario: Number(r.prezzo_unitario || 0)
+      }))
+    })
+    setModaleAperta(true)
+  }
   const [formOrdine, setFormOrdine] = useState({
     numero_ordine: '',
     riferimento_ordine_cliente: '',
@@ -443,6 +487,75 @@ export default function OrdiniPage() {
 
     if (!finalClienteId) {
       alert('Seleziona o specifica un cliente per la commessa.')
+      return
+    }
+
+    if (ordineInModifica) {
+      const ordineId = ordineInModifica.id
+      let odpModificati = [...odpList]
+      let countOdpAggiornati = 0
+
+      const righeFinali: RigaOrdineCliente[] = righeValide.map((r, idx) => {
+        const rigaPrecedente = ordineInModifica.righe[idx] && ordineInModifica.righe[idx].articolo_id === r.articolo_id
+          ? ordineInModifica.righe[idx]
+          : ordineInModifica.righe.find((orig) => orig.articolo_id === r.articolo_id)
+
+        const rigaId = rigaPrecedente ? rigaPrecedente.id : `riga-${Date.now()}-${idx}`
+        const quantitaNuova = Number(r.quantita)
+
+        if (rigaPrecedente) {
+          odpModificati = odpModificati.map((odp) => {
+            if (odp.riga_ordine_cliente_id === rigaPrecedente.id) {
+              countOdpAggiornati++
+              const odpAgg = {
+                ...odp,
+                fasi: odp.fasi || [],
+                riferimento_ordine_cliente: formOrdine.riferimento_ordine_cliente.trim() || undefined,
+                pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente).trim() : (idx + 1),
+                quantita_da_produrre: odp.stato === 'pianificato' ? quantitaNuova : odp.quantita_da_produrre
+              }
+              syncService.salvaOrdineProduzione(odpAgg)
+              return odpAgg
+            }
+            return odp
+          })
+        }
+
+        return {
+          id: rigaId,
+          ordine_cliente_id: ordineId,
+          pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente).trim() : (idx + 1),
+          articolo_id: r.articolo_id,
+          quantita: quantitaNuova,
+          prezzo_unitario: Number(r.prezzo_unitario),
+          articolo: articoli.find((a) => a.id === r.articolo_id)
+        }
+      })
+
+      const ordineModificato: OrdineCompleto = {
+        ...ordineInModifica,
+        numero_ordine: formOrdine.numero_ordine.trim().toUpperCase(),
+        riferimento_ordine_cliente: formOrdine.riferimento_ordine_cliente.trim() || undefined,
+        cliente_id: finalClienteId,
+        data_consegna_concordata: formOrdine.data_consegna_concordata,
+        note: formOrdine.note,
+        cliente: clientiAggiornati.find((c) => c.id === finalClienteId),
+        righe: righeFinali
+      }
+
+      const ordiniAggiornati = ordini.map((o) => (o.id === ordineId ? ordineModificato : o))
+      setOrdini(ordiniAggiornati)
+      localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+      syncService.salvaOrdineCliente(ordineModificato)
+
+      if (countOdpAggiornati > 0) {
+        setOdpList(odpModificati)
+        localStorage.setItem('machinaflow_odp', JSON.stringify(odpModificati))
+      }
+
+      chiudiModaleOrdine()
+      setNotifica(`✓ Commessa ${ordineModificato.numero_ordine} modificata con successo!`)
+      setTimeout(() => setNotifica(null), 4000)
       return
     }
 
@@ -1134,9 +1247,17 @@ export default function OrdiniPage() {
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2.5">
-                      <span className="text-sm font-mono font-bold text-orange-400 bg-orange-950/80 px-3 py-0.5 rounded-lg border border-orange-500/20">
-                        {ordine.numero_ordine}
-                      </span>
+                      <span className="text-sm font-mono font-bold text-orange-400 bg-orange-950/80 px-3 py-0.5 rounded-lg border border-orange-500/20 inline-flex items-center gap-1.5">
+                    <span>{ordine.numero_ordine}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRichiediModificaOrdine(ordine)}
+                      className="text-orange-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded hover:bg-orange-800/60"
+                      title="Modifica Commessa"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
                       {ordine.riferimento_ordine_cliente && (
                         <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-lg border border-emerald-500/30 flex items-center gap-1" title="Commessa / Riferimento Ordine Cliente">
                           <span className="text-[10px] text-emerald-300 font-sans uppercase">Rif. Cliente:</span>
@@ -1618,11 +1739,21 @@ export default function OrdiniPage() {
                         <td className="py-2.5 px-3 font-mono font-bold text-orange-400 whitespace-nowrap">
                           {isFirstRowOfOrder ? (
                             <div>
+                            <div className="flex items-center gap-1.5">
                               <span>{ordine.numero_ordine}</span>
-                              <span className="block text-[10px] text-slate-500 font-sans font-normal">
-                                {ordine.righe.length} art.
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRichiediModificaOrdine(ordine)}
+                                className="text-orange-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded hover:bg-slate-800"
+                                title="Modifica Commessa"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
+                            <span className="block text-[10px] text-slate-500 font-sans font-normal">
+                              {ordine.righe.length} art.
+                            </span>
+                          </div>
                           ) : (
                             <span className="text-slate-600 text-[10px] font-mono">↳ {ordine.numero_ordine}</span>
                           )}
@@ -2406,9 +2537,77 @@ export default function OrdiniPage() {
                     type="submit"
                     className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
                   >
-                    Registra Commessa Multi-Articolo
+                    {ordineInModifica ? 'Salva Modifiche Commessa' : 'Registra Commessa Multi-Articolo'}
                   </button>
                 </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE AUTORIZZAZIONE PIN SUPERVISORE PER MODIFICA ORDINE */}
+      {modalePinModificaAperta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-orange-600/20 text-orange-400 flex items-center justify-center">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm">Accesso Ufficio / Supervisore</h3>
+                  <p className="text-[11px] text-slate-400">Modifica {ordineTargetPerPin?.numero_ordine}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalePinModificaAperta(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfermaPinModifica} className="p-5 space-y-4">
+              <p className="text-xs text-slate-300">
+                La modifica di una commessa è riservata all&apos;Ufficio Tecnico o al Capo Officina. Inserisci il PIN:
+              </p>
+
+              <div>
+                <input
+                  type="password"
+                  autoFocus
+                  maxLength={4}
+                  placeholder="••••"
+                  value={pinInserito}
+                  onChange={(e) => {
+                    setPinInserito(e.target.value)
+                    setPinErrore(false)
+                  }}
+                  className="w-full text-center text-2xl tracking-[0.5em] py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-orange-500"
+                />
+                {pinErrore && (
+                  <p className="text-rose-400 text-xs text-center mt-1.5 font-semibold">
+                    PIN errato. Inserisci il PIN Supervisore (1234 o 2026).
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModalePinModificaAperta(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs uppercase cursor-pointer shadow-md shadow-orange-600/30"
+                >
+                  Autorizza Modifica
+                </button>
               </div>
             </form>
           </div>

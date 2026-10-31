@@ -1097,7 +1097,7 @@ export default function SpedizioniDdtPage() {
                   <tr>
                     <th className="py-3 px-3.5 whitespace-nowrap">DDT / Emissione</th>
                     <th className="py-3 px-3.5">Cliente Destinatario</th>
-                    <th className="py-3 px-3.5">Rif. Ordine / Commessa</th>
+                    <th className="py-3 px-3.5">Commessa Cliente</th>
                     <th className="py-3 px-3.5">Particolari & Quantità</th>
                     <th className="py-3 px-3.5">Trasporto & Vettore</th>
                     <th className="py-3 px-3.5 text-right">Azioni</th>
@@ -1131,14 +1131,37 @@ export default function SpedizioniDdtPage() {
                         </td>
 
                         <td className="py-3 px-3.5">
-                          <div className="space-y-1">
-                            {Array.from(new Set(doc.righe.map((r) => r.riferimento_ordine_cliente || r.codice_ordine_cliente).filter(Boolean))).map((comm) => (
-                              <div key={comm} className="flex items-center gap-1.5">
-                                <span className="inline-block px-2 py-0.5 bg-emerald-950/80 border border-emerald-600/40 rounded text-[11px] font-mono font-bold text-emerald-300">
-                                  {comm}
-                                </span>
-                              </div>
-                            ))}
+                          <div className="space-y-1.5">
+                            {doc.righe.map((r, rIdx) => {
+                              const ordineCollegato = ordiniClienti.find(
+                                (o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente
+                              )
+                              const commessaCliente = r.riferimento_ordine_cliente || ordineCollegato?.riferimento_ordine_cliente
+
+                              return (
+                                <div key={r.id || rIdx} className="space-y-0.5">
+                                  {commessaCliente ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="inline-block px-2.5 py-0.5 bg-emerald-950/90 border border-emerald-500/50 rounded-lg text-xs font-mono font-bold text-emerald-300 shadow-xs">
+                                        {commessaCliente}
+                                      </span>
+                                      {r.pos_riga_cliente && (
+                                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-900/40 px-1 rounded">
+                                          pos. {r.pos_riga_cliente}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-slate-500 font-mono italic">Non specificata</span>
+                                  )}
+                                  {r.codice_ordine_cliente && (
+                                    <span className="text-[10px] text-slate-500 font-mono block">
+                                      Ns: {r.codice_ordine_cliente}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
                           </div>
                         </td>
 
@@ -1883,9 +1906,9 @@ export default function SpedizioniDdtPage() {
                       <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold">
                         <tr>
                           <th className="py-2.5 px-3 text-center w-10">Includi</th>
-                          <th className="py-2.5 px-3">Commessa Cliente</th>
+                          <th className="py-2.5 px-3">Ns. Ordine</th>
                           <th className="py-2.5 px-2 text-center whitespace-nowrap">Item #</th>
-                          <th className="py-2.5 px-3">Rif. Interno / OdP</th>
+                          <th className="py-2.5 px-3">Commessa Cliente</th>
                           <th className="py-2.5 px-3">Codice Articolo</th>
                           <th className="py-2.5 px-3">Descrizione</th>
                           <th className="py-2.5 px-3 text-center">Ordinati</th>
@@ -1927,16 +1950,11 @@ export default function SpedizioniDdtPage() {
                                 />
                               </td>
 
-                              {/* Commessa Cliente */}
+                              {/* Ns. Ordine */}
                               <td className="py-2.5 px-3 whitespace-nowrap">
                                 <span className="font-mono font-bold text-white block">
-                                  {r.riferimento_ordine_cliente || r.codice_ordine}
+                                  {r.codice_ordine || '-'}
                                 </span>
-                                {r.riferimento_ordine_cliente && (
-                                  <span className="text-[10px] text-slate-500 block">
-                                    Ord: {r.codice_ordine}
-                                  </span>
-                                )}
                               </td>
 
                               {/* Item / Pos. Cliente */}
@@ -1950,9 +1968,9 @@ export default function SpedizioniDdtPage() {
                                 )}
                               </td>
 
-                              {/* Rif Interno OdP */}
-                              <td className="py-2.5 px-3 font-mono text-emerald-400 font-semibold text-xs whitespace-nowrap">
-                                {r.codice_odp || '-'}
+                              {/* Commessa Cliente */}
+                              <td className="py-2.5 px-3 font-mono text-emerald-300 font-bold text-xs whitespace-nowrap">
+                                {r.riferimento_ordine_cliente || '-'}
                               </td>
 
                               <td className="py-2.5 px-3 font-mono font-bold text-white">
@@ -2113,6 +2131,7 @@ export default function SpedizioniDdtPage() {
         <SchedaDDTStampabile
           ddt={ddtClientePerStampa}
           tipo="cliente"
+          ordiniClienti={ordiniClienti}
           onChiudi={() => setDdtClientePerStampa(null)}
         />
       )}

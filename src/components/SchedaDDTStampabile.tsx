@@ -2,18 +2,69 @@
 
 import React from 'react'
 import { Printer, Download, Truck, CheckCircle2, QrCode } from 'lucide-react'
-import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente } from '@/types/database'
+import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente, OrdineCliente } from '@/types/database'
 
 interface SchedaDDTStampabileProps {
   ddt: DocumentoTrasportoEsterno | DocumentoTrasportoCliente
   tipo?: 'terzista' | 'cliente'
+  ordiniClienti?: OrdineCliente[]
   onChiudi: () => void
 }
 
-export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }: SchedaDDTStampabileProps) {
+export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClienti = [], onChiudi }: SchedaDDTStampabileProps) {
   const isCliente = tipo === 'cliente' || 'cliente_nome' in ddt
   const clienteDdt = isCliente ? (ddt as DocumentoTrasportoCliente) : null
   const terzistaDdt = !isCliente ? (ddt as DocumentoTrasportoEsterno) : null
+
+  // Mappa di fallback per recuperare la commessa cliente anche da DDT storici salvati prima dell'introduzione del campo
+  const getCommessaCliente = (r: any) => {
+    if (r.riferimento_ordine_cliente && r.riferimento_ordine_cliente.trim() !== '') {
+      return r.riferimento_ordine_cliente
+    }
+    // Cerca nell'array ordiniClienti passato come prop
+    if (ordiniClienti && ordiniClienti.length > 0) {
+      const match = ordiniClienti.find(
+        (o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente
+      )
+      if (match && match.riferimento_ordine_cliente) {
+        return match.riferimento_ordine_cliente
+      }
+    }
+    // Cerca in localStorage come ulteriore fallback
+    try {
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      if (salvati) {
+        const ords: OrdineCliente[] = JSON.parse(salvati)
+        const match = ords.find(
+          (o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente
+        )
+        if (match && match.riferimento_ordine_cliente) {
+          return match.riferimento_ordine_cliente
+        }
+      }
+    } catch {}
+    return '-'
+  }
+
+  const getItemRigaCliente = (r: any) => {
+    if (r.pos_riga_cliente) return r.pos_riga_cliente
+    try {
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      if (salvati) {
+        const ords: any[] = JSON.parse(salvati)
+        const match = ords.find(
+          (o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente
+        )
+        if (match && match.righe) {
+          const rigaMatch = match.righe.find((rig: any) => rig.id === r.riga_ordine_cliente_id || rig.articolo_id === r.articolo_id)
+          if (rigaMatch && rigaMatch.pos_riga_cliente) {
+            return rigaMatch.pos_riga_cliente
+          }
+        }
+      }
+    } catch {}
+    return null
+  }
 
   const handleStampa = () => {
     window.print()
@@ -49,8 +100,8 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
         `"${clienteDdt.cliente_nome}"`,
         `"${clienteDdt.cliente_piva || ''}"`,
         `"${clienteDdt.destinazione_diversa || clienteDdt.cliente_indirizzo || ''}"`,
-        `"${r.riferimento_ordine_cliente || ''}"`,
-        `"${r.pos_riga_cliente || ''}"`,
+        `"${getCommessaCliente(r) !== '-' ? getCommessaCliente(r) : ''}"`,
+        `"${getItemRigaCliente(r) || ''}"`,
         `"${r.codice_ordine_cliente || ''}"`,
         `"${r.codice_odp || ''}"`,
         `"${r.articolo_codice}"`,
@@ -257,9 +308,9 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
                 <tr>
                   {isCliente ? (
                     <>
-                      <th className="py-2.5 px-3">Commessa Cliente</th>
+                      <th className="py-2.5 px-3">Ns. Ordine</th>
                       <th className="py-2.5 px-2 text-center whitespace-nowrap">Pos. / Item</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Rif. Interno (OdP)</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Commessa Cliente</th>
                     </>
                   ) : (
                     <th className="py-2.5 px-3"># OdP / Rif.</th>
@@ -275,32 +326,27 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', onChiudi }
                 {isCliente && clienteDdt
                   ? clienteDdt.righe.map((r, i) => (
                       <tr key={r.id || i} className="hover:bg-slate-50">
-                        {/* Commessa Cliente */}
+                        {/* Ns. Ordine */}
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <span className="font-mono font-black text-slate-900 text-xs block">
-                            {r.riferimento_ordine_cliente || r.codice_ordine_cliente || 'N/D'}
+                            {r.codice_ordine_cliente || 'N/D'}
                           </span>
-                          {r.riferimento_ordine_cliente && r.codice_ordine_cliente && (
-                            <span className="text-[10px] text-slate-500 block">
-                              Ord. Machina: {r.codice_ordine_cliente}
-                            </span>
-                          )}
                         </td>
 
                         {/* Pos / Item Cliente */}
                         <td className="py-2.5 px-2 text-center whitespace-nowrap">
-                          {r.pos_riga_cliente ? (
+                          {getItemRigaCliente(r) ? (
                             <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[11px] border border-slate-200">
-                              #{r.pos_riga_cliente}
+                              #{getItemRigaCliente(r)}
                             </span>
                           ) : (
                             <span className="text-slate-400 text-[11px]">-</span>
                           )}
                         </td>
 
-                        {/* Rif OdP interno */}
-                        <td className="py-2.5 px-3 font-mono text-emerald-700 font-semibold text-xs whitespace-nowrap">
-                          {r.codice_odp || '-'}
+                        {/* Commessa Cliente */}
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 text-xs whitespace-nowrap">
+                          {getCommessaCliente(r)}
                         </td>
 
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">

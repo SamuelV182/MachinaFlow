@@ -61,6 +61,7 @@ export const syncService = {
           await supabase.from('ordini_clienti').upsert({
             id: ord.id,
             numero_ordine: ord.numero_ordine,
+            riferimento_ordine_cliente: ord.riferimento_ordine_cliente || null,
             cliente_id: ord.cliente_id,
             data_ordine: ord.data_ordine,
             data_consegna_concordata: ord.data_consegna_concordata,
@@ -68,7 +69,16 @@ export const syncService = {
             note: ord.note
           })
           if (ord.righe && ord.righe.length > 0) {
-            await supabase.from('righe_ordine_cliente').upsert(ord.righe)
+            await supabase.from('righe_ordine_cliente').upsert(
+              ord.righe.map((r: any) => ({
+                id: r.id,
+                ordine_cliente_id: ord.id,
+                pos_riga_cliente: r.pos_riga_cliente || null,
+                articolo_id: r.articolo_id,
+                quantita: r.quantita,
+                prezzo_unitario: r.prezzo_unitario || 0
+              }))
+            )
           }
         }
       }
@@ -317,15 +327,27 @@ export const syncService = {
   // 3. ORDINI CLIENTI
   async getOrdiniClienti(): Promise<(OrdineCliente & { righe: RigaOrdineCliente[] })[]> {
     try {
+      // Recupera prima le modifiche salvate localmente
+      let ordiniLocali: any[] = []
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      if (salvati) {
+        try {
+          ordiniLocali = JSON.parse(salvati)
+        } catch {}
+      }
+
       const { data: ordiniData, error: errOrdini } = await supabase
         .from('ordini_clienti')
         .select('*')
         .order('numero_ordine', { ascending: false })
 
       if (errOrdini || !ordiniData) {
-        console.warn('Lettura ordini_clienti da Supabase fallita o vuota:', errOrdini?.message)
-        const salvati = localStorage.getItem('machinaflow_ordini_clienti')
-        return salvati ? JSON.parse(salvati) : SEED_ORDINI_CLIENTI
+        console.warn('Lettura ordini_clienti da Supabase fallita o non disponibile:', errOrdini?.message)
+        // Se c'è localStorage, uniscilo con i seed dando priorità a localStorage
+        const mappaLocale = new Map<string, any>()
+        SEED_ORDINI_CLIENTI.forEach((o) => mappaLocale.set(o.id, o))
+        ordiniLocali.forEach((o) => mappaLocale.set(o.id, o))
+        return Array.from(mappaLocale.values())
       }
 
       // Leggi tutte le righe associate agli ordini da Supabase
@@ -345,21 +367,14 @@ export const syncService = {
         righe: mappaRighe.get(ord.id) || ord.righe || []
       }))
 
-      // Unisci con i seed per garantire la presenza degli ordini storici
+      // Unisci le fonti:
+      // 1. Base: SEED_ORDINI_CLIENTI
+      // 2. Cloud: ordiniCompletiCloud sovrascrivono SEED
+      // 3. Locale: ordiniLocali (le modifiche recenti dell'utente) hanno la priorità massima
       const mappa = new Map<string, any>()
       SEED_ORDINI_CLIENTI.forEach((o) => mappa.set(o.id, o))
       ordiniCompletiCloud.forEach((o: any) => mappa.set(o.id, o))
-
-      // Se in locale c'erano ordini ancora non su cloud, includili
-      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
-      if (salvati) {
-        try {
-          const loc: any[] = JSON.parse(salvati)
-          loc.forEach((o) => {
-            if (!mappa.has(o.id)) mappa.set(o.id, o)
-          })
-        } catch {}
-      }
+      ordiniLocali.forEach((o: any) => mappa.set(o.id, o))
 
       const finale = Array.from(mappa.values())
       localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(finale))
@@ -372,8 +387,25 @@ export const syncService = {
   },
 
   async salvaOrdineCliente(ordine: OrdineCliente & { righe?: RigaOrdineCliente[] }) {
+    // 1. Salva subito in localStorage per non perdere la modifica anche offline
     try {
-      await supabase.from('ordini_clienti').upsert({
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      let lista: any[] = salvati ? JSON.parse(salvati) : []
+      const index = lista.findIndex((o) => o.id === ordine.id)
+      if (index >= 0) {
+        lista[index] = { ...lista[index], ...ordine }
+      } else {
+        lista.push(ordine)
+      }
+      localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(lista))
+    } catch (e) {
+      console.warn('Errore salvataggio locale ordine cliente:', e)
+    }
+
+    // 2. Tenta la sincronizzazione cloud su Supabase
+    try {
+      // Prepariamo il payload: proviamo con riferimento_ordine_cliente, con fallback se la colonna non esiste ancora nel DB
+      const payloadOrdine: any = {
         id: ordine.id,
         numero_ordine: ordine.numero_ordine,
         cliente_id: ordine.cliente_id,
@@ -381,17 +413,34 @@ export const syncService = {
         data_consegna_concordata: ordine.data_consegna_concordata,
         stato: ordine.stato,
         note: ordine.note || null
-      })
+      }
+      if (ordine.riferimento_ordine_cliente !== undefined) {
+        payloadOrdine.riferimento_ordine_cliente = ordine.riferimento_ordine_cliente
+      }
+
+      let resOrd = await supabase.from('ordini_clienti').upsert(payloadOrdine)
+      // Se fallisce per colonna inesistente (es. riferimento_ordine_cliente), ritenta senza quella colonna
+      if (resOrd.error && resOrd.error.message && resOrd.error.message.includes('riferimento_ordine_cliente')) {
+        delete payloadOrdine.riferimento_ordine_cliente
+        resOrd = await supabase.from('ordini_clienti').upsert(payloadOrdine)
+      }
 
       if (ordine.righe && ordine.righe.length > 0) {
-        const righeDaSalvare = ordine.righe.map((r) => ({
+        const righeDaSalvare = ordine.righe.map((r: any) => ({
           id: r.id,
           ordine_cliente_id: ordine.id,
+          pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente) : null,
           articolo_id: r.articolo_id,
           quantita: r.quantita,
           prezzo_unitario: r.prezzo_unitario || 0
         }))
-        await supabase.from('righe_ordine_cliente').upsert(righeDaSalvare)
+        
+        let resRighe = await supabase.from('righe_ordine_cliente').upsert(righeDaSalvare)
+        if (resRighe.error && resRighe.error.message && resRighe.error.message.includes('pos_riga_cliente')) {
+          // Se la colonna pos_riga_cliente non è ancora stata creata in Supabase, salviamo senza quella colonna
+          const righeBase = righeDaSalvare.map(({ pos_riga_cliente, ...rest }) => rest)
+          await supabase.from('righe_ordine_cliente').upsert(righeBase)
+        }
       }
     } catch (e) {
       console.error('Errore salvataggio ordine cliente su Supabase:', e)
