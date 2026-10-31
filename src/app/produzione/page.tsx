@@ -123,6 +123,25 @@ export default function ProduzionePage() {
     }
 
     caricaDati()
+
+    // Sottoscrizione Real-Time nativa Supabase (ad eventi, zero traffico a riposo):
+    // Riceve notifiche istantanee SOLO quando cambia qualcosa su OdP, DDT o Ordini
+    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
+      caricaDati()
+    })
+
+    // Sincronizzazione immediata al cambio scheda nello stesso browser
+    const onStorageChange = (e: StorageEvent) => {
+      if (e.key?.startsWith('machinaflow_')) {
+        caricaDati()
+      }
+    }
+    window.addEventListener('storage', onStorageChange)
+
+    return () => {
+      if (disiscrivi && typeof disiscrivi === 'function') disiscrivi()
+      window.removeEventListener('storage', onStorageChange)
+    }
   }, [])
 
   // Reset pagina al cambio filtro o ricerca

@@ -122,27 +122,81 @@ export default function OrdiniPage() {
   const [ordineInModifica, setOrdineInModifica] = useState<OrdineCompleto | null>(null)
   const [modalePinModificaAperta, setModalePinModificaAperta] = useState(false)
   const [ordineTargetPerPin, setOrdineTargetPerPin] = useState<OrdineCompleto | null>(null)
+  const [azionePin, setAzionePin] = useState<'modifica' | 'elimina'>('modifica')
   const [pinInserito, setPinInserito] = useState("")
   const [pinErrore, setPinErrore] = useState(false)
 
   const handleRichiediModificaOrdine = (ordine: OrdineCompleto) => {
     setOrdineTargetPerPin(ordine)
+    setAzionePin('modifica')
     setPinInserito("")
     setPinErrore(false)
     setModalePinModificaAperta(true)
   }
 
-  const handleConfermaPinModifica = (e: React.FormEvent) => {
+  const handleRichiediEliminaOrdine = (ordine: OrdineCompleto) => {
+    // Controllo sicurezza: se ci sono OdP già avviati o completati, avvisa
+    const righeIds = new Set(ordine.righe.map((r) => r.id))
+    const odpInCorso = odpList.filter(
+      (o) =>
+        ((o.riga_ordine_cliente_id && righeIds.has(o.riga_ordine_cliente_id)) || o.ordine_cliente_id === ordine.id) &&
+        o.stato !== 'pianificato' && o.stato !== 'scartato'
+    )
+
+    if (odpInCorso.length > 0) {
+      alert(`Attenzione: l'ordine ${ordine.numero_ordine} ha OdP già avviati in lavorazione o spediti (${odpInCorso.map(o => o.codice_odp).join(', ')}). Annulla o gestisci prima gli OdP collegati.`)
+      return
+    }
+
+    setOrdineTargetPerPin(ordine)
+    setAzionePin('elimina')
+    setPinInserito("")
+    setPinErrore(false)
+    setModalePinModificaAperta(true)
+  }
+
+  const handleConfermaPinModifica = async (e: React.FormEvent) => {
     e.preventDefault()
     if (pinInserito === '1234' || pinInserito === '2026') {
       const ordine = ordineTargetPerPin
       setModalePinModificaAperta(false)
       if (ordine) {
-        handleApriModificaOrdine(ordine)
+        if (azionePin === 'elimina') {
+          await handleEseguiEliminazioneOrdine(ordine)
+        } else {
+          handleApriModificaOrdine(ordine)
+        }
       }
     } else {
       setPinErrore(true)
     }
+  }
+
+  const handleEseguiEliminazioneOrdine = async (ordine: OrdineCompleto) => {
+    // 1. Rimuovi dall'array ordini locale
+    const ordiniAggiornati = ordini.filter((o) => o.id !== ordine.id)
+    setOrdini(ordiniAggiornati)
+    localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+
+    // 2. Rimuovi eventuali OdP pianificati non ancora avviati collegati a quest'ordine
+    const righeIds = new Set(ordine.righe.map((r) => r.id))
+    const odpDaRimuovere = odpList.filter(
+      (o) =>
+        ((o.riga_ordine_cliente_id && righeIds.has(o.riga_ordine_cliente_id)) || o.ordine_cliente_id === ordine.id) &&
+        o.stato === 'pianificato'
+    )
+    if (odpDaRimuovere.length > 0) {
+      const idsDaRimuovere = new Set(odpDaRimuovere.map((o) => o.id))
+      const odpAggiornati = odpList.filter((o) => !idsDaRimuovere.has(o.id))
+      setOdpList(odpAggiornati)
+      localStorage.setItem('machinaflow_odp', JSON.stringify(odpAggiornati))
+    }
+
+    // 3. Sincronizza eliminazione su Supabase Cloud
+    await syncService.eliminaOrdineCliente(ordine.id)
+
+    setNotifica(`✓ Commessa ${ordine.numero_ordine} eliminata con successo!`)
+    setTimeout(() => setNotifica(null), 4000)
   }
 
   const handleApriModificaOrdine = (ordine: OrdineCompleto) => {
@@ -1257,6 +1311,14 @@ export default function OrdiniPage() {
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRichiediEliminaOrdine(ordine)}
+                      className="text-slate-400 hover:text-rose-400 transition-colors cursor-pointer p-0.5 rounded hover:bg-rose-950/60"
+                      title="Elimina Ordine Cliente"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </span>
                       {ordine.riferimento_ordine_cliente && (
                         <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-lg border border-emerald-500/30 flex items-center gap-1" title="Commessa / Riferimento Ordine Cliente">
@@ -1748,6 +1810,14 @@ export default function OrdiniPage() {
                                 title="Modifica Commessa"
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRichiediEliminaOrdine(ordine)}
+                                className="text-slate-500 hover:text-rose-400 transition-colors cursor-pointer p-0.5 rounded hover:bg-slate-800"
+                                title="Elimina Ordine Cliente"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                             <span className="block text-[10px] text-slate-500 font-sans font-normal">
@@ -2546,18 +2616,24 @@ export default function OrdiniPage() {
         </div>
       )}
 
-      {/* MODALE AUTORIZZAZIONE PIN SUPERVISORE PER MODIFICA ORDINE */}
+      {/* MODALE AUTORIZZAZIONE PIN SUPERVISORE PER MODIFICA / ELIMINAZIONE ORDINE */}
       {modalePinModificaAperta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-orange-600/20 text-orange-400 flex items-center justify-center">
-                  <Edit2 className="w-4 h-4" />
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                  azionePin === 'elimina' ? 'bg-rose-600/20 text-rose-400' : 'bg-orange-600/20 text-orange-400'
+                }`}>
+                  {azionePin === 'elimina' ? <Trash2 className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
                 </div>
                 <div>
-                  <h3 className="font-bold text-white text-sm">Accesso Ufficio / Supervisore</h3>
-                  <p className="text-[11px] text-slate-400">Modifica {ordineTargetPerPin?.numero_ordine}</p>
+                  <h3 className="font-bold text-white text-sm">
+                    {azionePin === 'elimina' ? 'Eliminazione Commessa' : 'Accesso Ufficio / Supervisore'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {azionePin === 'elimina' ? 'Conferma eliminazione' : 'Modifica'} {ordineTargetPerPin?.numero_ordine}
+                  </p>
                 </div>
               </div>
               <button
@@ -2571,7 +2647,9 @@ export default function OrdiniPage() {
 
             <form onSubmit={handleConfermaPinModifica} className="p-5 space-y-4">
               <p className="text-xs text-slate-300">
-                La modifica di una commessa è riservata all&apos;Ufficio Tecnico o al Capo Officina. Inserisci il PIN:
+                {azionePin === 'elimina'
+                  ? "L'eliminazione della commessa rimuoverà l'ordine e gli OdP pianificati collegati. Inserisci il PIN per confermare:"
+                  : "La modifica di una commessa è riservata all'Ufficio Tecnico o al Capo Officina. Inserisci il PIN:"}
               </p>
 
               <div>
@@ -2585,7 +2663,9 @@ export default function OrdiniPage() {
                     setPinInserito(e.target.value)
                     setPinErrore(false)
                   }}
-                  className="w-full text-center text-2xl tracking-[0.5em] py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono focus:outline-none focus:border-orange-500"
+                  className={`w-full text-center text-2xl tracking-[0.5em] py-2.5 rounded-xl bg-slate-950 border text-white font-mono focus:outline-none ${
+                    azionePin === 'elimina' ? 'border-rose-900/60 focus:border-rose-500' : 'border-slate-800 focus:border-orange-500'
+                  }`}
                 />
                 {pinErrore && (
                   <p className="text-rose-400 text-xs text-center mt-1.5 font-semibold">
@@ -2604,9 +2684,13 @@ export default function OrdiniPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs uppercase cursor-pointer shadow-md shadow-orange-600/30"
+                  className={`px-4 py-2 rounded-xl text-white font-bold text-xs uppercase cursor-pointer shadow-md ${
+                    azionePin === 'elimina'
+                      ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/30'
+                      : 'bg-orange-600 hover:bg-orange-500 shadow-orange-600/30'
+                  }`}
                 >
-                  Autorizza Modifica
+                  {azionePin === 'elimina' ? 'Conferma Eliminazione' : 'Autorizza Modifica'}
                 </button>
               </div>
             </form>

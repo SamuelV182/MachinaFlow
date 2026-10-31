@@ -458,6 +458,28 @@ export const syncService = {
     }
   },
 
+  async eliminaOrdineCliente(ordineId: string) {
+    // 1. Rimuovi da localStorage
+    try {
+      const salvati = localStorage.getItem('machinaflow_ordini_clienti')
+      if (salvati) {
+        const lista: any[] = JSON.parse(salvati)
+        const filtrati = lista.filter((o) => o.id !== ordineId)
+        localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(filtrati))
+      }
+    } catch (e) {
+      console.warn('Errore rimozione locale ordine cliente:', e)
+    }
+
+    // 2. Rimuovi da Supabase Cloud (le righe figlie vengono cancellate in cascata da Postgres)
+    try {
+      await supabase.from('righe_ordine_cliente').delete().eq('ordine_cliente_id', ordineId)
+      await supabase.from('ordini_clienti').delete().eq('id', ordineId)
+    } catch (e) {
+      console.error('Errore eliminazione ordine cliente su Supabase:', e)
+    }
+  },
+
   // 4. ARTICOLI E GIACENZE
   async getArticoli(): Promise<Articolo[]> {
     try {
