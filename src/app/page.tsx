@@ -22,13 +22,16 @@ import {
   Articolo,
   OrdineProduzione,
   FaseOdP,
-  OrdineCliente
+  OrdineCliente,
+  ComponenteDistintaBase,
+  DocumentoTrasportoCliente
 } from '@/types/database'
 import {
   SEED_CENTRI_LAVORO,
   SEED_ODP,
   SEED_ARTICOLI,
-  SEED_ORDINI_CLIENTI
+  SEED_ORDINI_CLIENTI,
+  SEED_DISTINTA_BASE
 } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
 
@@ -36,6 +39,7 @@ export default function DashboardPage() {
   const [centriLavoro, setCentriLavoro] = useState<CentroLavoro[]>([])
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
   const [articoli, setArticoli] = useState<Articolo[]>([])
+  const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [ordiniClienti, setOrdiniClienti] = useState<OrdineCliente[]>([])
 
   // Orizzonte Temporale Selezionato (Oggi, Settimana, Mese, Trimestre, 6 Mesi)
@@ -56,11 +60,33 @@ export default function DashboardPage() {
 
       setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
+      setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
       setOrdiniClienti(parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI))
 
       // Carica e sincronizza OdP da Supabase Cloud
       const odpSincronizzati = await syncService.getOrdiniProduzione()
-      setOdpList(odpSincronizzati)
+      
+      // Carica DDT per identificare ordini già spediti
+      const ddtCloud = await syncService.getDdtClienti()
+      const ddtLocali = parseSicuro<DocumentoTrasportoCliente[]>('machinaflow_ddt_clienti', [])
+      const ddtTutti = [...ddtCloud, ...ddtLocali]
+      const odpSpeditiSet = new Set<string>()
+      ddtTutti.forEach((doc) => {
+        doc.righe.forEach((r) => {
+          if (r.odp_id) odpSpeditiSet.add(r.odp_id)
+        })
+      })
+
+      // Normalizza stato OdP: se tutte le fasi sono completate o se è presente in un DDT, consideralo chiuso/spedito
+      const odpNormalizzati = odpSincronizzati.map((odp) => {
+        const tutteCompletate = odp.fasi && odp.fasi.length > 0 && odp.fasi.every((f) => f.stato === 'completata')
+        const giaSpedito = odp.stato === 'spedito' || odpSpeditiSet.has(odp.id)
+        if (giaSpedito) return { ...odp, stato: 'spedito' as const }
+        if (tutteCompletate && odp.stato !== 'completato') return { ...odp, stato: 'completato' as const }
+        return odp
+      })
+
+      setOdpList(odpNormalizzati)
 
       // Inizializza seed Supabase se vuoto
       syncService.inizializzaDatabaseSeVuoto()
@@ -72,10 +98,17 @@ export default function DashboardPage() {
   // =========================================================================
   // CALCOLO DINAMICO KPI & CARICO CENTRI DI LAVORO
   // =========================================================================
-  const odpAttivi = odpList.filter((o) => o.stato !== 'completato')
-  const odpCompletati = odpList.filter((o) => o.stato === 'completato')
+  // Un OdP è attivo SOLO se è pianificato o in lavorazione (NON completato, spedito o scartato)
+  const odpAttivi = odpList.filter((o) => {
+    if (o.stato === 'completato' || o.stato === 'spedito' || o.stato === 'scartato') return false
+    // Se tutte le fasi sono completate, è concluso
+    if (o.fasi && o.fasi.length > 0 && o.fasi.every((f) => f.stato === 'completata')) return false
+    return true
+  })
+  
+  const odpCompletati = odpList.filter((o) => o.stato === 'completato' || o.stato === 'spedito' || (o.fasi && o.fasi.length > 0 && o.fasi.every((f) => f.stato === 'completata')))
 
-  // Ore totali stimate vs effettive
+  // Ore totali stimate vs effettive (calcolate ESCLUSIVAMENTE per gli OdP attivi in officina)
   let oreTotaliStimate = 0
   let oreCompletate = 0
 
@@ -128,14 +161,39 @@ export default function DashboardPage() {
     }
   })
 
-  // Articoli sotto scorta
-  const countSottoScorta = articoli.filter((a) => a.giacenza_attuale < a.scorta_minima).length
+  // Materiali Sotto Scorta (MRP): calcolato ESCLUSIVAMENTE sui fabbisogni reali degli OdP attivi in produzione
+  // Formula MRP: Fabbisogno lordo generato dagli OdP attivi vs Giacenza disponibile di materie prime/semilavorati
+  const fabbisogniOdPAttivi = new Map<string, number>()
+  odpAttivi.forEach((odp) => {
+    // Non conteggiare se la materia prima è già stata scaricata a bordo macchina
+    if (odp.materia_prima_scaricata) return
+    const componenti = distinte.filter((d) => d.articolo_padre_id === odp.articolo_id)
+    componenti.forEach((comp) => {
+      const consumo = Number(comp.quantita_necessaria || 1) * Number(odp.quantita_da_produrre || 1)
+      const attuale = fabbisogniOdPAttivi.get(comp.articolo_componente_id) || 0
+      fabbisogniOdPAttivi.set(comp.articolo_componente_id, attuale + consumo)
+    })
+  })
+
+  // Un materiale è sotto scorta se è richiesto da un OdP attivo e la giacenza attuale non copre il fabbisogno (o la scorta minima di sicurezza)
+  let countSottoScorta = 0
+  fabbisogniOdPAttivi.forEach((fabbisognoLordo, articoloId) => {
+    const art = articoli.find((a) => a.id === articoloId)
+    if (art) {
+      const giacenza = art.giacenza_attuale || 0
+      const scortaSicurezza = art.scorta_minima || 0
+      // Mancanza fisica o intacco della scorta di sicurezza
+      if (giacenza < (fabbisognoLordo + scortaSicurezza)) {
+        countSottoScorta++
+      }
+    }
+  })
 
   const kpis = [
     {
       titolo: 'Ordini di Produzione Attivi',
       valore: odpAttivi.length.toString(),
-      sottoTesto: `${odpAttivi.filter((o) => o.stato === 'in_lavorazione').length} in lavorazione sui reparti`,
+      sottoTesto: odpAttivi.length === 0 ? 'Nessun ordine aperto sui reparti' : `${odpAttivi.filter((o) => o.stato === 'in_lavorazione').length} in lavorazione sui reparti`,
       icona: Factory,
       colore: 'text-orange-400',
       bg: 'bg-orange-950/40 border-orange-500/20'
@@ -151,7 +209,7 @@ export default function DashboardPage() {
     {
       titolo: 'Materiali Sotto Scorta (MRP)',
       valore: countSottoScorta.toString(),
-      sottoTesto: countSottoScorta > 0 ? 'Richiede emissione ordini acquisto' : 'Stock a livello ottimale',
+      sottoTesto: countSottoScorta > 0 ? 'Richiede emissione ordini acquisto' : 'Tutti i fabbisogni coperti da stock',
       icona: AlertTriangle,
       colore: countSottoScorta > 0 ? 'text-rose-400' : 'text-emerald-400',
       bg: countSottoScorta > 0 ? 'bg-rose-950/40 border-rose-500/20' : 'bg-emerald-950/40 border-emerald-500/20'
