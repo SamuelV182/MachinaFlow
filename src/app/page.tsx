@@ -59,12 +59,15 @@ export default function DashboardPage() {
       }
 
       setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
-      setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
       setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
       setOrdiniClienti(parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI))
-
       // Carica e sincronizza OdP da Supabase Cloud
       const odpSincronizzati = await syncService.getOrdiniProduzione()
+
+      // Carica anagrafica articoli e giacenze reali aggiornate da Supabase Cloud
+      const articoliCloud = await syncService.getArticoli()
+      const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
+      setArticoli(articoliEffettivi)
       
       // Carica DDT per identificare ordini già spediti
       const ddtCloud = await syncService.getDdtClienti()
