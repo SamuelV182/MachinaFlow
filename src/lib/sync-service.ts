@@ -770,7 +770,7 @@ export const syncService = {
       }, 400)
     }
 
-    // Canale unico dedicato per tutte le azioni operative dell'officina e magazzino
+    // Canale unico dedicato per le tabelle operative con Realtime attivo
     const channelId = `mf-realtime-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`
     const channel = supabase
       .channel(channelId)
@@ -782,11 +782,6 @@ export const syncService = {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ordini_produzione' },
-        eseguiAggiornamentoPulito
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'ddt_clienti' },
         eseguiAggiornamentoPulito
       )
       .on(
