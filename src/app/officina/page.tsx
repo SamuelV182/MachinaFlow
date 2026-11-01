@@ -228,7 +228,11 @@ export default function TerminaleOfficinaPage() {
     // Sottoscrizione Real-Time nativa Supabase:
     // Quando qualsiasi postazione in officina o ufficio completa/avvia una fase o aggiorna un OdP,
     // questo terminale aggiorna la sua coda di lavoro istantaneamente e silenziosamente
-    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(async () => {
+    let debounceTimer: any = null
+
+    const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(async () => {
       const aggiornati = await syncService.getOrdiniProduzione({ soloAttivi: true })
       const normalizzati = aggiornati.map((o) => ({
         ...o,
@@ -247,9 +251,11 @@ export default function TerminaleOfficinaPage() {
         })
       }))
       setOdpList(normalizzati)
+      }, 300)
     })
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
       disiscrivi()
     }
   }, [])

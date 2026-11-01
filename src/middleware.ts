@@ -34,9 +34,18 @@ export async function middleware(request: NextRequest) {
     }
   })
 
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  // Timeout di sicurezza per getUser (massimo 1500ms per non far andare mai Vercel in timeout)
+  let user = null
+  try {
+    const authPromise = supabase.auth.getUser()
+    const timeoutPromise = new Promise<{ data: { user: null } }>((resolve) =>
+      setTimeout(() => resolve({ data: { user: null } }), 1500)
+    )
+    const result = await Promise.race([authPromise, timeoutPromise])
+    user = result?.data?.user || null
+  } catch {
+    user = null
+  }
 
   const pathname = request.nextUrl.pathname
 
