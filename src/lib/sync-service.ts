@@ -760,8 +760,9 @@ export const syncService = {
   // Permette a tutti i client (desktop, cellulari, postazioni) di ricevere aggiornamenti
   // istantanei in tempo reale quando qualsiasi postazione aggiorna OdP, Fasi, Ordini Clienti o DDT
   sottoscriviAvanzamentoProduzione(suAggiornamento: () => void) {
-    const channel = supabase
-      .channel('officina-realtime-changes')
+    // Canale dedicato alle fasi e ordini di produzione (priorità assoluta per i tablet officina)
+    const channelProduzione = supabase
+      .channel(`prod-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'fasi_odp' },
@@ -776,6 +777,11 @@ export const syncService = {
           suAggiornamento()
         }
       )
+      .subscribe()
+
+    // Canale dedicato agli ordini clienti, DDT e articoli
+    const channelCommerciale = supabase
+      .channel(`comm-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ordini_clienti' },
@@ -807,7 +813,8 @@ export const syncService = {
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channel)
+      supabase.removeChannel(channelProduzione)
+      supabase.removeChannel(channelCommerciale)
     }
   }
 }
