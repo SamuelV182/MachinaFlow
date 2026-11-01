@@ -915,6 +915,32 @@ export default function SpedizioniDdtPage() {
     setTimeout(() => setNotifica(null), 4000)
   }
 
+  const ddtAttivoInStampa = ddtClientePerStampa || ddtSelezionatoPerStampa
+
+  // Se un DDT è aperto per la visualizzazione/stampa, nascondiamo l'intera pagina gestionale sotto!
+  // In questo modo il browser non ha nulla di pesante da calcolare e window.print() si apre in 0.1 secondi.
+  if (ddtAttivoInStampa) {
+    return (
+      <>
+        {ddtClientePerStampa && (
+          <SchedaDDTStampabile
+            ddt={ddtClientePerStampa}
+            tipo="cliente"
+            ordiniClienti={ordiniClienti}
+            onChiudi={() => setDdtClientePerStampa(null)}
+          />
+        )}
+        {ddtSelezionatoPerStampa && (
+          <SchedaDDTStampabile
+            ddt={ddtSelezionatoPerStampa}
+            tipo="terzista"
+            onChiudi={() => setDdtSelezionatoPerStampa(null)}
+          />
+        )}
+      </>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Intestazione Sezione Ufficio */}

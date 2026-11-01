@@ -8,6 +8,7 @@ import {
   Clock,
   ArrowLeft,
   Plus,
+  Pencil,
   Trash2,
   Cpu,
   AlertCircle,
@@ -44,8 +45,9 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
   const [distinta, setDistinta] = useState<ComponenteDistintaBase[]>([])
   const [fasiCiclo, setFasiCiclo] = useState<FaseCicloStandard[]>([])
 
-  // Stato Modale Aggiungi Componente BOM
+  // Stato Modale Aggiungi/Modifica Componente BOM
   const [modaleBomAperta, setModaleBomAperta] = useState(false)
+  const [modificaBomId, setModificaBomId] = useState<string | null>(null)
   const [creazioneRapidaAttiva, setCreazioneRapidaAttiva] = useState(false)
   const [filtroTestoComponente, setFiltroTestoComponente] = useState('')
   const [mostraDropdownRisultati, setMostraDropdownRisultati] = useState(false)
@@ -68,8 +70,9 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
 
   const [notificaSuccesso, setNotificaSuccesso] = useState<string | null>(null)
 
-  // Stato Modale Aggiungi Fase Ciclo
+  // Stato Modale Aggiungi/Modifica Fase Ciclo
   const [modaleCicloAperta, setModaleCicloAperta] = useState(false)
+  const [modificaCicloId, setModificaCicloId] = useState<string | null>(null)
   const [filtroProcessoTesto, setFiltroProcessoTesto] = useState('')
   const [mostraDropdownProcessi, setMostraDropdownProcessi] = useState(false)
   const [filtroMacchinaTesto, setFiltroMacchinaTesto] = useState('')
@@ -94,8 +97,40 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     costo_minimo_fornitura: 0
   })
 
+  const apriModaleNuovoComponente = () => {
+    setModificaBomId(null)
+    setCreazioneRapidaAttiva(false)
+    setFiltroTestoComponente('')
+    setMostraDropdownRisultati(false)
+    setFormBom({ articolo_componente_id: '', quantita_necessaria: '1', note: '' })
+    setFormNuovoArticolo({
+      codice_articolo: '',
+      descrizione: '',
+      tipo: 'materia_prima',
+      unita_misura: 'pz',
+      giacenza_attuale: 0,
+      scorta_minima: 0,
+      prezzo_riferimento: 0
+    })
+    setModaleBomAperta(true)
+  }
+
+  const apriModaleModificaComponente = (comp: ComponenteDistintaBase) => {
+    setModificaBomId(comp.id)
+    setCreazioneRapidaAttiva(false)
+    setFiltroTestoComponente('')
+    setMostraDropdownRisultati(false)
+    setFormBom({
+      articolo_componente_id: comp.articolo_componente_id,
+      quantita_necessaria: String(comp.quantita_necessaria),
+      note: comp.note || ''
+    })
+    setModaleBomAperta(true)
+  }
+
   // Funzione con calcolo automatico sequenza (10 -> 20 -> 30...)
   const apriModaleNuovaFase = () => {
+    setModificaCicloId(null)
     const maxSeq = fasiCiclo.length > 0 ? Math.max(...fasiCiclo.map((f) => f.sequenza)) : 0
     const proxSeq = maxSeq > 0 ? maxSeq + 10 : 10
 
@@ -115,6 +150,30 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       modello_tariffa: 'pezzo_fisso',
       costo_tariffa_valore: 0,
       costo_minimo_fornitura: 0
+    })
+    setFiltroProcessoTesto('')
+    setFiltroMacchinaTesto('')
+    setModaleCicloAperta(true)
+  }
+
+  const apriModaleModificaFase = (fase: FaseCicloStandard) => {
+    setModificaCicloId(fase.id)
+    setFormCiclo({
+      sequenza: fase.sequenza,
+      nome_fase: fase.nome_fase,
+      tipo_processo_id: fase.tipo_processo_id || '',
+      centro_lavoro_id: fase.centro_lavoro_id || '',
+      centri_lavoro_alternativi_ids: fase.centri_lavoro_alternativi_ids || [],
+      tempo_attrezzaggio_min: String(fase.tempo_attrezzaggio_min),
+      tempo_ciclo_pezzo_min: String(fase.tempo_ciclo_pezzo_min),
+      note_operative: fase.note_operative || '',
+      preleva_materia_prima: fase.preleva_materia_prima || false,
+      is_esterna: fase.is_esterna || false,
+      fornitore_nome: fase.fornitore_nome || '',
+      giorni_rientro_previsti: fase.giorni_rientro_previsti || 5,
+      modello_tariffa: fase.modello_tariffa || 'pezzo_fisso',
+      costo_tariffa_valore: fase.costo_tariffa_valore || 0,
+      costo_minimo_fornitura: fase.costo_minimo_fornitura || 0
     })
     setFiltroProcessoTesto('')
     setFiltroMacchinaTesto('')
@@ -155,7 +214,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     setFasiCiclo(delQuesto)
   }, [articoloId])
 
-  // Aggiungi Componente alla Distinta Base (con supporto creazione On-The-Fly)
+  // Aggiungi o Modifica Componente nella Distinta Base
   const handleAggiungiComponente = (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -195,15 +254,31 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
 
     if (!finalComponenteId) return
 
-    const nuovoComp: ComponenteDistintaBase = {
-      id: 'bom-' + Date.now(),
-      articolo_padre_id: articoloId,
-      articolo_componente_id: finalComponenteId,
-      quantita_necessaria: qtaValida,
-      note: formBom.note
+    let aggiornata: ComponenteDistintaBase[]
+    if (modificaBomId) {
+      aggiornata = distinta.map((comp) =>
+        comp.id === modificaBomId
+          ? {
+              ...comp,
+              articolo_componente_id: finalComponenteId,
+              quantita_necessaria: qtaValida,
+              note: formBom.note
+            }
+          : comp
+      )
+      setNotificaSuccesso('Componente della distinta base aggiornato con successo!')
+      setTimeout(() => setNotificaSuccesso(null), 3000)
+    } else {
+      const nuovoComp: ComponenteDistintaBase = {
+        id: 'bom-' + Date.now(),
+        articolo_padre_id: articoloId,
+        articolo_componente_id: finalComponenteId,
+        quantita_necessaria: qtaValida,
+        note: formBom.note
+      }
+      aggiornata = [...distinta, nuovoComp]
     }
 
-    const aggiornata = [...distinta, nuovoComp]
     setDistinta(aggiornata)
 
     const salvateDistinte = localStorage.getItem('machinaflow_distinte')
@@ -212,6 +287,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     localStorage.setItem('machinaflow_distinte', JSON.stringify([...filtrateGlobali, ...aggiornata]))
 
     setModaleBomAperta(false)
+    setModificaBomId(null)
     setCreazioneRapidaAttiva(false)
     setFormBom({ articolo_componente_id: '', quantita_necessaria: '1', note: '' })
     setFormNuovoArticolo({
@@ -235,7 +311,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     localStorage.setItem('machinaflow_distinte', JSON.stringify(filtrateGlobali))
   }
 
-  // Aggiungi Fase al Ciclo di Lavorazione
+  // Aggiungi o Modifica Fase al Ciclo di Lavorazione
   const handleAggiungiFase = (e: React.FormEvent) => {
     e.preventDefault()
     if (!formCiclo.nome_fase.trim() || !formCiclo.centro_lavoro_id) return
@@ -243,27 +319,58 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     const setupMin = parseFloat(String(formCiclo.tempo_attrezzaggio_min).replace(',', '.').trim()) || 0
     const cicloPzMin = parseFloat(String(formCiclo.tempo_ciclo_pezzo_min).replace(',', '.').trim()) || 0
 
-    const nuovaFase: FaseCicloStandard = {
-      id: 'ciclo-' + Date.now(),
-      articolo_id: articoloId,
-      sequenza: Number(formCiclo.sequenza),
-      nome_fase: formCiclo.nome_fase.trim(),
-      tipo_processo_id: formCiclo.tipo_processo_id || undefined,
-      centro_lavoro_id: formCiclo.is_esterna ? 'mc-esterna-01' : formCiclo.centro_lavoro_id,
-      centri_lavoro_alternativi_ids: formCiclo.is_esterna ? [] : formCiclo.centri_lavoro_alternativi_ids || [],
-      tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
-      tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
-      note_operative: formCiclo.note_operative,
-      preleva_materia_prima: formCiclo.preleva_materia_prima,
-      is_esterna: formCiclo.is_esterna,
-      fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
-      giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
-      modello_tariffa: formCiclo.is_esterna ? formCiclo.modello_tariffa : undefined,
-      costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
-      costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
+    let aggiornato: FaseCicloStandard[]
+
+    if (modificaCicloId) {
+      aggiornato = fasiCiclo
+        .map((fase) =>
+          fase.id === modificaCicloId
+            ? {
+                ...fase,
+                sequenza: Number(formCiclo.sequenza),
+                nome_fase: formCiclo.nome_fase.trim(),
+                tipo_processo_id: formCiclo.tipo_processo_id || undefined,
+                centro_lavoro_id: formCiclo.is_esterna ? 'mc-esterna-01' : formCiclo.centro_lavoro_id,
+                centri_lavoro_alternativi_ids: formCiclo.is_esterna ? [] : formCiclo.centri_lavoro_alternativi_ids || [],
+                tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
+                tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
+                note_operative: formCiclo.note_operative,
+                preleva_materia_prima: formCiclo.preleva_materia_prima,
+                is_esterna: formCiclo.is_esterna,
+                fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
+                giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
+                modello_tariffa: formCiclo.is_esterna ? formCiclo.modello_tariffa : undefined,
+                costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
+                costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
+              }
+            : fase
+        )
+        .sort((a, b) => a.sequenza - b.sequenza)
+      setNotificaSuccesso('Fase del ciclo di lavorazione aggiornata con successo!')
+      setTimeout(() => setNotificaSuccesso(null), 3000)
+    } else {
+      const nuovaFase: FaseCicloStandard = {
+        id: 'ciclo-' + Date.now(),
+        articolo_id: articoloId,
+        sequenza: Number(formCiclo.sequenza),
+        nome_fase: formCiclo.nome_fase.trim(),
+        tipo_processo_id: formCiclo.tipo_processo_id || undefined,
+        centro_lavoro_id: formCiclo.is_esterna ? 'mc-esterna-01' : formCiclo.centro_lavoro_id,
+        centri_lavoro_alternativi_ids: formCiclo.is_esterna ? [] : formCiclo.centri_lavoro_alternativi_ids || [],
+        tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
+        tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
+        note_operative: formCiclo.note_operative,
+        preleva_materia_prima: formCiclo.preleva_materia_prima,
+        is_esterna: formCiclo.is_esterna,
+        fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
+        giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
+        modello_tariffa: formCiclo.is_esterna ? formCiclo.modello_tariffa : undefined,
+        costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
+        costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
+      }
+      aggiornato = [...fasiCiclo, nuovaFase].sort((a, b) => a.sequenza - b.sequenza)
     }
 
-    const aggiornato = [...fasiCiclo, nuovaFase].sort((a, b) => a.sequenza - b.sequenza)
     setFasiCiclo(aggiornato)
 
     const salvatiCicli = localStorage.getItem('machinaflow_cicli')
@@ -272,6 +379,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     localStorage.setItem('machinaflow_cicli', JSON.stringify([...filtratiGlobali, ...aggiornato]))
 
     setModaleCicloAperta(false)
+    setModificaCicloId(null)
     setFiltroProcessoTesto('')
     setFiltroMacchinaTesto('')
     const prossimaSeq = aggiornato.length > 0 ? aggiornato[aggiornato.length - 1].sequenza + 10 : 10
@@ -400,7 +508,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
           </div>
 
           <button
-            onClick={() => setModaleBomAperta(true)}
+            onClick={apriModaleNuovoComponente}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -446,13 +554,22 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                         {comp.note || '-'}
                       </td>
                       <td className="p-3 text-right">
-                        <button
-                          onClick={() => handleRimuoviComponente(comp.id)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                          title="Rimuovi componente dalla distinta"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => apriModaleModificaComponente(comp)}
+                            className="p-1 text-slate-500 hover:text-orange-400 transition-colors cursor-pointer"
+                            title="Modifica componente della distinta"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleRimuoviComponente(comp.id)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                            title="Rimuovi componente dalla distinta"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -602,13 +719,22 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                       </>
                     )}
 
-                    <button
-                      onClick={() => handleRimuoviFase(fase.id)}
-                      className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                      title="Elimina fase dal ciclo"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => apriModaleModificaFase(fase)}
+                        className="p-1.5 text-slate-500 hover:text-orange-400 transition-colors cursor-pointer"
+                        title="Modifica parametri fase ciclo"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleRimuoviFase(fase.id)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                        title="Elimina fase dal ciclo"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )
@@ -625,14 +751,14 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
         )}
       </div>
 
-      {/* MODALE AGGIUNGI COMPONENTE BOM */}
+      {/* MODALE AGGIUNGI / MODIFICA COMPONENTE BOM */}
       {modaleBomAperta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 <Layers className="w-5 h-5 text-orange-500" />
-                Aggiungi Componente alla Distinta Base
+                {modificaBomId ? 'Modifica Componente Distinta Base' : 'Aggiungi Componente alla Distinta Base'}
               </h2>
               <button
                 type="button"
@@ -975,7 +1101,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                   type="submit"
                   className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
                 >
-                  Aggiungi alla Distinta
+                  {modificaBomId ? 'Salva Modifiche' : 'Aggiungi alla Distinta'}
                 </button>
               </div>
             </form>
@@ -983,14 +1109,14 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
         </div>
       )}
 
-      {/* MODALE AGGIUNGI FASE CICLO */}
+      {/* MODALE AGGIUNGI / MODIFICA FASE CICLO */}
       {modaleCicloAperta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 <Clock className="w-5 h-5 text-orange-500" />
-                Aggiungi Fase al Ciclo di Lavorazione
+                {modificaCicloId ? 'Modifica Fase del Ciclo di Lavorazione' : 'Aggiungi Fase al Ciclo di Lavorazione'}
               </h2>
               <button
                 type="button"
@@ -1497,7 +1623,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                   type="submit"
                   className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
                 >
-                  Salva Fase Ciclo
+                  {modificaCicloId ? 'Salva Modifiche Fase' : 'Salva Fase Ciclo'}
                 </button>
               </div>
             </form>

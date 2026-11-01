@@ -24,8 +24,8 @@ import {
   Truck,
   FileText
 } from 'lucide-react'
-import { OrdineProduzione, FaseOdP, Articolo, DocumentoTrasportoCliente } from '@/types/database'
-import { SEED_ODP, SEED_ARTICOLI } from '@/lib/data-service'
+import { OrdineProduzione, FaseOdP, Articolo, DocumentoTrasportoCliente, OrdineCliente } from '@/types/database'
+import { SEED_ODP, SEED_ARTICOLI, SEED_ORDINI_CLIENTI } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
 import SchedaDDTStampabile from '@/components/SchedaDDTStampabile'
 
@@ -38,6 +38,7 @@ export default function ProduzionePage() {
   const [odpList, setOdpList] = useState<OdPConFasi[]>([])
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [ddtClientiList, setDdtClientiList] = useState<DocumentoTrasportoCliente[]>([])
+  const [ordiniClienti, setOrdiniClienti] = useState<OrdineCliente[]>([])
   const [ddtDaStampare, setDdtDaStampare] = useState<DocumentoTrasportoCliente | null>(null)
   const [termineRicerca, setTermineRicerca] = useState('')
   const [filtroStato, setFiltroStato] = useState<string>('tutti')
@@ -59,6 +60,9 @@ export default function ProduzionePage() {
 
       const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
       setArticoli(articoliList)
+
+      const ordiniList = parseSicuro('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+      setOrdiniClienti(ordiniList)
 
       // Carica ordini sincronizzati da Supabase Cloud
       const odpCaricati = await syncService.getOrdiniProduzione()
@@ -233,6 +237,19 @@ export default function ProduzionePage() {
       diffGiorni,
       isRitardo: false
     }
+  }
+
+  // Se un DDT è aperto per la visualizzazione/stampa, smontiamo l'intera pagina degli OdP
+  // In questo modo il rendering è immediato (< 0.2s) senza caricare e ricalcolare centinaia di card sotto
+  if (ddtDaStampare) {
+    return (
+      <SchedaDDTStampabile
+        ddt={ddtDaStampare}
+        tipo="cliente"
+        ordiniClienti={ordiniClienti}
+        onChiudi={() => setDdtDaStampare(null)}
+      />
+    )
   }
 
   return (
@@ -666,14 +683,7 @@ export default function ProduzionePage() {
         </div>
       )}
 
-      {/* Modale Anteprima Stampa A4 del DDT Cliente per OdP Spediti */}
-      {ddtDaStampare && (
-        <SchedaDDTStampabile
-          ddt={ddtDaStampare}
-          tipo="cliente"
-          onChiudi={() => setDdtDaStampare(null)}
-        />
-      )}
+      {/* Modale Anteprima Stampa A4 del DDT Cliente per OdP Spediti rimossa dal fondo perché gestita all'inizio con unmount */}
     </div>
   )
 }
