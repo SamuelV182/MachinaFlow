@@ -758,63 +758,47 @@ export const syncService = {
 
   // 6. REAL-TIME SUBSCRIPTIONS
   // Permette a tutti i client (desktop, cellulari, postazioni) di ricevere aggiornamenti
-  // istantanei in tempo reale quando qualsiasi postazione aggiorna OdP, Fasi, Ordini Clienti o DDT
+  // istantanei in tempo reale quando qualsiasi postazione compie un'azione (avvio/chiusura fase, emissione DDT, ecc.)
   sottoscriviAvanzamentoProduzione(suAggiornamento: () => void) {
-    // Canale dedicato alle fasi e ordini di produzione (priorità assoluta per i tablet officina)
-    const channelProduzione = supabase
-      .channel(`prod-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`)
+    let timerDebounce: any = null
+
+    const eseguiAggiornamentoPulito = () => {
+      if (timerDebounce) clearTimeout(timerDebounce)
+      // Debounce di 400ms: raggruppa le notifiche a raffica in un'unica sincronizzazione pulita
+      timerDebounce = setTimeout(() => {
+        suAggiornamento()
+      }, 400)
+    }
+
+    // Canale unico dedicato per tutte le azioni operative dell'officina e magazzino
+    const channelId = `mf-realtime-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`
+    const channel = supabase
+      .channel(channelId)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'fasi_odp' },
-        () => {
-          suAggiornamento()
-        }
+        eseguiAggiornamentoPulito
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ordini_produzione' },
-        () => {
-          suAggiornamento()
-        }
-      )
-      .subscribe()
-
-    // Canale dedicato agli ordini clienti, DDT e articoli
-    const channelCommerciale = supabase
-      .channel(`comm-realtime-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'ordini_clienti' },
-        () => {
-          suAggiornamento()
-        }
+        eseguiAggiornamentoPulito
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ddt_clienti' },
-        () => {
-          suAggiornamento()
-        }
+        eseguiAggiornamentoPulito
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ordini_fornitori' },
-        () => {
-          suAggiornamento()
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'articoli' },
-        () => {
-          suAggiornamento()
-        }
+        eseguiAggiornamentoPulito
       )
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channelProduzione)
-      supabase.removeChannel(channelCommerciale)
+      if (timerDebounce) clearTimeout(timerDebounce)
+      supabase.removeChannel(channel)
     }
   }
 }
