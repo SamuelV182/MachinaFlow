@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
-import { Printer, Download, Truck, CheckCircle2, QrCode, FileText } from 'lucide-react'
+import { Printer, Download, Truck, CheckCircle2, QrCode, FileText, ExternalLink, Eye } from 'lucide-react'
 import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente, OrdineCliente } from '@/types/database'
 import { generaDdtPdf } from '@/lib/pdf-ddt-service'
 
@@ -19,9 +19,19 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
   // URL del PDF generato dal template predefinito (< 0.1s)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState<boolean>(false)
 
   const ddtId = ddt.id || ddt.numero_ddt
   const ordiniCount = ordiniClienti?.length || 0
+
+  useEffect(() => {
+    // Rileva smartphone/tablet dove il browser non supporta il rendering dei PDF in iframe
+    if (typeof window !== 'undefined') {
+      const ua = navigator.userAgent || ''
+      const mobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || window.innerWidth < 768
+      setIsMobile(mobileDevice)
+    }
+  }, [])
 
   useEffect(() => {
     try {
@@ -44,6 +54,18 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
       doc.save(`${ddt.numero_ddt || 'DDT'}.pdf`)
     } catch {
       window.print()
+    }
+  }
+
+  // Apertura a schermo intero o in nuova scheda per smartphone
+  const handleApriPdfEsterno = () => {
+    try {
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti)
+      const blob = doc.output('blob')
+      const blobUrl = URL.createObjectURL(blob)
+      window.open(blobUrl, '_blank')
+    } catch {
+      handleScaricaPdf()
     }
   }
 
@@ -211,8 +233,67 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
           </div>
         </div>
 
-        {/* ANTEPRIMA VETTORIALE NATIVA IN-APP DEL PDF A4 (< 0.2s) */}
-        {pdfUrl ? (
+        {/* VISUALIZZAZIONE OTTIMIZZATA: SMARTPHONE VS DESKTOP */}
+        {isMobile ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-5 shadow-2xl">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto shadow-inner">
+              <FileText className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-bold text-white">Documento di Trasporto A4 Pronto</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                DDT N° <strong className="text-slate-200">{ddt.numero_ddt}</strong> per{' '}
+                <strong className="text-emerald-400">{isCliente ? clienteDdt?.cliente_nome : terzistaDdt?.fornitore_nome}</strong>
+              </p>
+            </div>
+
+            {/* Riepilogo Dati Rapido per Smartphone */}
+            <div className="bg-slate-950 rounded-xl p-3.5 border border-slate-800 text-left grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-slate-400 block text-[11px]">Data Emissione:</span>
+                <span className="font-semibold text-slate-200">
+                  {new Date(ddt.data_emissione).toLocaleDateString('it-IT')}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[11px]">Totale Articoli/Righe:</span>
+                <span className="font-semibold text-slate-200">{ddt.righe?.length || 0} riga/e</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[11px]">Colli e Peso:</span>
+                <span className="font-semibold text-slate-200">
+                  {ddt.numero_colli || 1} colli • {ddt.peso_totale_kg ? `${ddt.peso_totale_kg.toFixed(1)} kg` : 'A vista'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[11px]">Vettore Incaricato:</span>
+                <span className="font-semibold text-slate-200 truncate block">{ddt.vettore_nome || 'Mittente'}</span>
+              </div>
+            </div>
+
+            {/* Pulsantoni Azione Mobile */}
+            <div className="flex flex-col gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={handleScaricaPdf}
+                className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>Scarica e Stampa PDF A4</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApriPdfEsterno}
+                className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 flex items-center justify-center gap-2 cursor-pointer transition-all"
+              >
+                <ExternalLink className="w-4 h-4 text-emerald-400" />
+                <span>Visualizza a Schermo Intero</span>
+              </button>
+            </div>
+          </div>
+        ) : pdfUrl ? (
           <div className="bg-slate-950 rounded-2xl p-2 border border-slate-800 shadow-2xl h-[78vh] w-full flex flex-col">
             <iframe
               src={`${pdfUrl}#toolbar=0&navpanes=0&view=FitH`}
