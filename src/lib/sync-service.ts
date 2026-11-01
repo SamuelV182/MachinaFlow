@@ -106,16 +106,17 @@ export const syncService = {
         `)
         .order('creato_il', { ascending: false })
 
-      // Se richiesto solo il carico attivo (es. tablet officina), escludiamo gli ordini completati o già spediti
-      // mantenendo gli ordini pianificati, in_corso o sospesi
+      // Se richiesto solo il carico attivo (es. tablet officina), escludiamo gli ordini completati
+      // (filtriamo lo stato 'spedito' lato codice per evitare errore 22P02 su enum postgres)
       if (opzioni?.soloAttivi) {
-        query = query.neq('stato', 'completato').neq('stato', 'spedito')
+        query = query.neq('stato', 'completato')
       }
 
       const { data: odpCloud, error } = await query
 
       if (error || !odpCloud) {
-        return opzioni?.soloAttivi ? locali.filter((o) => o.stato !== 'completato') : locali
+        if (error) console.warn('Errore lettura OdP da Supabase:', error.message)
+        return opzioni?.soloAttivi ? locali.filter((o) => o.stato !== 'completato' && (o.stato as string) !== 'spedito') : locali
       }
 
       // Se nel browser ci sono ordini non ancora presenti su Supabase, inviali in background verificando sia id che codice_odp
