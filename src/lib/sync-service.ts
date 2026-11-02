@@ -789,6 +789,11 @@ export const syncService = {
         { event: '*', schema: 'public', table: 'ordini_fornitori' },
         eseguiAggiornamentoPulito
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'articoli' },
+        eseguiAggiornamentoPulito
+      )
       .subscribe()
 
     return () => {

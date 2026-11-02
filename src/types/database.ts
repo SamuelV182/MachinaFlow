@@ -49,6 +49,8 @@ export interface CentroLavoro {
   capacita_giornaliera_ore: number
   costo_orario: number
   attivo: boolean
+  lavora_sabato?: boolean
+  lavora_domenica?: boolean
   creato_il: string
 }
 

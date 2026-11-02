@@ -36,7 +36,9 @@ export default function ProcessiMacchinePage() {
     reparto: 'Officina',
     capacita_giornaliera_ore: 8,
     costo_orario: 50,
-    attivo: true
+    attivo: true,
+    lavora_sabato: false,
+    lavora_domenica: false
   })
 
   // Modale Processo
@@ -115,7 +117,9 @@ export default function ProcessiMacchinePage() {
               reparto: formMacchina.reparto,
               capacita_giornaliera_ore: Number(formMacchina.capacita_giornaliera_ore),
               costo_orario: Number(formMacchina.costo_orario),
-              attivo: formMacchina.attivo
+              attivo: formMacchina.attivo,
+              lavora_sabato: formMacchina.lavora_sabato,
+              lavora_domenica: formMacchina.lavora_domenica
             }
           : m
       )
@@ -128,6 +132,8 @@ export default function ProcessiMacchinePage() {
         capacita_giornaliera_ore: Number(formMacchina.capacita_giornaliera_ore),
         costo_orario: Number(formMacchina.costo_orario),
         attivo: formMacchina.attivo,
+        lavora_sabato: formMacchina.lavora_sabato,
+        lavora_domenica: formMacchina.lavora_domenica,
         creato_il: new Date().toISOString()
       }
       aggiornati = [nuovaMacchina, ...centriLavoro]
@@ -153,7 +159,9 @@ export default function ProcessiMacchinePage() {
       reparto: m.reparto,
       capacita_giornaliera_ore: m.capacita_giornaliera_ore,
       costo_orario: m.costo_orario,
-      attivo: m.attivo
+      attivo: m.attivo,
+      lavora_sabato: !!m.lavora_sabato,
+      lavora_domenica: !!m.lavora_domenica
     })
     setModaleMacchinaAperta(true)
   }
@@ -167,7 +175,9 @@ export default function ProcessiMacchinePage() {
       reparto: 'Officina',
       capacita_giornaliera_ore: 8,
       costo_orario: 50,
-      attivo: true
+      attivo: true,
+      lavora_sabato: false,
+      lavora_domenica: false
     })
   }
 
@@ -408,7 +418,17 @@ export default function ProcessiMacchinePage() {
                     <Clock className="w-3.5 h-3.5 text-slate-500" />
                     Capacità Giornaliera:
                   </span>
-                  <span className="font-semibold text-slate-200">{macchina.capacita_giornaliera_ore} ore/giorno</span>
+                  <div className="text-right">
+                    <span className="font-semibold text-slate-200">{macchina.capacita_giornaliera_ore} ore/giorno</span>
+                    {(macchina.lavora_sabato || macchina.lavora_domenica) && (
+                      <span className="block text-[10px] text-orange-400 font-medium">
+                        {[macchina.lavora_sabato ? 'Sabato' : null, macchina.lavora_domenica ? 'Domenica' : null]
+                          .filter(Boolean)
+                          .join(' e ')}{' '}
+                        attivo
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between text-xs">
@@ -625,13 +645,43 @@ export default function ProcessiMacchinePage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2">
+                <span className="text-xs font-bold text-slate-300 block">Pianificazione Fine Settimana:</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="lavora_sabato"
+                      checked={formMacchina.lavora_sabato}
+                      onChange={(e) => setFormMacchina({ ...formMacchina, lavora_sabato: e.target.checked })}
+                      className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500 bg-slate-950 border-slate-800 cursor-pointer"
+                    />
+                    <label htmlFor="lavora_sabato" className="text-xs text-slate-300 cursor-pointer">
+                      Lavora Sabato
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="lavora_domenica"
+                      checked={formMacchina.lavora_domenica}
+                      onChange={(e) => setFormMacchina({ ...formMacchina, lavora_domenica: e.target.checked })}
+                      className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500 bg-slate-950 border-slate-800 cursor-pointer"
+                    />
+                    <label htmlFor="lavora_domenica" className="text-xs text-slate-300 cursor-pointer">
+                      Lavora Domenica
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
                 <input
                   type="checkbox"
                   id="macchina_attiva"
                   checked={formMacchina.attivo}
                   onChange={(e) => setFormMacchina({ ...formMacchina, attivo: e.target.checked })}
-                  className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500 bg-slate-950 border-slate-800"
+                  className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500 bg-slate-950 border-slate-800 cursor-pointer"
                 />
                 <label htmlFor="macchina_attiva" className="text-xs font-semibold text-slate-300 cursor-pointer">
                   Macchina Attiva e Disponibile alla Pianificazione
