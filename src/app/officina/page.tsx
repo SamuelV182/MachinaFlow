@@ -538,6 +538,7 @@ export default function TerminaleOfficinaPage() {
   // Conferma completamento fase con quantità effettiva e gestione scarti (Opzione B)
   const handleConfermaCompletaFase = async () => {
     if (!datiCompleta) return
+    ultimaAzioneLocaleTimestampRef.current = Date.now()
     const { odp, fase, pezziBuoni, pezziScarto, opzioneResiduo, generaRipristinoScarto } = datiCompleta
 
     // 1. Se ci sono scarti registrati e l'operatore/capo officina ha richiesto il ripristino immediato (/R)
@@ -612,8 +613,8 @@ export default function TerminaleOfficinaPage() {
 
         const odpModificato = aggiornati.find((o) => o.id === odp.id)
         const faseModificata = odpModificato?.fasi.find((f) => f.id === fase.id)
-        if (faseModificata) syncService.aggiornaFaseOdP(faseModificata)
-        if (odpModificato) syncService.aggiornaStatoOdP(odpModificato.id, 'in_lavorazione', pezziBuoni)
+        if (faseModificata) await syncService.aggiornaFaseOdP(faseModificata)
+        if (odpModificato) await syncService.aggiornaStatoOdP(odpModificato.id, 'in_lavorazione', pezziBuoni)
 
         setModaleCompletaAperta(false)
         setDatiCompleta(null)
@@ -624,7 +625,7 @@ export default function TerminaleOfficinaPage() {
       }
 
       // Altrimenti chiudi normalmente la fase
-      handleCambiaStatoFase(odp.id, fase.id, 'completata')
+      await handleCambiaStatoFase(odp.id, fase.id, 'completata')
 
       if (nuovoOdpRipristino) {
         // Salva prima l'OdP di ripristino sul cloud
@@ -1015,9 +1016,10 @@ export default function TerminaleOfficinaPage() {
   }
 
   // Salvataggio nota operatore
-  const handleSalvaNota = (e: React.FormEvent) => {
+  const handleSalvaNota = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!fasePerNota) return
+    ultimaAzioneLocaleTimestampRef.current = Date.now()
 
     const aggiornati = odpList.map((odp) => {
       if (odp.id === fasePerNota.odpId) {
@@ -1033,6 +1035,12 @@ export default function TerminaleOfficinaPage() {
 
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    const odpMod = aggiornati.find((o) => o.id === fasePerNota.odpId)
+    const faseMod = odpMod?.fasi.find((f) => f.id === fasePerNota.faseId)
+    if (faseMod) {
+      await syncService.aggiornaFaseOdP(faseMod)
+    }
 
     setModaleNoteAperta(false)
     setNotifica('Nota operatore registrata!')
