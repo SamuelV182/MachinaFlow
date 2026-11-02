@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import {
   QrCode,
@@ -146,6 +146,9 @@ export default function TerminaleOfficinaPage() {
     note: ''
   })
 
+  // Timestamp dell'ultima azione locale per evitare sovrascritture da Realtime prematuro
+  const ultimaAzioneLocaleTimestampRef = useRef<number>(0)
+
   const [datiEsterna, setDatiEsterna] = useState<{
     odp: OrdineProduzione & { fasi: FaseOdP[] }
     fase: FaseOdP
@@ -233,6 +236,8 @@ export default function TerminaleOfficinaPage() {
     const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(async () => {
+        // Se abbiamo appena premuto un pulsante localmente negli ultimi 1500ms, non sovrascrivere con letture server premature
+        if (Date.now() - ultimaAzioneLocaleTimestampRef.current < 1500) return
       const aggiornati = await syncService.getOrdiniProduzione({ soloAttivi: true })
       const normalizzati = aggiornati.map((o) => ({
         ...o,
@@ -323,11 +328,12 @@ export default function TerminaleOfficinaPage() {
   }
 
   // Aggiornamento stato fase da terminale touch
-  const handleCambiaStatoFase = (
+  const handleCambiaStatoFase = async (
     odpId: string,
     faseId: string,
     nuovoStato: 'in_corso' | 'completata' | 'non_iniziata'
   ) => {
+    ultimaAzioneLocaleTimestampRef.current = Date.now()
     const aggiornati = odpList.map((odp) => {
       if (odp.id === odpId) {
         const fasiAggiornate = odp.fasi.map((f) => {
@@ -409,13 +415,13 @@ export default function TerminaleOfficinaPage() {
     const odpModificato = aggiornati.find((o) => o.id === odpId)
     const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
     if (faseModificata) {
-      syncService.aggiornaFaseOdP(faseModificata)
+      await syncService.aggiornaFaseOdP(faseModificata)
     }
 
     if (odpModificato) {
-      syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
+      await syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
       if (odpModificato.materia_prima_scaricata) {
-        syncService.segnaMateriaPrimaScaricata(odpModificato.id)
+        await syncService.segnaMateriaPrimaScaricata(odpModificato.id)
       }
     }
 
