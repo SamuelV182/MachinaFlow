@@ -237,7 +237,7 @@ export default function TerminaleOfficinaPage() {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(async () => {
         // Se abbiamo appena premuto un pulsante localmente negli ultimi 1500ms, non sovrascrivere con letture server premature
-        if (Date.now() - ultimaAzioneLocaleTimestampRef.current < 1500) return
+        if (Date.now() - ultimaAzioneLocaleTimestampRef.current < 2500) return
       const aggiornati = await syncService.getOrdiniProduzione({ soloAttivi: true })
       const normalizzati = aggiornati.map((o) => ({
         ...o,
@@ -411,13 +411,12 @@ export default function TerminaleOfficinaPage() {
     setOdpList(aggiornati)
     localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
 
-    // Sincronizza l'avanzamento della fase e lo stato dell'OdP su Supabase
+    // Sincronizza con certezza assoluta su Supabase
     const odpModificato = aggiornati.find((o) => o.id === odpId)
     const faseModificata = odpModificato?.fasi.find((f) => f.id === faseId)
     if (faseModificata) {
       await syncService.aggiornaFaseOdP(faseModificata)
     }
-
     if (odpModificato) {
       await syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
       if (odpModificato.materia_prima_scaricata) {
