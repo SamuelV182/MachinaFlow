@@ -119,8 +119,9 @@ export const syncService = {
         return opzioni?.soloAttivi ? locali.filter((o) => o.stato !== 'completato' && (o.stato as string) !== 'spedito') : locali
       }
 
-      // Se nel browser ci sono ordini non ancora presenti su Supabase, inviali in background verificando sia id che codice_odp
-      if (locali.length > 0) {
+      // 1. Se opzioni.soloAttivi è attivo, NON ripescare ordini non presenti nella risposta cloud:
+      // se non sono nella risposta cloud significa che sono stati COMPLETATI da un altro dispositivo!
+      if (!opzioni?.soloAttivi && locali.length > 0) {
         for (const loc of locali) {
           const esisteSuCloud = odpCloud.some((c) => c.id === loc.id || c.codice_odp === loc.codice_odp)
           if (!esisteSuCloud) {
@@ -130,18 +131,29 @@ export const syncService = {
         }
       }
 
-      // Ordina le fasi per sequenza
+      // 2. Ordina le fasi per sequenza
       const formattati = odpCloud.map((o) => ({
         ...o,
         fasi: (o.fasi || []).sort((a: FaseOdP, b: FaseOdP) => a.sequenza - b.sequenza)
       }))
 
-      // Aggiorna cache locale (se non è un filtro parziale)
-      if (!opzioni?.soloAttivi) {
-        try {
+      // 3. Allinea sempre la cache locale del browser con i dati reali ricevuti:
+      try {
+        if (!opzioni?.soloAttivi) {
           localStorage.setItem('machinaflow_odp', JSON.stringify(formattati))
-        } catch {}
-      }
+        } else if (locali.length > 0) {
+          const mappaCloud = new Map(formattati.map((o) => [o.id, o]))
+          const localiAggiornati = locali.map((loc) => {
+            const fresco = mappaCloud.get(loc.id)
+            if (fresco) return fresco
+            if (loc.stato === 'in_lavorazione' || loc.stato === 'pianificato' || loc.stato === 'rilasciato') {
+              return { ...loc, stato: 'completato' as const }
+            }
+            return loc
+          })
+          localStorage.setItem('machinaflow_odp', JSON.stringify(localiAggiornati))
+        }
+      } catch {}
 
       return formattati
     } catch {
