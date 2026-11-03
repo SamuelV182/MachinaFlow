@@ -386,8 +386,8 @@ export const syncService = {
       // 3. Locale: ordiniLocali (le modifiche recenti dell'utente) hanno la priorità massima
       const mappa = new Map<string, any>()
       SEED_ORDINI_CLIENTI.forEach((o) => mappa.set(o.id, o))
-      ordiniCompletiCloud.forEach((o: any) => mappa.set(o.id, o))
       ordiniLocali.forEach((o: any) => mappa.set(o.id, o))
+      ordiniCompletiCloud.forEach((o: any) => mappa.set(o.id, o))
 
       const finale = Array.from(mappa.values())
       localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(finale))
@@ -804,6 +804,16 @@ export const syncService = {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'articoli' },
+        eseguiAggiornamentoPulito
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'ordini_clienti' },
+        eseguiAggiornamentoPulito
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'righe_ordine_cliente' },
         eseguiAggiornamentoPulito
       )
       .subscribe()

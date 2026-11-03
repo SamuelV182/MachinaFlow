@@ -52,7 +52,7 @@ export default function DashboardPage() {
   const [orizzonte, setOrizzonte] = useState<OrizzonteTemporale>('settimana')
   const [vistaCarico, setVistaCarico] = useState<'sintetica' | 'calendario'>('sintetica')
   const [giorniCalendario, setGiorniCalendario] = useState<
-    { dataIso: string; giornoSettimana: string; giornoMese: string; isOggi: boolean; isWeekend: boolean }[]
+    { dataIso: string; giornoSettimana: string; giornoMese: string; isOggi: boolean; isWeekend: boolean; isPassato: boolean }[]
   >([])
 
   // Navigazione Settimane per Matrice Buchi Macchine
@@ -94,10 +94,10 @@ export default function DashboardPage() {
     return 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000)
   }
 
-  // Inizializzazione al Lunedì corrente
+  // Inizializzazione a OGGI (Finestra Mobile 7 Giorni da Oggi)
   useEffect(() => {
-    const lunediCorrente = getLunedi(new Date())
-    setDataInizioSettimana(lunediCorrente.toISOString().split('T')[0])
+    const oggiIso = new Date().toISOString().split('T')[0]
+    setDataInizioSettimana(oggiIso)
   }, [])
 
   // Rigenera i 7 giorni del calendario ogni volta che cambia dataInizioSettimana
@@ -118,7 +118,8 @@ export default function DashboardPage() {
         giornoSettimana: giorno.toLocaleDateString('it-IT', { weekday: 'short' }).toUpperCase(),
         giornoMese: giorno.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }),
         isOggi: dataIso === oggiIso,
-        isWeekend: giorno.getDay() === 0 || giorno.getDay() === 6
+        isWeekend: giorno.getDay() === 0 || giorno.getDay() === 6,
+        isPassato: dataIso < oggiIso
       }
     })
     setGiorniCalendario(list)
@@ -134,7 +135,7 @@ export default function DashboardPage() {
       anno: annoSettimana,
       valoreInputWeek: `${annoSettimana}-W${padWeek}`,
       etichettaPeriodo: `${inizio.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} - ${fineSettimana.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' })}`,
-      isSettimanaCorrente: dataInizioSettimana === lunediOggiIso
+      isSettimanaCorrente: dataInizioSettimana === oggiIso
     })
   }, [dataInizioSettimana])
 
@@ -148,8 +149,8 @@ export default function DashboardPage() {
   }
 
   const vaiAOggi = () => {
-    const lunedi = getLunedi(new Date())
-    setDataInizioSettimana(lunedi.toISOString().split('T')[0])
+    const oggiIso = new Date().toISOString().split('T')[0]
+    setDataInizioSettimana(oggiIso)
   }
 
   const selezionaSettimanaEAnno = (nuovaSettimana: number, nuovoAnno: number) => {

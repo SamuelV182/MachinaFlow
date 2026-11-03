@@ -1,4 +1,5 @@
 'use client'
+import SelettoreArticoloRicerca from '@/components/SelettoreArticoloRicerca'
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
@@ -228,8 +229,8 @@ export default function OrdiniPage() {
       {
         pos_riga_cliente: '1',
         articolo_id: '',
-        quantita: 2,
-        prezzo_unitario: 500
+        quantita: 0,
+        prezzo_unitario: 0
       }
     ]
   })
@@ -500,8 +501,8 @@ export default function OrdiniPage() {
         {
           pos_riga_cliente: '1',
           articolo_id: '',
-          quantita: 2,
-          prezzo_unitario: 500
+          quantita: 0,
+          prezzo_unitario: 0
         }
       ]
     })
@@ -658,7 +659,7 @@ export default function OrdiniPage() {
 
   const toggleSelezioneOrdine = (ordine: OrdineCompleto) => {
     const righeNonLanciate = ordine.righe
-      .filter((r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id))
+      .filter((r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === r.articolo_id)))
       .map((r) => r.id)
 
     const tutteGiaSelezionate = righeNonLanciate.every((id) => righeSelezionate.includes(id))
@@ -698,7 +699,7 @@ export default function OrdiniPage() {
     ordini.forEach((ord) => {
       ord.righe.forEach((riga, rigaIdx) => {
         if (!righeSelezionate.includes(riga.id)) return
-        if (tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id)) return
+        if (tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ord.id && o.articolo_id === riga.articolo_id))) return
 
         const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
         const nuovoOdpId = `odp-${Date.now()}-${rigaIdx}-${Math.random().toString(36).substring(2, 5)}`
@@ -796,7 +797,7 @@ export default function OrdiniPage() {
 
     ordine.righe.forEach((riga, rigaIdx) => {
       // Controlla se esiste già un OdP per questa riga
-      const esisteGia = tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id)
+      const esisteGia = tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id))
       if (esisteGia) return
 
       const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
@@ -894,6 +895,12 @@ export default function OrdiniPage() {
 
   // Generazione Automatica OdP dalla riga d'ordine
   const handleGeneraOdP = (ordine: OrdineCompleto, riga: RigaOrdineCliente & { articolo?: Articolo }) => {
+    // Controllo preventivo: se esiste già un OdP per questa riga o articolo/ordine, non ricrearlo
+    const esisteGiaOdP = odpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id))
+    if (esisteGiaOdP) {
+      alert(`Un OdP per l'articolo ${riga.articolo?.codice_articolo || ''} dell'ordine ${ordine.numero_ordine} è già presente in officina.`)
+      return
+    }
     // 1. Trova le fasi del ciclo standard dell'articolo
     const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
 
@@ -1285,7 +1292,7 @@ export default function OrdiniPage() {
               0
             )
             const righeSenzaOdP = ordine.righe.filter(
-              (r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id)
+              (r) => !odpList.some((o) => o.riga_ordine_cliente_id === r.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === r.articolo_id))
             )
 
             const haMolteRighe = ordine.righe.length > 3
@@ -1733,8 +1740,8 @@ export default function OrdiniPage() {
                         type="checkbox"
                         onChange={toggleSelezionaTuttiVisibili}
                         checked={
-                          righePaginateTabella.filter(({ riga }) => !odpList.some((o) => o.riga_ordine_cliente_id === riga.id)).length > 0 &&
-                          righePaginateTabella.filter(({ riga }) => !odpList.some((o) => o.riga_ordine_cliente_id === riga.id)).every(({ riga }) => righeSelezionate.includes(riga.id))
+                          righePaginateTabella.filter(({ riga, ordine }) => !odpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id))).length > 0 &&
+                          righePaginateTabella.filter(({ riga, ordine }) => !odpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id))).every(({ riga }) => righeSelezionate.includes(riga.id))
                         }
                         className="w-4 h-4 rounded text-orange-600 bg-slate-900 border-slate-700 focus:ring-orange-500 cursor-pointer"
                         title="Seleziona/Deseleziona tutti gli articoli visibili in questa pagina pronti al lancio"
@@ -2453,7 +2460,7 @@ export default function OrdiniPage() {
                         ...formOrdine,
                         righe: [
                           ...formOrdine.righe,
-                          { pos_riga_cliente: String(formOrdine.righe.length + 1), articolo_id: '', quantita: 2, prezzo_unitario: 350 }
+                          { pos_riga_cliente: String(formOrdine.righe.length + 1), articolo_id: '', quantita: 0, prezzo_unitario: 0 }
                         ]
                       })
                     }}
@@ -2506,31 +2513,21 @@ export default function OrdiniPage() {
                           />
                         </div>
                         <div className="sm:col-span-5">
-                          <label className="block text-[10px] text-slate-400 mb-0.5">Articolo *</label>
-                          <select
-                            required
-                            value={riga.articolo_id}
-                            onChange={(e) => {
-                              const selArt = articoli.find((a) => a.id === e.target.value)
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Articolo * (Cerca codice o descrizione)</label>
+                          <SelettoreArticoloRicerca
+                            articoli={articoli}
+                            articoloIdSelezionato={riga.articolo_id}
+                            onSeleziona={(selArt) => {
                               const nuoveRighe = [...formOrdine.righe]
                               nuoveRighe[index] = {
                                 ...nuoveRighe[index],
-                                articolo_id: e.target.value,
+                                articolo_id: selArt ? selArt.id : '',
                                 prezzo_unitario: selArt?.prezzo_riferimento || nuoveRighe[index].prezzo_unitario
                               }
                               setFormOrdine({ ...formOrdine, righe: nuoveRighe })
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500"
-                          >
-                            <option value="">-- Seleziona particolare finito --</option>
-                            {articoli
-                              .filter((a) => a.tipo !== 'materia_prima')
-                              .map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.codice_articolo} - {a.descrizione}
-                                </option>
-                              ))}
-                          </select>
+                            placeholder="Digita codice o nome articolo..."
+                          />
                         </div>
 
                         <div className="sm:col-span-3">
@@ -2539,13 +2536,14 @@ export default function OrdiniPage() {
                             type="number"
                             min="1"
                             required
-                            value={riga.quantita}
+                            placeholder="es. 10"
+                            value={riga.quantita > 0 ? riga.quantita : ''}
                             onChange={(e) => {
                               const nuoveRighe = [...formOrdine.righe]
-                              nuoveRighe[index].quantita = Number(e.target.value)
+                              nuoveRighe[index].quantita = e.target.value === '' ? 0 : Number(e.target.value)
                               setFormOrdine({ ...formOrdine, righe: nuoveRighe })
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500 font-bold text-orange-400"
                           />
                         </div>
 
