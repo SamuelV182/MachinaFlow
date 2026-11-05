@@ -74,6 +74,8 @@ export default function OrdiniPage() {
 
   // Stato Anagrafica Clienti
   const [ricercaClienti, setRicercaClienti] = useState('')
+  const [paginaClienti, setPaginaClienti] = useState(1)
+  const [clientiPerPagina, setClientiPerPagina] = useState(9)
   const [modaleClienteAperta, setModaleClienteAperta] = useState(false)
   const [clienteInModifica, setClienteInModifica] = useState<Cliente | null>(null)
   const [formCliente, setFormCliente] = useState<Omit<Cliente, 'id' | 'creato_il'>>({
@@ -1063,6 +1065,18 @@ export default function OrdiniPage() {
         (c.indirizzo && c.indirizzo.toLowerCase().includes(q))
     )
   }, [clienti, ricercaClienti])
+
+  // Reset pagina anagrafica clienti
+  useEffect(() => {
+    setPaginaClienti(1)
+  }, [ricercaClienti, clientiPerPagina])
+
+  // Paginazione Intelligente Anagrafica Clienti
+  const totaleClienti = clientiFiltrati.length
+  const totalePagineClienti = Math.max(1, Math.ceil(totaleClienti / clientiPerPagina))
+  const inizioClienti = (paginaClienti - 1) * clientiPerPagina
+  const fineClienti = Math.min(inizioClienti + clientiPerPagina, totaleClienti)
+  const clientiPaginati = clientiFiltrati.slice(inizioClienti, fineClienti)
 
   // Reset pagina al cambio filtro o ricerca
   useEffect(() => {
@@ -2095,7 +2109,7 @@ export default function OrdiniPage() {
 
           {/* Griglia Schede Clienti */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {clientiFiltrati.map((c: Cliente) => {
+            {clientiPaginati.map((c: Cliente) => {
               const commesseCliente = ordini.filter((o) => o.cliente_id === c.id)
               const attive = commesseCliente.filter((o) => o.stato === 'in_produzione' || o.stato === 'confermato').length
 
@@ -2184,6 +2198,80 @@ export default function OrdiniPage() {
               </div>
             )}
           </div>
+
+          {/* BARRA CONTROLLI PAGINAZIONE ANAGRAFICA CLIENTI */}
+          {totaleClienti > 0 && (
+            <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span>
+                  Visualizzati <strong className="text-white">{inizioClienti + 1} - {fineClienti}</strong> di{' '}
+                  <strong className="text-white">{totaleClienti}</strong> clienti
+                </span>
+                <span className="text-slate-600">•</span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <span>Mostra:</span>
+                  <select
+                    value={clientiPerPagina}
+                    onChange={(e) => setClientiPerPagina(Number(e.target.value))}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-orange-500 cursor-pointer"
+                  >
+                    <option value={6}>6</option>
+                    <option value={9}>9</option>
+                    <option value={15}>15</option>
+                    <option value={30}>30</option>
+                  </select>
+                </label>
+              </div>
+
+              {totalePagineClienti > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={paginaClienti === 1}
+                    onClick={() => setPaginaClienti((prev) => Math.max(1, prev - 1))}
+                    className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Precedente"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalePagineClienti }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalePagineClienti || Math.abs(p - paginaClienti) <= 1)
+                      .map((p, idx, array) => {
+                        const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                        return (
+                          <div key={p} className="flex items-center gap-1">
+                            {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setPaginaClienti(p)}
+                              className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                paginaClienti === p
+                                  ? 'bg-orange-600 text-white shadow-xs'
+                                  : 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </div>
+                        )
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaClienti === totalePagineClienti}
+                    onClick={() => setPaginaClienti((prev) => Math.min(totalePagineClienti, prev + 1))}
+                    className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Successiva"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

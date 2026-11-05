@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   ShoppingCart,
   Boxes,
+  ChevronLeft,
+  ChevronRight,
   ArrowRight,
   TrendingDown,
   Clock,
@@ -19,7 +21,8 @@ import {
   RotateCcw,
   Search,
   Check,
-  Lock
+  Lock,
+  X
 } from 'lucide-react'
 import {
   Articolo,
@@ -59,6 +62,10 @@ export default function MRPPage() {
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [odpList, setOdpList] = useState<(OrdineProduzione & { fasi: FaseOdP[] })[]>([])
   const [ordiniFornitori, setOrdiniFornitori] = useState<OrdineFornitore[]>([])
+  const [filtroRicerca, setFiltroRicerca] = useState('')
+  const [filtroStato, setFiltroStato] = useState<'tutti' | 'critico' | 'in_arrivo' | 'sufficiente'>('tutti')
+  const [paginaCorrente, setPaginaCorrente] = useState(1)
+  const [elementiPerPagina, setElementiPerPagina] = useState<number>(15)
 
   // Stato Modale Ordine a Fornitore (Anti-Doppio Ordine & Trattativa)
   const [modaleOrdineAperta, setModaleOrdineAperta] = useState(false)
@@ -101,6 +108,11 @@ export default function MRPPage() {
   const [notificaCarico, setNotificaCarico] = useState<string | null>(null)
   const [dataStampa, setDataStampa] = useState('')
   const [codiceDocStampa, setCodiceDocStampa] = useState('MRP-2026')
+
+  // Reset pagina corrente quando cambiano ricerca, filtri o elementi per pagina
+  useEffect(() => {
+    setPaginaCorrente(1)
+  }, [filtroRicerca, filtroStato, elementiPerPagina])
 
   // Blocca lo scroll del body quando una modale è aperta
   useEffect(() => {
@@ -651,6 +663,35 @@ export default function MRPPage() {
     m.descrizione.toLowerCase().includes(ricercaMaterialeCarico.toLowerCase())
   )
 
+  const righeMrpFiltrate = righeMrp.filter((riga: RigaMRP) => {
+    // Filtro per stato
+    if (filtroStato !== 'tutti') {
+      if (filtroStato === 'critico' && riga.stato !== 'critico' && riga.stato !== 'attenzione') return false
+      if (filtroStato === 'in_arrivo' && riga.stato !== 'in_arrivo') return false
+      if (filtroStato === 'sufficiente' && riga.stato !== 'sufficiente') return false
+    }
+
+    // Filtro per testo (codice, descrizione, fornitore o ordini coinvolti)
+    if (filtroRicerca.trim()) {
+      const q = filtroRicerca.toLowerCase()
+      const mat = riga.componente
+      const matchCodice = mat.codice_articolo.toLowerCase().includes(q)
+      const matchDesc = mat.descrizione.toLowerCase().includes(q)
+      const matchOdp = (riga.ordiniCoinvolti || []).some((code: string) => code.toLowerCase().includes(q))
+      const matchFornitore = (riga.ordiniFornitoreAperti || []).some((o: OrdineFornitore) => (o.fornitore_nome || '').toLowerCase().includes(q))
+      if (!matchCodice && !matchDesc && !matchOdp && !matchFornitore) return false
+    }
+
+    return true
+  })
+
+  // Calcolo Paginazione Intelligente
+  const totaleElementi = righeMrpFiltrate.length
+  const totalePagine = Math.max(1, Math.ceil(totaleElementi / elementiPerPagina))
+  const indiceInizio = (paginaCorrente - 1) * elementiPerPagina
+  const indiceFine = Math.min(indiceInizio + elementiPerPagina, totaleElementi)
+  const righeMrpPaginate = righeMrpFiltrate.slice(indiceInizio, indiceFine)
+
   const countCritici = righeMrp.filter((r) => r.stato === 'critico').length
   const countAttenzione = righeMrp.filter((r) => r.stato === 'attenzione').length
 
@@ -895,14 +936,98 @@ export default function MRPPage() {
 
         {/* Tabella Fabbisogni Materiali Gestionale */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-          <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Boxes className="w-5 h-5 text-orange-500" />
-              Matrice di Calcolo Fabbisogni & Suggerimento Acquisti ai Fornitori
-            </h2>
-            <span className="text-xs text-slate-400 font-mono">
-              {odpList.filter((o) => o.stato !== 'completato').length} OdP Aperti Analizzati
-            </span>
+          <div className="p-5 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-orange-500" />
+                Matrice di Calcolo Fabbisogni & Suggerimento Acquisti ai Fornitori
+              </h2>
+              <span className="text-xs text-slate-400 font-mono mt-0.5 block">
+                {odpList.filter((o) => o.stato !== 'completato').length} OdP Aperti Analizzati
+              </span>
+            </div>
+
+            {/* Barra di Ricerca & Filtri Rapidi */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Campo di ricerca rapida */}
+              <div className="relative min-w-[240px] sm:min-w-[280px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cerca materiale, codice, OdP..."
+                  value={filtroRicerca}
+                  onChange={(e) => setFiltroRicerca(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-700/80 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors shadow-inner"
+                />
+                {filtroRicerca && (
+                  <button
+                    type="button"
+                    onClick={() => setFiltroRicerca('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+                    title="Cancella ricerca"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filtri pillola rapida per stato */}
+              <div className="inline-flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setFiltroStato('tutti')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    filtroStato === 'tutti'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Tutti ({righeMrp.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroStato('critico')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                    filtroStato === 'critico'
+                      ? 'bg-rose-950 text-rose-300 border border-rose-800/80 shadow-xs'
+                      : 'text-rose-400 hover:text-rose-300'
+                  }`}
+                >
+                  <span>Critici</span>
+                  <span className="text-[10px] font-mono opacity-80">
+                    ({righeMrp.filter((r) => r.stato === 'critico' || r.stato === 'attenzione').length})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroStato('in_arrivo')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                    filtroStato === 'in_arrivo'
+                      ? 'bg-amber-950 text-amber-300 border border-amber-800/80 shadow-xs'
+                      : 'text-amber-400 hover:text-amber-300'
+                  }`}
+                >
+                  <span>In Arrivo</span>
+                  <span className="text-[10px] font-mono opacity-80">
+                    ({righeMrp.filter((r) => r.stato === 'in_arrivo').length})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltroStato('sufficiente')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                    filtroStato === 'sufficiente'
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/80 shadow-xs'
+                      : 'text-emerald-400 hover:text-emerald-300'
+                  }`}
+                >
+                  <span>Coperti</span>
+                  <span className="text-[10px] font-mono opacity-80">
+                    ({righeMrp.filter((r) => r.stato === 'sufficiente').length})
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className="overflow-x-auto no-scrollbar">
@@ -919,7 +1044,7 @@ export default function MRPPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {righeMrp.map((riga) => {
+                {righeMrpPaginate.map((riga) => {
                   const mat = riga.componente
                   const isCritico = riga.stato === 'critico'
                   const isAttenzione = riga.stato === 'attenzione'
@@ -1160,7 +1285,107 @@ export default function MRPPage() {
                 })}
               </tbody>
             </table>
+
+            {righeMrpFiltrate.length === 0 && (
+              <div className="py-12 px-4 text-center space-y-3">
+                <Boxes className="w-10 h-10 text-slate-600 mx-auto" />
+                <p className="text-sm font-semibold text-slate-300">
+                  Nessun materiale corrisponde ai criteri di ricerca
+                </p>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Prova a verificare il codice cercato o clicca su &quot;Tutti&quot; per azzerare i filtri.
+                </p>
+                {(filtroRicerca || filtroStato !== 'tutti') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiltroRicerca('')
+                      setFiltroStato('tutti')
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3 h-3 text-orange-400" />
+                    <span>Azzera Ricerca e Filtri</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* BARRA CONTROLLI PAGINAZIONE INTELLIGENTE */}
+          {totaleElementi > 0 && (
+            <div className="p-4 bg-slate-950/70 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span>
+                  Visualizzati <strong className="text-white">{indiceInizio + 1} - {indiceFine}</strong> di{' '}
+                  <strong className="text-white">{totaleElementi}</strong> materiali
+                </span>
+                <span className="text-slate-600">•</span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <span>Mostra:</span>
+                  <select
+                    value={elementiPerPagina}
+                    onChange={(e) => setElementiPerPagina(Number(e.target.value))}
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-orange-500 cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
+              </div>
+
+              {totalePagine > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={paginaCorrente === 1}
+                    onClick={() => setPaginaCorrente((prev) => Math.max(1, prev - 1))}
+                    className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Precedente"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalePagine }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalePagine || Math.abs(p - paginaCorrente) <= 1)
+                      .map((p, idx, array) => {
+                        const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                        return (
+                          <div key={p} className="flex items-center gap-1">
+                            {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setPaginaCorrente(p)}
+                              className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                paginaCorrente === p
+                                  ? 'bg-orange-600 text-white shadow-xs'
+                                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </div>
+                        )
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaCorrente === totalePagine}
+                    onClick={() => setPaginaCorrente((prev) => Math.min(totalePagine, prev + 1))}
+                    className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Successiva"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

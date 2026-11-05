@@ -154,6 +154,7 @@ export default function TerminaleOfficinaPage() {
     fase: FaseOdP
     tipoAzione: 'spedizione' | 'rientro'
     ddtNumero: string
+    quantitaRientro: number
     note: string
     numeroColli: number
     pesoTotaleKg: number
@@ -773,6 +774,95 @@ export default function TerminaleOfficinaPage() {
     const { odp, fase, tipoAzione, ddtNumero, note } = datiEsterna
 
     const oggiIso = new Date().toISOString()
+    const quantitaRientrataEffettiva = Math.max(1, Math.min(odp.quantita_da_produrre, datiEsterna.quantitaRientro || odp.quantita_da_produrre))
+    const isRientroParziale = tipoAzione === 'rientro' && quantitaRientrataEffettiva < odp.quantita_da_produrre
+
+    if (isRientroParziale) {
+      // RIENTRO PARZIALE DA TERZISTA:
+      // I pezzi rientrati (quantitaRientrataEffettiva) avanzano alle fasi successive.
+      // I pezzi rimanenti (quantitaResidua) rimangono in attesa dal terzista (/B).
+      const quantitaResidua = odp.quantita_da_produrre - quantitaRientrataEffettiva
+      const codiceBase = odp.codice_odp.replace(/\/A$|\/B\d*$|\/R\d*$/, '')
+      const splitEsistenti = odpList.filter((o) => o.codice_odp.startsWith(`${codiceBase}/`)).length
+      const codiceRientrati = odp.codice_odp.includes('/A') ? odp.codice_odp : `${codiceBase}/A`
+      const codiceResiduo = splitEsistenti > 1 ? `${codiceBase}/B${splitEsistenti}` : `${codiceBase}/B`
+
+      // 1. Lotto dei pezzi Rientrati (avanza alla fase successiva)
+      const odpRientrati: OrdineProduzione & { fasi: FaseOdP[] } = {
+        ...odp,
+        codice_odp: codiceRientrati,
+        quantita_da_produrre: quantitaRientrataEffettiva,
+        quantita_prodotta: quantitaRientrataEffettiva,
+        fasi: odp.fasi.map((f) => {
+          if (f.id === fase.id) {
+            return {
+              ...f,
+              stato: 'completata' as const,
+              stato_esterna: 'rientrato' as const,
+              data_rientro_terzista: oggiIso,
+              ddt_rientro_numero: ddtNumero.trim() || undefined,
+              data_fine_reale: oggiIso,
+              note_officina: note.trim()
+                ? `${f.note_officina ? f.note_officina + ' | ' : ''}Rientro parziale ${quantitaRientrataEffettiva} pz con DDT ${ddtNumero}: ${note.trim()}`
+                : `Rientro parziale ${quantitaRientrataEffettiva} pz con DDT ${ddtNumero}`
+            }
+          }
+          return f
+        })
+      }
+      const tutteChiuseRientrati = odpRientrati.fasi.every((f) => f.stato === 'completata')
+      odpRientrati.stato = tutteChiuseRientrati ? 'completato' : 'in_lavorazione'
+
+      // 2. Lotto a saldo dei pezzi ancora FUORI presso il terzista
+      const nuovoIdResiduo = `odp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`
+      const odpResiduoTerzista: OrdineProduzione & { fasi: FaseOdP[] } = {
+        ...odp,
+        id: nuovoIdResiduo,
+        codice_odp: codiceResiduo,
+        quantita_da_produrre: quantitaResidua,
+        quantita_prodotta: 0,
+        stato: 'in_lavorazione',
+        qr_code_token: `QR-${codiceResiduo}`,
+        note: `Lotto residuo a saldo: ${quantitaResidua} pz ancora presso ${fase.fornitore_nome || 'terzista'} in attesa del saldo DDT.`,
+        fasi: odp.fasi.map((f) => {
+          const nuovaFaseId = `fase-${Date.now()}-${f.sequenza}-${Math.random().toString(36).substring(2, 4)}`
+          if (f.id === fase.id) {
+            return {
+              ...f,
+              id: nuovaFaseId,
+              odp_id: nuovoIdResiduo,
+              stato: 'in_corso' as const,
+              stato_esterna: 'inviato_al_terzista' as const,
+              ddt_rientro_numero: undefined,
+              data_rientro_terzista: undefined,
+              note_officina: `In attesa saldo ${quantitaResidua} pz da ${f.fornitore_nome || 'terzista'}`
+            }
+          }
+          return {
+            ...f,
+            id: nuovaFaseId,
+            odp_id: nuovoIdResiduo
+          }
+        })
+      }
+
+      const listaAggiornata = odpList.map((o) => (o.id === odp.id ? odpRientrati : o))
+      listaAggiornata.unshift(odpResiduoTerzista)
+
+      setOdpList(listaAggiornata)
+      localStorage.setItem('machinaflow_odp', JSON.stringify(listaAggiornata))
+
+      await syncService.salvaOrdineProduzione(odpRientrati)
+      await syncService.salvaOrdineProduzione(odpResiduoTerzista)
+
+      setModaleEsternaAperta(false)
+      setDatiEsterna(null)
+      setNotifica(`✓ Rientrati ${quantitaRientrataEffettiva} pz (${codiceRientrati}) pronti per le fasi successive! Creato lotto a saldo ${codiceResiduo} (${quantitaResidua} pz) ancora dal terzista.`)
+      setTimeout(() => setNotifica(null), 5000)
+      return
+    }
+
+    // RIENTRO TOTALE (100%) o SPEDIZIONE REGOLARE
     const aggiornati = odpList.map((o) => {
       if (o.id === odp.id) {
         const fasiAggiornate = o.fasi.map((f) => {
@@ -789,7 +879,7 @@ export default function TerminaleOfficinaPage() {
                   : f.note_officina
               }
             } else {
-              // Rientro da terzista -> fase completata
+              // Rientro totale da terzista -> fase completata
               return {
                 ...f,
                 stato: 'completata' as const,
@@ -798,7 +888,7 @@ export default function TerminaleOfficinaPage() {
                 ddt_rientro_numero: ddtNumero.trim() || undefined,
                 data_fine_reale: oggiIso,
                 note_officina: note.trim()
-                  ? `${f.note_officina ? f.note_officina + ' | ' : ''}Rientrato con DDT ${ddtNumero}: ${note.trim()}`
+                  ? `${f.note_officina ? f.note_officina + ' | ' : ''}Rientrato 100% con DDT ${ddtNumero}: ${note.trim()}`
                   : f.note_officina
               }
             }
@@ -2238,6 +2328,7 @@ export default function TerminaleOfficinaPage() {
                                   fase,
                                   tipoAzione: 'spedizione',
                                   ddtNumero: `DDT-EXT-${Date.now().toString().slice(-4)}`,
+                                  quantitaRientro: odp.quantita_da_produrre,
                                   note: '',
                                   numeroColli: 1,
                                   pesoTotaleKg: pesoStimato,
@@ -2282,6 +2373,7 @@ export default function TerminaleOfficinaPage() {
                                 fase,
                                 tipoAzione: 'rientro',
                                 ddtNumero: '',
+                                quantitaRientro: odp.quantita_da_produrre,
                                 note: '',
                                 numeroColli: 1,
                                 pesoTotaleKg: 0,
@@ -2753,6 +2845,7 @@ export default function TerminaleOfficinaPage() {
                                         fase,
                                         tipoAzione: 'spedizione',
                                         ddtNumero: `DDT-EXT-${Date.now().toString().slice(-4)}`,
+                                        quantitaRientro: odp.quantita_da_produrre,
                                         note: '',
                                         numeroColli: 1,
                                         pesoTotaleKg: pesoStimato,
@@ -2788,6 +2881,7 @@ export default function TerminaleOfficinaPage() {
                                       fase,
                                       tipoAzione: 'rientro',
                                       ddtNumero: '',
+                                      quantitaRientro: odp.quantita_da_produrre,
                                       note: '',
                                       numeroColli: 1,
                                       pesoTotaleKg: 0,
@@ -3071,8 +3165,8 @@ export default function TerminaleOfficinaPage() {
                   <span className="text-slate-400">Terzista incaricato:</span>
                   <strong className="text-pink-400 font-bold">{datiEsterna.fase.fornitore_nome || 'Esterno non specificato'}</strong>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Quantità Pezzi da inviare/ricevere:</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Lotto complessivo OdP:</span>
                   <strong className="text-orange-400 font-bold">{datiEsterna.odp.quantita_da_produrre} pz</strong>
                 </div>
                 <div className="flex justify-between">
@@ -3093,6 +3187,53 @@ export default function TerminaleOfficinaPage() {
                   </div>
                 ) : null}
               </div>
+
+              {/* Campo Quantità Rientrata (permette rientro parziale con sdoppio automatico) */}
+              {datiEsterna.tipoAzione === 'rientro' && (
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="block text-xs font-semibold text-slate-200">
+                      Quantità Pezzi Rientrati con questo DDT *
+                    </label>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      Totale lotto: <strong>{datiEsterna.odp.quantita_da_produrre} pz</strong>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min="1"
+                      max={datiEsterna.odp.quantita_da_produrre}
+                      value={datiEsterna.quantitaRientro}
+                      onChange={(e) => {
+                        const val = Math.max(1, Math.min(datiEsterna.odp.quantita_da_produrre, Number(e.target.value)))
+                        setDatiEsterna({ ...datiEsterna, quantitaRientro: val })
+                      }}
+                      className="w-32 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm font-bold text-emerald-400 font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                    <span className="text-xs text-slate-400">
+                      su {datiEsterna.odp.quantita_da_produrre} pezzi totali
+                    </span>
+                  </div>
+
+                  {datiEsterna.quantitaRientro < datiEsterna.odp.quantita_da_produrre ? (
+                    <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[11px] text-amber-300 space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>⚠️</span>
+                        <span>Rientro Parziale Rilevato</span>
+                      </div>
+                      <p className="text-slate-300">
+                        I <strong>{datiEsterna.quantitaRientro} pz</strong> rientrati avanzeranno subito alle fasi successive di officina.
+                        I rimanenti <strong>{datiEsterna.odp.quantita_da_produrre - datiEsterna.quantitaRientro} pz</strong> rimarranno come lotto a saldo presso il terzista in attesa del saldo.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-emerald-400 font-medium">
+                      ✓ Rientro completo al 100% dell&apos;intero lotto
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">

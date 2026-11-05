@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
   Truck,
+  ChevronLeft,
+  ChevronRight,
   Printer,
   Download,
   Search,
@@ -142,6 +144,17 @@ export default function SpedizioniDdtPage() {
   // Stato DDT Vendite Clienti
   const [listaDdtClienti, setListaDdtClienti] = useState<DocumentoTrasportoCliente[]>([])
   const [ricercaDdtClienti, setRicercaDdtClienti] = useState('')
+  // Paginazione Tab 1: DDT Vendite / Clienti
+  const [paginaDdtClienti, setPaginaDdtClienti] = useState(1)
+  const [perPaginaDdtClienti, setPerPaginaDdtClienti] = useState(10)
+
+  // Paginazione Tab 2: DDT Conto Terzi Esterni
+  const [paginaDdtEsterni, setPaginaDdtEsterni] = useState(1)
+  const [perPaginaDdtEsterni, setPerPaginaDdtEsterni] = useState(10)
+
+  // Paginazione Tab 3: Anagrafica Fornitori Terzisti
+  const [paginaTerzisti, setPaginaTerzisti] = useState(1)
+  const [perPaginaTerzisti, setPerPaginaTerzisti] = useState(9)
   const [ddtClientePerStampa, setDdtClientePerStampa] = useState<DocumentoTrasportoCliente | null>(null)
 
   // Stato Modale Emissione DDT Cliente
@@ -425,6 +438,13 @@ export default function SpedizioniDdtPage() {
     )
   }, [terzisti, ricercaTerzisti])
 
+  // Paginazione Tab 3: Terzisti
+  const totaleTerzisti = terzistiFiltrati.length
+  const totalePagineTerzisti = Math.max(1, Math.ceil(totaleTerzisti / perPaginaTerzisti))
+  const inizioTerzisti = (paginaTerzisti - 1) * perPaginaTerzisti
+  const fineTerzisti = Math.min(inizioTerzisti + perPaginaTerzisti, totaleTerzisti)
+  const terzistiPaginati = terzistiFiltrati.slice(inizioTerzisti, fineTerzisti)
+
 
   // Determina se un DDT esterno e effettivamente rientrato o fuori sede incrociando con gli OdP
   const isDdtEsternoRientrato = (doc: DocumentoTrasportoEsterno): boolean => {
@@ -465,6 +485,13 @@ export default function SpedizioniDdtPage() {
       return matchStato && matchTesto
     })
   }, [listaDdt, ricerca, filtroStato])
+
+  // Paginazione Tab 2: DDT Conto Terzi
+  const totaleDdtEsterni = ddtFiltrati.length
+  const totalePagineDdtEsterni = Math.max(1, Math.ceil(totaleDdtEsterni / perPaginaDdtEsterni))
+  const inizioDdtEsterni = (paginaDdtEsterni - 1) * perPaginaDdtEsterni
+  const fineDdtEsterni = Math.min(inizioDdtEsterni + perPaginaDdtEsterni, totaleDdtEsterni)
+  const ddtEsterniPaginati = ddtFiltrati.slice(inizioDdtEsterni, fineDdtEsterni)
 
   // Calcolo pezzi pronti a magazzino per cliente (per emissione DDT consegna)
   const handleSelezionaClientePerDDT = (clienteId: string, currentOdpList?: (OrdineProduzione & { fasi?: FaseOdP[] })[], currentClienti?: Cliente[], currentOrdini?: typeof ordiniClienti, currentDdtClienti?: DocumentoTrasportoCliente[]) => {
@@ -807,6 +834,13 @@ export default function SpedizioniDdtPage() {
     )
   }, [listaDdtClienti, ricercaDdtClienti])
 
+  // Paginazione Tab 1: DDT Clienti
+  const totaleDdtClienti = ddtClientiFiltrati.length
+  const totalePagineDdtClienti = Math.max(1, Math.ceil(totaleDdtClienti / perPaginaDdtClienti))
+  const inizioDdtClienti = (paginaDdtClienti - 1) * perPaginaDdtClienti
+  const fineDdtClienti = Math.min(inizioDdtClienti + perPaginaDdtClienti, totaleDdtClienti)
+  const ddtClientiPaginati = ddtClientiFiltrati.slice(inizioDdtClienti, fineDdtClienti)
+
   // Esportazione CSV DDT Clienti
   const handleEsportaTuttiCsvClienti = () => {
     const separatore = ';'
@@ -986,14 +1020,6 @@ export default function SpedizioniDdtPage() {
               <span>Esporta Terzisti (CSV)</span>
             </button>
           )}
-
-          <Link
-            href="/officina"
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
-          >
-            <Truck className="w-4 h-4 text-pink-400" />
-            <span>Terminale EXT</span>
-          </Link>
         </div>
       </div>
 
@@ -1117,7 +1143,7 @@ export default function SpedizioniDdtPage() {
 
           {/* Tabella DDT Consegne Clienti */}
           <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto no-scrollbar">
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                   <tr>
@@ -1137,7 +1163,7 @@ export default function SpedizioniDdtPage() {
                       </td>
                     </tr>
                   ) : (
-                    ddtClientiFiltrati.map((doc) => (
+                    ddtClientiPaginati.map((doc) => (
                       <tr key={doc.id} className="hover:bg-slate-800/50 transition-colors">
                         <td className="py-3 px-3.5 whitespace-nowrap">
                           <span className="font-mono font-black text-emerald-400 block text-sm">
@@ -1244,6 +1270,80 @@ export default function SpedizioniDdtPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* BARRA CONTROLLI PAGINAZIONE TAB 1: DDT VENDITE */}
+            {totaleDdtClienti > 0 && (
+              <div className="p-4 bg-slate-950/70 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Visualizzati <strong className="text-white">{inizioDdtClienti + 1} - {fineDdtClienti}</strong> di{' '}
+                    <strong className="text-white">{totaleDdtClienti}</strong> DDT
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <span>Mostra:</span>
+                    <select
+                      value={perPaginaDdtClienti}
+                      onChange={(e) => setPerPaginaDdtClienti(Number(e.target.value))}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                  </label>
+                </div>
+
+                {totalePagineDdtClienti > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={paginaDdtClienti === 1}
+                      onClick={() => setPaginaDdtClienti((prev) => Math.max(1, prev - 1))}
+                      className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title="Pagina Precedente"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalePagineDdtClienti }, (_, i) => i + 1)
+                        .filter((p) => p === 1 || p === totalePagineDdtClienti || Math.abs(p - paginaDdtClienti) <= 1)
+                        .map((p, idx, array) => {
+                          const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                          return (
+                            <div key={p} className="flex items-center gap-1">
+                              {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                              <button
+                                type="button"
+                                onClick={() => setPaginaDdtClienti(p)}
+                                className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                  paginaDdtClienti === p
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            </div>
+                          )
+                        })}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={paginaDdtClienti === totalePagineDdtClienti}
+                      onClick={() => setPaginaDdtClienti((prev) => Math.min(totalePagineDdtClienti, prev + 1))}
+                      className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title="Pagina Successiva"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1340,23 +1440,23 @@ export default function SpedizioniDdtPage() {
 
           {/* Tabella DDT Emessi per l'Ufficio */}
           <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="overflow-x-auto">
+            <div>
               <table className="w-full text-left text-xs text-slate-300">
                 <thead className="bg-slate-950/90 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                   <tr>
                     <th className="py-3 px-3.5 whitespace-nowrap">DDT / Emissione</th>
                     <th className="py-3 px-3.5 whitespace-nowrap">Fornitore Terzista</th>
-                    <th className="py-3 px-3.5 whitespace-nowrap">Dettaglio Merci & OdP</th>
-                    <th className="py-3 px-2.5 text-center whitespace-nowrap">Colli & Peso</th>
-                    <th className="py-3 px-2.5 text-center whitespace-nowrap">Vettore</th>
-                    <th className="py-3 px-2.5 text-center whitespace-nowrap">Stato Merce</th>
-                    <th className="py-3 px-3.5 text-right whitespace-nowrap sticky right-0 bg-slate-950/95">
+                    <th className="py-3 px-3.5">Dettaglio Merci & OdP</th>
+                    <th className="py-3 px-2 text-center whitespace-nowrap">Colli & Peso</th>
+                    <th className="py-3 px-2 text-center whitespace-nowrap">Vettore</th>
+                    <th className="py-3 px-2 text-center whitespace-nowrap">Stato Merce</th>
+                    <th className="py-3 px-3.5 text-right whitespace-nowrap">
                       Azioni
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {ddtFiltrati.map((doc) => {
+                  {ddtEsterniPaginati.map((doc) => {
                     const isFuoriSede = !isDdtEsternoRientrato(doc) && doc.stato === 'spedito'
 
                     return (
@@ -1425,9 +1525,9 @@ export default function SpedizioniDdtPage() {
                         </td>
 
                         {/* Stato Merce */}
-                        <td className="py-3 px-2.5 text-center whitespace-nowrap">
+                        <td className="py-3 px-2 text-center whitespace-nowrap">
                           <span
-                            className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full whitespace-nowrap ${
+                            className={`inline-flex items-center justify-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full whitespace-nowrap ${
                               isFuoriSede
                                 ? 'bg-pink-950 text-pink-300 border border-pink-700 animate-pulse'
                                 : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
@@ -1438,8 +1538,8 @@ export default function SpedizioniDdtPage() {
                         </td>
 
                         {/* Azioni: Stampa A4 e Dettaglio */}
-                        <td className="py-3 px-3.5 text-right whitespace-nowrap sticky right-0 bg-slate-900/95 shadow-l">
-                          <div className="flex items-center justify-end gap-2">
+                        <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end">
                             <button
                               type="button"
                               onClick={() => setDdtSelezionatoPerStampa(doc)}
@@ -1465,6 +1565,80 @@ export default function SpedizioniDdtPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* BARRA CONTROLLI PAGINAZIONE TAB 2: DDT CONTO TERZI */}
+            {totaleDdtEsterni > 0 && (
+              <div className="p-4 bg-slate-950/70 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Visualizzati <strong className="text-white">{inizioDdtEsterni + 1} - {fineDdtEsterni}</strong> di{' '}
+                    <strong className="text-white">{totaleDdtEsterni}</strong> DDT
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <span>Mostra:</span>
+                    <select
+                      value={perPaginaDdtEsterni}
+                      onChange={(e) => setPerPaginaDdtEsterni(Number(e.target.value))}
+                      className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-pink-500 cursor-pointer"
+                    >
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                  </label>
+                </div>
+
+                {totalePagineDdtEsterni > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={paginaDdtEsterni === 1}
+                      onClick={() => setPaginaDdtEsterni((prev) => Math.max(1, prev - 1))}
+                      className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title="Pagina Precedente"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalePagineDdtEsterni }, (_, i) => i + 1)
+                        .filter((p) => p === 1 || p === totalePagineDdtEsterni || Math.abs(p - paginaDdtEsterni) <= 1)
+                        .map((p, idx, array) => {
+                          const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                          return (
+                            <div key={p} className="flex items-center gap-1">
+                              {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                              <button
+                                type="button"
+                                onClick={() => setPaginaDdtEsterni(p)}
+                                className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                  paginaDdtEsterni === p
+                                    ? 'bg-pink-600 text-white shadow-xs'
+                                    : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            </div>
+                          )
+                        })}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={paginaDdtEsterni === totalePagineDdtEsterni}
+                      onClick={() => setPaginaDdtEsterni((prev) => Math.min(totalePagineDdtEsterni, prev + 1))}
+                      className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      title="Pagina Successiva"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1498,7 +1672,7 @@ export default function SpedizioniDdtPage() {
 
           {/* Griglia Schede Terzisti */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {terzistiFiltrati.map((t) => (
+            {terzistiPaginati.map((t) => (
               <div
                 key={t.id}
                 className="p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-pink-500/50 transition-all shadow-xl space-y-3 flex flex-col justify-between"
@@ -1580,6 +1754,80 @@ export default function SpedizioniDdtPage() {
               </div>
             )}
           </div>
+
+          {/* BARRA CONTROLLI PAGINAZIONE TAB 3: ANAGRAFICA TERZISTI */}
+          {totaleTerzisti > 0 && (
+            <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span>
+                  Visualizzati <strong className="text-white">{inizioTerzisti + 1} - {fineTerzisti}</strong> di{' '}
+                  <strong className="text-white">{totaleTerzisti}</strong> terzisti
+                </span>
+                <span className="text-slate-600">•</span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <span>Mostra:</span>
+                  <select
+                    value={perPaginaTerzisti}
+                    onChange={(e) => setPerPaginaTerzisti(Number(e.target.value))}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-pink-500 cursor-pointer"
+                  >
+                    <option value={6}>6</option>
+                    <option value={9}>9</option>
+                    <option value={15}>15</option>
+                    <option value={30}>30</option>
+                  </select>
+                </label>
+              </div>
+
+              {totalePagineTerzisti > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={paginaTerzisti === 1}
+                    onClick={() => setPaginaTerzisti((prev) => Math.max(1, prev - 1))}
+                    className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Precedente"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalePagineTerzisti }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalePagineTerzisti || Math.abs(p - paginaTerzisti) <= 1)
+                      .map((p, idx, array) => {
+                        const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                        return (
+                          <div key={p} className="flex items-center gap-1">
+                            {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setPaginaTerzisti(p)}
+                              className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                paginaTerzisti === p
+                                  ? 'bg-pink-600 text-white shadow-xs'
+                                  : 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </div>
+                        )
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaTerzisti === totalePagineTerzisti}
+                    onClick={() => setPaginaTerzisti((prev) => Math.min(totalePagineTerzisti, prev + 1))}
+                    className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Successiva"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
