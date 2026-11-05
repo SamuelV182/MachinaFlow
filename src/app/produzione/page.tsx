@@ -67,14 +67,8 @@ export default function ProduzionePage() {
       // Carica ordini sincronizzati da Supabase Cloud
       const odpCaricati = await syncService.getOrdiniProduzione()
 
-      // Se c'erano ordini in localStorage mai sincronizzati, caricali su Supabase
-      const locali = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', [])
-      for (const loc of locali) {
-        if (!odpCaricati.some((c) => c.id === loc.id)) {
-          await syncService.salvaOrdineProduzione(loc)
-          odpCaricati.push(loc)
-        }
-      }
+      // Allinea la cache locale con gli ordini ufficiali di Supabase Cloud
+      localStorage.setItem('machinaflow_odp', JSON.stringify(odpCaricati))
 
       // Carica i DDT Clienti per identificare con precisione assoluta gli OdP già spediti (sia cloud che locale)
       const ddtClientiCloud = await syncService.getDdtClienti()

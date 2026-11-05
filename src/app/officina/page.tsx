@@ -558,6 +558,8 @@ export default function TerminaleOfficinaPage() {
         quantita_prodotta: 0,
         stato: 'pianificato',
         priorita: 4, // Priorità URGENTE automatica per i ripristini
+        materia_prima_scaricata: false, // Per un lotto scartato serve nuovo grezzo: attiva il fabbisogno in MRP
+        data_scarico_materia_prima: undefined,
         ordine_cliente_id: odp.ordine_cliente_id,
         codice_ordine_cliente: odp.codice_ordine_cliente,
         cliente_id: odp.cliente_id,
@@ -579,9 +581,13 @@ export default function TerminaleOfficinaPage() {
       }
     }
 
-    // 2. Se l'operatore ha fatto l'intera quantità del lotto (o di più) oppure ha scelto di sospendere
-    if (pezziBuoni >= odp.quantita_da_produrre || opzioneResiduo === 'sospendi') {
-      if (pezziBuoni < odp.quantita_da_produrre && opzioneResiduo === 'sospendi') {
+    // 2. Se l'operatore ha completato l'intero lotto (buoni + scarti coprono il 100% dell'ordine)
+    // oppure ha scelto di sospendere la lavorazione parziale
+    const totaleLavorati = pezziBuoni + pezziScarto
+    const isLottoInteramenteChiuso = totaleLavorati >= odp.quantita_da_produrre
+
+    if (isLottoInteramenteChiuso || opzioneResiduo === 'sospendi') {
+      if (!isLottoInteramenteChiuso && opzioneResiduo === 'sospendi') {
         // Sospendi la fase registrando l'avanzamento parziale
         const aggiornati = odpList.map((o) => {
           if (o.id === odp.id) {
@@ -624,6 +630,12 @@ export default function TerminaleOfficinaPage() {
       }
 
       // Altrimenti chiudi normalmente la fase
+      // Se ci sono stati scarti sul lotto chiuso al 100%, l'OdP originario prosegue con i pezzi buoni conformi
+      if (pezziScarto > 0 && pezziBuoni < odp.quantita_da_produrre) {
+        odp.quantita_da_produrre = pezziBuoni
+        odp.quantita_prodotta = pezziBuoni
+        await syncService.aggiornaStatoOdP(odp.id, odp.stato, pezziBuoni)
+      }
       await handleCambiaStatoFase(odp.id, fase.id, 'completata')
 
       if (nuovoOdpRipristino) {
@@ -646,7 +658,7 @@ export default function TerminaleOfficinaPage() {
     }
 
     // 3. Se ha fatto meno pezzi e ha scelto di splittare il residuo (invia i pezzi buoni avanti)
-    const quantitaResidua = odp.quantita_da_produrre - pezziBuoni
+    const quantitaResidua = odp.quantita_da_produrre - (pezziBuoni + pezziScarto)
     const codiceBase = odp.codice_odp.replace(/\/A$|\/B\d*$|\/R\d*$/, '')
     const splitEsistenti = odpList.filter((o) => o.codice_odp.startsWith(`${codiceBase}/`)).length
     const codiceFatti = odp.codice_odp.includes('/A') ? odp.codice_odp : `${codiceBase}/A`

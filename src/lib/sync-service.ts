@@ -119,17 +119,7 @@ export const syncService = {
         return opzioni?.soloAttivi ? locali.filter((o) => o.stato !== 'completato' && (o.stato as string) !== 'spedito') : locali
       }
 
-      // 1. Se opzioni.soloAttivi è attivo, NON ripescare ordini non presenti nella risposta cloud:
-      // se non sono nella risposta cloud significa che sono stati COMPLETATI da un altro dispositivo!
-      if (!opzioni?.soloAttivi && locali.length > 0) {
-        for (const loc of locali) {
-          const esisteSuCloud = odpCloud.some((c) => c.id === loc.id || c.codice_odp === loc.codice_odp)
-          if (!esisteSuCloud) {
-            this.salvaOrdineProduzione(loc)
-            odpCloud.push(loc)
-          }
-        }
-      }
+      // 1. Il Cloud Supabase è l'autorità principale. I dati cloud aggiornano la cache locale.
 
       // 2. Ordina le fasi per sequenza
       const formattati = odpCloud.map((o) => ({
