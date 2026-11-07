@@ -35,7 +35,15 @@ export default function LoginPage() {
           setErrore(error.message)
         } else if (data.session) {
           // Accesso immediato senza conferma email richiesta
-          router.push('/')
+          const emailPulita = email.trim().toLowerCase()
+          const isSuperAdminEmail = emailPulita.includes('admin')
+
+          // Se è un Super Admin, reindirizzalo subito alla Gestione Officine & Clienti (/super-admin)
+          if (isSuperAdminEmail) {
+            router.push('/super-admin')
+          } else {
+            router.push('/')
+          }
           router.refresh()
         } else {
           setMessaggioSuccesso('Account creato con successo! Controlla la tua email per confermare la registrazione, oppure effettua il login.')
@@ -75,7 +83,15 @@ export default function LoginPage() {
             localStorage.setItem('machinaflow_session_email', email.trim().toLowerCase())
           } catch {}
 
-          router.push('/')
+          const emailPulita = email.trim().toLowerCase()
+          const isSuperAdminEmail = emailPulita.includes('admin')
+
+          // Se è un Super Admin, reindirizzalo subito alla Gestione Officine & Clienti (/super-admin)
+          if (isSuperAdminEmail) {
+            router.push('/super-admin')
+          } else {
+            router.push('/')
+          }
           router.refresh()
         }
       }

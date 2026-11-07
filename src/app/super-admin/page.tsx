@@ -440,6 +440,8 @@ export default function SuperAdminPage() {
                             try {
                               localStorage.setItem('machinaflow_supporto_azienda_id', az.id)
                               localStorage.setItem('machinaflow_supporto_azienda_nome', az.nome)
+                              // Assicura che la sidebar laterale sia aperta e visibile per navigare nell'officina
+                              localStorage.setItem('machinaflow_sidebar_collassata', 'false')
                               // Pulisce la cache dati demo per permettere di vedere l'officina cliente reale/vuota
                               localStorage.removeItem('machinaflow_odp')
                               localStorage.removeItem('machinaflow_articoli')

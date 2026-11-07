@@ -16,14 +16,23 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
   // Inizializza lo stato della sidebar da localStorage
   useEffect(() => {
     try {
+      // In modalità supporto mostriamo sempre la sidebar aperta di default per facilitare la navigazione
+      const idSupporto = localStorage.getItem('machinaflow_supporto_azienda_id')
+      if (idSupporto) {
+        setIsSidebarCollassata(false)
+        return
+      }
+
       const salvata = localStorage.getItem('machinaflow_sidebar_collassata')
       if (salvata === 'true') {
         setIsSidebarCollassata(true)
+      } else {
+        setIsSidebarCollassata(false)
       }
     } catch {
       // Ignora errori di parsing
     }
-  }, [])
+  }, [pathname])
 
   // Toggle collasso con persistenza in localStorage
   const handleToggleSidebar = () => {
