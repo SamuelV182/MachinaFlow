@@ -55,7 +55,26 @@ export default function LoginPage() {
             setErrore(error.message)
           }
         } else {
-          // Login riuscito
+          // Login riuscito: pulisci cache browser vecchia per non ereditare dati di un altro utente/officina
+          try {
+            const previousEmail = localStorage.getItem('machinaflow_session_email')
+            if (previousEmail !== email.trim().toLowerCase()) {
+              localStorage.removeItem('machinaflow_odp')
+              localStorage.removeItem('machinaflow_articoli')
+              localStorage.removeItem('machinaflow_ordini_clienti')
+              localStorage.removeItem('machinaflow_ddt_clienti')
+              localStorage.removeItem('machinaflow_ddt_esterni')
+              localStorage.removeItem('machinaflow_centri_lavoro')
+              localStorage.removeItem('machinaflow_distinte')
+              localStorage.removeItem('machinaflow_dati_azienda_cache')
+              localStorage.removeItem('machinaflow_session_azienda')
+              localStorage.removeItem('machinaflow_session_azienda_id')
+              localStorage.removeItem('machinaflow_supporto_azienda_id')
+              localStorage.removeItem('machinaflow_supporto_azienda_nome')
+            }
+            localStorage.setItem('machinaflow_session_email', email.trim().toLowerCase())
+          } catch {}
+
           router.push('/')
           router.refresh()
         }

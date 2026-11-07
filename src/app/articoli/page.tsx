@@ -75,17 +75,24 @@ export default function ArticoliPage() {
       }
     }
 
+    const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+
     // Carica articoli sincronizzandoli con Supabase Cloud
     syncService.getArticoli().then((articoliCloud) => {
       if (articoliCloud && articoliCloud.length > 0) {
-        const mappa = new Map<string, Articolo>()
-        SEED_ARTICOLI.forEach((a) => mappa.set(a.id, a))
-        articoliCloud.forEach((a) => mappa.set(a.id, a))
-        const listaFinale = Array.from(mappa.values())
-        setArticoli(listaFinale)
-        localStorage.setItem('machinaflow_articoli', JSON.stringify(listaFinale))
+        setArticoli(articoliCloud)
+        localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliCloud))
+      } else if (azIsolata) {
+        setArticoli([])
       }
     })
+
+    if (azIsolata) {
+      setArticoli([])
+      setDistinte([])
+      setCicli([])
+      return
+    }
 
     const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
     const mappaArticoli = new Map<string, Articolo>()

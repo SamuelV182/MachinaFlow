@@ -49,6 +49,8 @@ export function isAziendaClienteIsolata(): boolean {
 }
 
 export const syncService = {
+  getCurrentAziendaId,
+  isAziendaClienteIsolata,
   // Sincronizza Seed iniziale nel Database Cloud se vuoto
   async inizializzaDatabaseSeVuoto() {
     try {
@@ -585,6 +587,46 @@ export const syncService = {
   },
 
   // 5. CENTRI DI LAVORO E PROCESSI
+  async getCentriLavoro(): Promise<CentroLavoro[]> {
+    try {
+      let queryMacchine = supabase
+        .from('centri_lavoro')
+        .select('*')
+        .order('codice')
+
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryMacchine = queryMacchine.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await queryMacchine
+
+      if (error) {
+        console.warn('Errore lettura centri_lavoro da Supabase:', error.message)
+        if (isAziendaClienteIsolata()) return []
+        const salvati = localStorage.getItem('machinaflow_centri_lavoro')
+        return salvati ? JSON.parse(salvati) : SEED_CENTRI_LAVORO
+      }
+
+      if (data && data.length > 0) {
+        localStorage.setItem('machinaflow_centri_lavoro', JSON.stringify(data))
+        return data as CentroLavoro[]
+      }
+
+      if (isAziendaClienteIsolata()) {
+        return []
+      }
+
+      const salvati = localStorage.getItem('machinaflow_centri_lavoro')
+      return salvati ? JSON.parse(salvati) : SEED_CENTRI_LAVORO
+    } catch (e) {
+      console.error('Errore getCentriLavoro:', e)
+      if (isAziendaClienteIsolata()) return []
+      const salvati = localStorage.getItem('machinaflow_centri_lavoro')
+      return salvati ? JSON.parse(salvati) : SEED_CENTRI_LAVORO
+    }
+  },
+
   async salvaCentroLavoro(centro: CentroLavoro) {
     try {
       await supabase.from('centri_lavoro').upsert(centro)

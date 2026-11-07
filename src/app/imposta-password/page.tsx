@@ -117,6 +117,22 @@ function ImpostaPasswordContent() {
           azienda_id: aziendaId,
           ruolo: 'admin_officina'
         })
+
+        // Memorizza l'azienda della nuova officina e pulisci la cache demo precedente
+        try {
+          localStorage.removeItem('machinaflow_odp')
+          localStorage.removeItem('machinaflow_articoli')
+          localStorage.removeItem('machinaflow_ordini_clienti')
+          localStorage.removeItem('machinaflow_ddt_clienti')
+          localStorage.removeItem('machinaflow_ddt_esterni')
+          localStorage.removeItem('machinaflow_centri_lavoro')
+          localStorage.removeItem('machinaflow_distinte')
+          localStorage.removeItem('machinaflow_dati_azienda_cache')
+          localStorage.setItem('machinaflow_session_azienda_id', aziendaId)
+          if (nomeAzienda) {
+            localStorage.setItem('machinaflow_session_azienda', nomeAzienda)
+          }
+        } catch {}
       }
 
       // 3. Marca l'invito come accettato

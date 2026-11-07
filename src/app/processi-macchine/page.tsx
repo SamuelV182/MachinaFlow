@@ -75,30 +75,43 @@ export default function ProcessiMacchinePage() {
 
   // Caricamento dati iniziale (con persistenza locale in localStorage)
   useEffect(() => {
-    const salvatiMacchine = localStorage.getItem('machinaflow_centri_lavoro')
-    const salvatiProcessi = localStorage.getItem('machinaflow_tipi_processo')
-
-    if (salvatiMacchine) {
-      try {
-        setCentriLavoro(JSON.parse(salvatiMacchine))
-      } catch {
-        setCentriLavoro(SEED_CENTRI_LAVORO)
+    const caricaDati = async () => {
+      const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+      const macchineCloud = await syncService.getCentriLavoro()
+      if (macchineCloud && macchineCloud.length > 0) {
+        setCentriLavoro(macchineCloud)
+      } else if (azIsolata) {
+        setCentriLavoro([])
+      } else {
+        const salvatiMacchine = localStorage.getItem('machinaflow_centri_lavoro')
+        if (salvatiMacchine) {
+          try {
+            setCentriLavoro(JSON.parse(salvatiMacchine))
+          } catch {
+            setCentriLavoro(SEED_CENTRI_LAVORO)
+          }
+        } else {
+          setCentriLavoro(SEED_CENTRI_LAVORO)
+        }
       }
-    } else {
-      setCentriLavoro(SEED_CENTRI_LAVORO)
-      localStorage.setItem('machinaflow_centri_lavoro', JSON.stringify(SEED_CENTRI_LAVORO))
+
+      if (azIsolata) {
+        setTipiProcesso([])
+      } else {
+        const salvatiProcessi = localStorage.getItem('machinaflow_tipi_processo')
+        if (salvatiProcessi) {
+          try {
+            setTipiProcesso(JSON.parse(salvatiProcessi))
+          } catch {
+            setTipiProcesso(SEED_TIPI_PROCESSO)
+          }
+        } else {
+          setTipiProcesso(SEED_TIPI_PROCESSO)
+        }
+      }
     }
 
-    if (salvatiProcessi) {
-      try {
-        setTipiProcesso(JSON.parse(salvatiProcessi))
-      } catch {
-        setTipiProcesso(SEED_TIPI_PROCESSO)
-      }
-    } else {
-      setTipiProcesso(SEED_TIPI_PROCESSO)
-      localStorage.setItem('machinaflow_tipi_processo', JSON.stringify(SEED_TIPI_PROCESSO))
-    }
+    caricaDati()
   }, [])
 
   // Salvataggio Macchina

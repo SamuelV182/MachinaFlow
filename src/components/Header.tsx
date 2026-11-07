@@ -53,6 +53,9 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
           setRuoloUtente(profilo.ruolo)
           try {
             localStorage.setItem('machinaflow_session_ruolo', profilo.ruolo)
+            if (profilo.azienda_id) {
+              localStorage.setItem('machinaflow_session_azienda_id', profilo.azienda_id)
+            }
           } catch {}
 
           if ((profilo as any).azienda?.nome) {
