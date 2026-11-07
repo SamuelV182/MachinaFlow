@@ -159,6 +159,14 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
                 try {
                   localStorage.removeItem('machinaflow_supporto_azienda_id')
                   localStorage.removeItem('machinaflow_supporto_azienda_nome')
+                  localStorage.removeItem('machinaflow_odp')
+                  localStorage.removeItem('machinaflow_articoli')
+                  localStorage.removeItem('machinaflow_ordini_clienti')
+                  localStorage.removeItem('machinaflow_ddt_clienti')
+                  localStorage.removeItem('machinaflow_ddt_esterni')
+                  localStorage.removeItem('machinaflow_centri_lavoro')
+                  localStorage.removeItem('machinaflow_distinte')
+                  localStorage.removeItem('machinaflow_dati_azienda_cache')
                 } catch {}
                 setSupportoAziendaNome(null)
                 router.push('/super-admin')

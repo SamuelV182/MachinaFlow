@@ -27,6 +27,27 @@ import {
 
 const supabase = createClient()
 
+// Recupera in modo ultra-rapido l'ID dell'azienda corrente (sia per utenti normali che per Super Admin in Modalità Supporto)
+export function getCurrentAziendaId(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    // 1. Priorità massima: modalità supporto esplicita attivata dal Super Admin
+    const idSupporto = localStorage.getItem('machinaflow_supporto_azienda_id')
+    if (idSupporto) return idSupporto
+
+    // 2. Azienda memorizzata dell'utente loggato
+    const sessionAz = localStorage.getItem('machinaflow_session_azienda_id')
+    if (sessionAz) return sessionAz
+  } catch {}
+  return null
+}
+
+// Verifica se siamo in modalità supporto o con un'azienda diversa da quella demo pilota
+export function isAziendaClienteIsolata(): boolean {
+  const azId = getCurrentAziendaId()
+  return Boolean(azId && azId !== 'az-pilota-01')
+}
+
 export const syncService = {
   // Sincronizza Seed iniziale nel Database Cloud se vuoto
   async inizializzaDatabaseSeVuoto() {
@@ -106,6 +127,12 @@ export const syncService = {
         `)
         .order('creato_il', { ascending: false })
 
+      // Se è attiva la modalità supporto o un'azienda isolata, filtra tassativamente per azienda_id
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        query = query.eq('azienda_id', azIdCorrente)
+      }
+
       // Se richiesto solo il carico attivo (es. tablet officina), escludiamo gli ordini completati
       // (filtriamo lo stato 'spedito' lato codice per evitare errore 22P02 su enum postgres)
       if (opzioni?.soloAttivi) {
@@ -116,6 +143,10 @@ export const syncService = {
 
       if (error || !odpCloud) {
         if (error) console.warn('Errore lettura OdP da Supabase:', error.message)
+        // Se siamo su una nuova azienda cliente e il cloud è vuoto o dà errore, non mostrare dati demo
+        if (isAziendaClienteIsolata()) {
+          return []
+        }
         return opzioni?.soloAttivi ? locali.filter((o) => o.stato !== 'completato' && (o.stato as string) !== 'spedito') : locali
       }
 
@@ -339,18 +370,33 @@ export const syncService = {
         } catch {}
       }
 
-      const { data: ordiniData, error: errOrdini } = await supabase
+      let queryOrdini = supabase
         .from('ordini_clienti')
         .select('*')
         .order('numero_ordine', { ascending: false })
 
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryOrdini = queryOrdini.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data: ordiniData, error: errOrdini } = await queryOrdini
+
       if (errOrdini || !ordiniData) {
         console.warn('Lettura ordini_clienti da Supabase fallita o non disponibile:', errOrdini?.message)
+        if (isAziendaClienteIsolata()) {
+          return []
+        }
         // Se c'è localStorage, uniscilo con i seed dando priorità a localStorage
         const mappaLocale = new Map<string, any>()
         SEED_ORDINI_CLIENTI.forEach((o) => mappaLocale.set(o.id, o))
         ordiniLocali.forEach((o) => mappaLocale.set(o.id, o))
         return Array.from(mappaLocale.values())
+      }
+
+      // Se siamo su una nuova azienda cliente (non demo) e non ci sono ordini cloud, ritorna vuoto
+      if (isAziendaClienteIsolata() && ordiniData.length === 0) {
+        return []
       }
 
       // Leggi tutte le righe associate agli ordini da Supabase
@@ -371,11 +417,13 @@ export const syncService = {
       }))
 
       // Unisci le fonti:
-      // 1. Base: SEED_ORDINI_CLIENTI
-      // 2. Cloud: ordiniCompletiCloud sovrascrivono SEED
-      // 3. Locale: ordiniLocali (le modifiche recenti dell'utente) hanno la priorità massima
+      // 1. Base: SEED_ORDINI_CLIENTI solo se siamo nell'azienda demo pilota
+      // 2. Cloud: ordiniCompletiCloud
+      // 3. Locale: ordiniLocali
       const mappa = new Map<string, any>()
-      SEED_ORDINI_CLIENTI.forEach((o) => mappa.set(o.id, o))
+      if (!isAziendaClienteIsolata()) {
+        SEED_ORDINI_CLIENTI.forEach((o) => mappa.set(o.id, o))
+      }
       ordiniLocali.forEach((o: any) => mappa.set(o.id, o))
       ordiniCompletiCloud.forEach((o: any) => mappa.set(o.id, o))
 
@@ -384,6 +432,7 @@ export const syncService = {
       return finale
     } catch (e) {
       console.error('Errore getOrdiniClienti:', e)
+      if (isAziendaClienteIsolata()) return []
       const salvati = localStorage.getItem('machinaflow_ordini_clienti')
       return salvati ? JSON.parse(salvati) : SEED_ORDINI_CLIENTI
     }
@@ -486,13 +535,21 @@ export const syncService = {
   // 4. ARTICOLI E GIACENZE
   async getArticoli(): Promise<Articolo[]> {
     try {
-      const { data, error } = await supabase
+      let queryArticoli = supabase
         .from('articoli')
         .select('*')
         .order('codice_articolo')
 
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryArticoli = queryArticoli.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await queryArticoli
+
       if (error) {
         console.warn('Errore lettura articoli da Supabase:', error.message)
+        if (isAziendaClienteIsolata()) return []
         const salvati = localStorage.getItem('machinaflow_articoli')
         return salvati ? JSON.parse(salvati) : []
       }
@@ -504,6 +561,7 @@ export const syncService = {
       return []
     } catch (e) {
       console.error('Errore getArticoli:', e)
+      if (isAziendaClienteIsolata()) return []
       const salvati = localStorage.getItem('machinaflow_articoli')
       return salvati ? JSON.parse(salvati) : []
     }
@@ -546,13 +604,21 @@ export const syncService = {
   // 6. DOCUMENTI DI TRASPORTO (DDT) CLIENTI
   async getDdtClienti(): Promise<DocumentoTrasportoCliente[]> {
     try {
-      const { data, error } = await supabase
+      let queryDdt = supabase
         .from('ddt_clienti')
         .select('*')
         .order('creato_il', { ascending: false })
 
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryDdt = queryDdt.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await queryDdt
+
       if (error) {
         console.warn('Errore lettura ddt_clienti da Supabase:', error.message)
+        if (isAziendaClienteIsolata()) return []
         const salvati = localStorage.getItem('machinaflow_ddt_clienti')
         return salvati ? JSON.parse(salvati) : []
       }
@@ -564,6 +630,7 @@ export const syncService = {
       return []
     } catch (e) {
       console.error('Errore getDdtClienti:', e)
+      if (isAziendaClienteIsolata()) return []
       const salvati = localStorage.getItem('machinaflow_ddt_clienti')
       return salvati ? JSON.parse(salvati) : []
     }
@@ -717,13 +784,21 @@ export const syncService = {
   // 9. ORDINI FORNITORI (MRP)
   async getOrdiniFornitori(): Promise<OrdineFornitore[]> {
     try {
-      const { data, error } = await supabase
+      let queryFornitori = supabase
         .from('ordini_fornitori')
         .select('*')
         .order('creato_il', { ascending: false })
 
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryFornitori = queryFornitori.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await queryFornitori
+
       if (error) {
         console.warn('Errore lettura ordini_fornitori:', error.message)
+        if (isAziendaClienteIsolata()) return []
         const salvati = localStorage.getItem('machinaflow_ordini_fornitori')
         return salvati ? JSON.parse(salvati) : []
       }
@@ -735,6 +810,7 @@ export const syncService = {
       return []
     } catch (e) {
       console.error('Errore getOrdiniFornitori:', e)
+      if (isAziendaClienteIsolata()) return []
       const salvati = localStorage.getItem('machinaflow_ordini_fornitori')
       return salvati ? JSON.parse(salvati) : []
     }

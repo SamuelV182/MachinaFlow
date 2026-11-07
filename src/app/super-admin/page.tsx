@@ -440,6 +440,15 @@ export default function SuperAdminPage() {
                             try {
                               localStorage.setItem('machinaflow_supporto_azienda_id', az.id)
                               localStorage.setItem('machinaflow_supporto_azienda_nome', az.nome)
+                              // Pulisce la cache dati demo per permettere di vedere l'officina cliente reale/vuota
+                              localStorage.removeItem('machinaflow_odp')
+                              localStorage.removeItem('machinaflow_articoli')
+                              localStorage.removeItem('machinaflow_ordini_clienti')
+                              localStorage.removeItem('machinaflow_ddt_clienti')
+                              localStorage.removeItem('machinaflow_ddt_esterni')
+                              localStorage.removeItem('machinaflow_centri_lavoro')
+                              localStorage.removeItem('machinaflow_distinte')
+                              localStorage.removeItem('machinaflow_dati_azienda_cache')
                             } catch {}
                             router.push('/')
                           }}
