@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { Printer, Download, Truck, CheckCircle2, QrCode, FileText, ExternalLink, Eye } from 'lucide-react'
-import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente, OrdineCliente } from '@/types/database'
+import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente, OrdineCliente, Azienda } from '@/types/database'
 import { generaDdtPdf } from '@/lib/pdf-ddt-service'
+import { createClient } from '@/lib/supabase/client'
 
 interface SchedaDDTStampabileProps {
   ddt: DocumentoTrasportoEsterno | DocumentoTrasportoCliente
@@ -17,12 +18,50 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
   const clienteDdt = isCliente ? (ddt as DocumentoTrasportoCliente) : null
   const terzistaDdt = !isCliente ? (ddt as DocumentoTrasportoEsterno) : null
 
+  const supabase = createClient()
+  const [azienda, setAzienda] = useState<Azienda | null>(null)
+
   // URL del PDF generato dal template predefinito (< 0.1s)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [isMobile, setIsMobile] = useState<boolean>(false)
 
   const ddtId = ddt.id || ddt.numero_ddt
   const ordiniCount = ordiniClienti?.length || 0
+
+  // Recupera i dati dell'azienda corrente per l'intestazione personalizzata
+  useEffect(() => {
+    const caricaAzienda = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return
+
+        const { data: profilo } = await supabase
+          .from('profili_utenti')
+          .select('azienda_id')
+          .eq('id', user.id)
+          .single()
+
+        let azId = profilo?.azienda_id || 'az-pilota-01'
+        try {
+          const azSup = localStorage.getItem('machinaflow_supporto_azienda_id')
+          if (azSup) azId = azSup
+        } catch {}
+
+        const { data: azData } = await supabase
+          .from('aziende')
+          .select('*')
+          .eq('id', azId)
+          .single()
+
+        if (azData) {
+          setAzienda(azData as Azienda)
+        }
+      } catch (err) {
+        console.warn('Recupero azienda per DDT fallback:', err)
+      }
+    }
+    caricaAzienda()
+  }, [supabase])
 
   useEffect(() => {
     // Rileva smartphone/tablet dove il browser non supporta il rendering dei PDF in iframe
@@ -35,7 +74,7 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
   useEffect(() => {
     try {
-      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti)
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda)
       const blobUrl = doc.output('bloburl')
       setPdfUrl(String(blobUrl))
 
@@ -45,7 +84,7 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
     } catch (e) {
       console.error('Errore generazione PDF DDT:', e)
     }
-  }, [ddtId, isCliente, ordiniCount])
+  }, [ddtId, isCliente, ordiniCount, azienda])
 
   // Scarica direttamente il file PDF già pronto
   const handleScaricaPdf = () => {

@@ -100,8 +100,13 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
     }
   }, [pathname])
 
-  // Se siamo nella pagina di login o imposta-password, mostra solo la pagina senza menu né header
-  if (pathname === '/login' || pathname === '/imposta-password') {
+  // Se siamo nella pagina di login, imposta-password o nelle pagine marketing/landing, mostra solo la pagina senza menu gestionale né header
+  if (
+    pathname === '/login' ||
+    pathname === '/imposta-password' ||
+    pathname.startsWith('/landing') ||
+    pathname.startsWith('/presentazione')
+  ) {
     return <>{children}</>
   }
 

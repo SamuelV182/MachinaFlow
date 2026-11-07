@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Factory, Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { MachinaFlowLogo } from '@/components/MachinaFlowLogo'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -72,17 +73,12 @@ export default function LoginPage() {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="w-full max-w-md relative z-10">
-        {/* Logo MachinaFlow */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-orange-500/10 border border-orange-500/30 text-orange-400 mb-4 shadow-lg shadow-orange-500/10">
-            <Factory className="w-8 h-8" />
-          </div>
-          <h1 className="text-3xl font-black tracking-tight text-white font-mono">
-            Machina<span className="text-orange-400">Flow</span>
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-semibold">
-            MES & Pianificazione Produzione Officina
-          </p>
+        {/* Logo MachinaFlow Ufficiale Coordinato */}
+        <div className="flex flex-col items-center justify-center mb-8 text-center">
+          <MachinaFlowLogo
+            dimensione={56}
+            sottotitolo="PCP & MES Industriale"
+          />
         </div>
 
         {/* Card di Login */}
@@ -183,10 +179,23 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Info stabilimento footer */}
-        <p className="text-center text-[11px] text-slate-600 mt-6">
-          MachinaFlow Platform &bull; Stabilimento Lucca &bull; Accesso protetto Supabase
-        </p>
+        {/* Info stabilimento footer e autore */}
+        <div className="text-center text-[11px] text-slate-500 mt-6 space-y-1">
+          <div>
+            MachinaFlow Platform &bull; Accesso Crittografato Multi-Tenant
+          </div>
+          <div>
+            Sviluppato da{' '}
+            <a
+              href="https://vsdigitalcreations.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400/90 hover:text-orange-300 font-semibold transition-colors underline underline-offset-2"
+            >
+              VS Digital Creations
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -55,7 +55,12 @@ export default function SuperAdminPage() {
     email_titolare: '',
     telefono: '',
     partita_iva: '',
-    citta: ''
+    codice_fiscale: '',
+    indirizzo: '',
+    citta: '',
+    cap: '',
+    provincia: '',
+    logo_url: ''
   })
 
   // Stato Modale Invito Generato (WhatsApp / Copia Link)
@@ -150,7 +155,12 @@ export default function SuperAdminPage() {
         email_titolare: formAzienda.email_titolare.trim().toLowerCase(),
         telefono: formAzienda.telefono.trim() || null,
         partita_iva: formAzienda.partita_iva.trim() || null,
+        codice_fiscale: formAzienda.codice_fiscale.trim() || null,
+        indirizzo: formAzienda.indirizzo.trim() || null,
         citta: formAzienda.citta.trim() || null,
+        cap: formAzienda.cap.trim() || null,
+        provincia: formAzienda.provincia.trim().toUpperCase() || null,
+        logo_url: formAzienda.logo_url.trim() || null,
         stato: 'attiva'
       })
 
@@ -189,7 +199,12 @@ export default function SuperAdminPage() {
         email_titolare: '',
         telefono: '',
         partita_iva: '',
-        citta: ''
+        codice_fiscale: '',
+        indirizzo: '',
+        citta: '',
+        cap: '',
+        provincia: '',
+        logo_url: ''
       })
       setModaleNuovaAzienda(false)
 
@@ -627,17 +642,90 @@ export default function SuperAdminPage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Partita IVA
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="es: IT01234567890"
+                    value={formAzienda.partita_iva}
+                    onChange={(e) => setFormAzienda({ ...formAzienda, partita_iva: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Codice Fiscale
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="es: 01234567890 o C.F."
+                    value={formAzienda.codice_fiscale}
+                    onChange={(e) => setFormAzienda({ ...formAzienda, codice_fiscale: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block font-semibold text-slate-300 mb-1">
-                  Partita IVA (Opzionale)
+                  Indirizzo Stabilimento / Sede Legale
                 </label>
                 <input
                   type="text"
-                  placeholder="es: IT01234567890"
-                  value={formAzienda.partita_iva}
-                  onChange={(e) => setFormAzienda({ ...formAzienda, partita_iva: e.target.value })}
+                  placeholder="es: Via dell'Artigianato 15"
+                  value={formAzienda.indirizzo}
+                  onChange={(e) => setFormAzienda({ ...formAzienda, indirizzo: e.target.value })}
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    CAP
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="es: 25100"
+                    value={formAzienda.cap}
+                    onChange={(e) => setFormAzienda({ ...formAzienda, cap: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Provincia (Sigla)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    placeholder="es: BS, MO, LU..."
+                    value={formAzienda.provincia}
+                    onChange={(e) => setFormAzienda({ ...formAzienda, provincia: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500 uppercase"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Logo Azienda (URL Immagine Web o CDN)
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://.../logo.png"
+                  value={formAzienda.logo_url}
+                  onChange={(e) => setFormAzienda({ ...formAzienda, logo_url: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Verrà stampato automaticamente nei DDT e nelle schede d&apos;officina del cliente.
+                </span>
               </div>
 
               <div className="p-4 border-t border-slate-800 flex items-center justify-end gap-3 -mx-5 -mb-5 bg-slate-950/50">

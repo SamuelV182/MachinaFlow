@@ -1,8 +1,9 @@
 'use client'
 
-import { Bell, Calendar, UserCheck, PanelLeft, PanelLeftClose, LogOut } from 'lucide-react'
+import { Bell, Calendar, UserCheck, PanelLeft, PanelLeftClose, LogOut, Settings } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 interface HeaderProps {
@@ -19,13 +20,27 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
   const supabase = createClient()
 
   useEffect(() => {
+    // 1. Carica subito dalla cache locale (0 millisecondi)
+    try {
+      const cachedEmail = localStorage.getItem('machinaflow_session_email')
+      const cachedRuolo = localStorage.getItem('machinaflow_session_ruolo')
+      const cachedAzienda = localStorage.getItem('machinaflow_session_azienda')
+      if (cachedEmail) setUtenteEmail(cachedEmail)
+      if (cachedRuolo) setRuoloUtente(cachedRuolo)
+      if (cachedAzienda) setAziendaNome(cachedAzienda)
+    } catch {}
+
     const fetchUser = async () => {
+      // Se già abbiamo l'email in cache, non bloccare
       const {
         data: { user }
       } = await supabase.auth.getUser()
 
       if (user?.email) {
         setUtenteEmail(user.email)
+        try {
+          localStorage.setItem('machinaflow_session_email', user.email)
+        } catch {}
 
         // Recupera profilo e azienda
         const { data: profilo } = await supabase
@@ -36,11 +51,22 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
 
         if (profilo) {
           setRuoloUtente(profilo.ruolo)
+          try {
+            localStorage.setItem('machinaflow_session_ruolo', profilo.ruolo)
+          } catch {}
+
           if ((profilo as any).azienda?.nome) {
-            setAziendaNome((profilo as any).azienda.nome)
+            const nomeAz = (profilo as any).azienda.nome
+            setAziendaNome(nomeAz)
+            try {
+              localStorage.setItem('machinaflow_session_azienda', nomeAz)
+            } catch {}
           }
         } else if (user.email.includes('admin')) {
           setRuoloUtente('super_admin')
+          try {
+            localStorage.setItem('machinaflow_session_ruolo', 'super_admin')
+          } catch {}
         }
       }
     }
@@ -104,9 +130,18 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
               Piattaforma Super Admin SaaS
             </span>
           ) : (
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-orange-400 border border-slate-700 hidden sm:inline-block">
-              {aziendaNome}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-orange-400 border border-slate-700 hidden sm:inline-block">
+                {aziendaNome}
+              </span>
+              <Link
+                href="/impostazioni-azienda"
+                title="Configura Dati Azienda, Indirizzo e Logo"
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-orange-400 border border-slate-700 transition-colors"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           )}
         </div>
       </div>

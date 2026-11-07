@@ -34,24 +34,18 @@ export async function middleware(request: NextRequest) {
     }
   })
 
-  // Timeout di sicurezza per getUser (massimo 1500ms per non far andare mai Vercel in timeout)
-  let user = null
-  try {
-    const authPromise = supabase.auth.getUser()
-    const timeoutPromise = new Promise<{ data: { user: null } }>((resolve) =>
-      setTimeout(() => resolve({ data: { user: null } }), 1500)
-    )
-    const result = await Promise.race([authPromise, timeoutPromise])
-    user = result?.data?.user || null
-  } catch {
-    user = null
-  }
+  // Verifica presenza del token di sessione Supabase nei cookie (Istantaneo: 0 millisecondi, nessuna chiamata di rete)
+  const haCookieAuth = request.cookies
+    .getAll()
+    .some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'))
 
   const pathname = request.nextUrl.pathname
 
   // Pagine pubbliche che non richiedono login
   const isPaginaPubblica =
     pathname.startsWith('/login') ||
+    pathname.startsWith('/landing') ||
+    pathname.startsWith('/presentazione') ||
     pathname.startsWith('/imposta-password') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
@@ -59,15 +53,15 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/icon.svg') ||
     pathname.startsWith('/manifest.json')
 
-  // Se l'utente non è autenticato e cerca di accedere a una pagina protetta, rimanda al login
-  if (!user && !isPaginaPubblica) {
+  // Se l'utente non ha cookie di autenticazione e cerca di accedere a una pagina protetta, rimanda al login
+  if (!haCookieAuth && !isPaginaPubblica) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
   // Se l'utente è già autenticato e va su /login, mandalo direttamente alla dashboard /
-  if (user && pathname === '/login') {
+  if (haCookieAuth && pathname === '/login') {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)

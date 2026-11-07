@@ -6,7 +6,13 @@ export interface Azienda {
   email_titolare: string
   telefono?: string
   partita_iva?: string
+  codice_fiscale?: string
+  indirizzo?: string
   citta?: string
+  cap?: string
+  provincia?: string
+  logo_url?: string
+  note_ddt_predefinite?: string
   stato: 'attiva' | 'sospesa'
   creato_il: string
 }

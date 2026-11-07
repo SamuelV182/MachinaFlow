@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { MachinaFlowLogo } from './MachinaFlowLogo'
 import {
   LayoutDashboard,
   Factory,
@@ -111,6 +112,16 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
   const supabase = createClient()
 
   useEffect(() => {
+    // 1. Carica subito dalla cache per rendere il menu istantaneo
+    try {
+      const cachedRuolo = localStorage.getItem('machinaflow_session_ruolo')
+      if (cachedRuolo === 'super_admin') {
+        setIsSuperAdmin(true)
+      } else if (cachedRuolo) {
+        setIsSuperAdmin(false)
+      }
+    } catch {}
+
     const verificaRuolo = async () => {
       // Se è attiva la modalità supporto impersonando un'officina cliente, mostra il menu completo dell'officina
       try {
@@ -136,8 +147,14 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
 
           if (profilo?.ruolo === 'super_admin' || user.email?.includes('admin')) {
             setIsSuperAdmin(true)
+            try {
+              localStorage.setItem('machinaflow_session_ruolo', 'super_admin')
+            } catch {}
           } else {
             setIsSuperAdmin(false)
+            try {
+              localStorage.setItem('machinaflow_session_ruolo', profilo?.ruolo || 'operatore')
+            } catch {}
           }
         }
       } catch {
@@ -146,7 +163,7 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
     }
 
     verificaRuolo()
-  }, [supabase, pathname])
+  }, [supabase])
 
   // Seleziona il menu appropriato
   const items = isSuperAdmin ? menuSuperAdminItems : menuOfficinaItems
@@ -184,22 +201,12 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
       >
         {/* Brand Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800/80 flex items-center justify-between">
-          <Link href={isSuperAdmin ? '/super-admin' : '/'} className="flex items-center gap-3 group" onClick={() => setIsOpenMobile(false)}>
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-lg transition-transform group-hover:scale-105 ${
-              isSuperAdmin 
-                ? 'bg-gradient-to-tr from-sky-600 to-indigo-500 shadow-sky-500/20' 
-                : 'bg-gradient-to-tr from-amber-600 to-orange-500 shadow-orange-500/20'
-            }`}>
-              {isSuperAdmin ? <ShieldCheck className="w-4 h-4" /> : <Wrench className="w-4 h-4" />}
-            </div>
-            <div>
-              <span className="text-lg font-bold tracking-tight text-white flex items-center gap-1">
-                Machina<span className={isSuperAdmin ? 'text-sky-400' : 'text-orange-500'}>Flow</span>
-              </span>
-              <span className="text-[9px] uppercase font-semibold tracking-wider text-slate-400 block -mt-1">
-                {isSuperAdmin ? 'Pannello Super Admin' : 'PCP & MES Industriale'}
-              </span>
-            </div>
+          <Link href={isSuperAdmin ? '/super-admin' : '/'} className="group" onClick={() => setIsOpenMobile(false)}>
+            <MachinaFlowLogo
+              dimensione={36}
+              variante={isSuperAdmin ? 'superadmin' : 'default'}
+              sottotitolo={isSuperAdmin ? 'Pannello Super Admin' : 'PCP & MES Industriale'}
+            />
           </Link>
 
           {/* Bottone Collasso per Desktop */}
@@ -281,18 +288,32 @@ export function Sidebar({ isCollassata = false, onToggleCollassata }: SidebarPro
           })}
         </nav>
 
-        {/* Footer Info / Sistema */}
-        <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <div className="text-xs text-slate-400">
-              <span className="font-semibold text-slate-200 block text-[11px]">Produzione Attiva</span>
-              <p className="text-[10px] text-slate-500">MachinaFlow v1.0.0</p>
+        {/* Footer Info / Sistema & Autore */}
+        <div className="p-3 border-t border-slate-800/80 bg-slate-950/60 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <div className="text-xs text-slate-400">
+                <span className="font-semibold text-slate-200 block text-[11px]">Produzione Attiva</span>
+                <p className="text-[10px] text-slate-500">MachinaFlow v2.5</p>
+              </div>
             </div>
+            <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+              Ctrl+B
+            </span>
           </div>
-          <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
-            Ctrl+B
-          </span>
+
+          <div className="pt-1 border-t border-slate-900 text-[10px] text-slate-500 flex items-center justify-between">
+            <span>Powered by</span>
+            <a
+              href="https://vsdigitalcreations.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-orange-400/80 hover:text-orange-300 font-semibold transition-colors"
+            >
+              VS Digital Creations
+            </a>
+          </div>
         </div>
       </aside>
     </>

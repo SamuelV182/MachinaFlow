@@ -1,15 +1,24 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { DocumentoTrasportoCliente, DocumentoTrasportoEsterno, OrdineCliente } from '@/types/database'
+import { DocumentoTrasportoCliente, DocumentoTrasportoEsterno, OrdineCliente, Azienda } from '@/types/database'
 
 export function generaDdtPdf(
   ddt: DocumentoTrasportoCliente | DocumentoTrasportoEsterno,
   tipo: 'cliente' | 'terzista',
-  ordiniClienti: OrdineCliente[] = []
+  ordiniClienti: OrdineCliente[] = [],
+  azienda?: Azienda | null
 ): jsPDF {
   const isCliente = tipo === 'cliente' || 'cliente_nome' in ddt
   const clienteDdt = isCliente ? (ddt as DocumentoTrasportoCliente) : null
   const terzistaDdt = !isCliente ? (ddt as DocumentoTrasportoEsterno) : null
+
+  // Dati azienda dinamici con fallback
+  const nomeAzienda = azienda?.nome || 'MACHINAFLOW MECCANICA S.R.L.'
+  const indirizzoAzienda = azienda?.indirizzo 
+    ? `${azienda.indirizzo}${azienda.citta ? `, ${azienda.cap || ''} ${azienda.citta} (${azienda.provincia || ''})` : ''}`
+    : "Via dell'Industria 14, 41012 Carpi (MO)"
+  const pivaAzienda = azienda?.partita_iva ? `P.IVA: ${azienda.partita_iva}` : 'P.IVA e C.F.: 03849200361'
+  const telAzienda = azienda?.telefono ? ` • Tel: ${azienda.telefono}` : ''
 
   // Crea documento A4 verticale (210 x 297 mm)
   const doc = new jsPDF({
@@ -31,15 +40,15 @@ export function generaDdtPdf(
   doc.text('DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)', 14, 14)
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(16)
+  doc.setFontSize(15)
   doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-  doc.text('MACHINAFLOW MECCANICA S.R.L.', 14, 21)
+  doc.text(nomeAzienda.toUpperCase(), 14, 21)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-  doc.text("Lavorazioni Meccaniche di Precisione CNC • Via dell'Industria 14, 41012 Carpi (MO)", 14, 26)
-  doc.text('P.IVA e C.F.: 03849200361 • Tel: +39 059 849201 • ordini@machinaflow.it', 14, 30)
+  doc.text(indirizzoAzienda, 14, 26)
+  doc.text(`${pivaAzienda}${telAzienda}`, 14, 30)
 
   // BOX NUMERO E DATA DOCUMENTO (A Destra)
   doc.setFillColor(colorLightBg[0], colorLightBg[1], colorLightBg[2])
@@ -83,12 +92,12 @@ export function generaDdtPdf(
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(9)
   doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-  doc.text('MachinaFlow Meccanica S.r.l. - Stabilimento 1', 17, yMittente + 10)
+  doc.text(nomeAzienda, 17, yMittente + 10)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-  doc.text("Via dell'Industria 14 - 41012 Carpi (MO)", 17, yMittente + 15)
+  doc.text(indirizzoAzienda, 17, yMittente + 15)
   doc.text(`Causale: ${ddt.causale_trasporto} • Porto: ${ddt.porto}`, 17, yMittente + 20)
 
   // Box Destinatario (Destra)
