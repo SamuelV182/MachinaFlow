@@ -175,12 +175,38 @@ export default function TerminaleOfficinaPage() {
         }
       }
 
-      const centriSalvati = parseSicuro<CentroLavoro[]>('machinaflow_centri_lavoro', [])
-      const mappaCentri = new Map<string, CentroLavoro>()
-      SEED_CENTRI_LAVORO.forEach((c) => mappaCentri.set(c.id, c))
-      centriSalvati.forEach((c) => mappaCentri.set(c.id, c))
-      const centriCompleti = Array.from(mappaCentri.values())
-      setCentriLavoro(centriCompleti)
+      // Postazione predefinita di sistema: sempre attiva e garantita per le lavorazioni esterne
+      const centroEsternoDefault: CentroLavoro = {
+        id: 'mc-esterna-01',
+        codice: 'EXT-TERZISTI',
+        nome: 'Conto Terzi Esterno (Trattamenti / Verniciatura)',
+        reparto: 'Lavorazioni Esterne',
+        capacita_giornaliera_ore: 24,
+        costo_orario: 0,
+        attivo: true,
+        creato_il: new Date().toISOString()
+      }
+
+      const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+      const macchineCloud = await syncService.getCentriLavoro()
+
+      let centriFinali: CentroLavoro[] = []
+      if (macchineCloud && macchineCloud.length > 0) {
+        centriFinali = [...macchineCloud]
+      } else if (!azIsolata) {
+        const centriSalvati = parseSicuro<CentroLavoro[]>('machinaflow_centri_lavoro', [])
+        const mappaCentri = new Map<string, CentroLavoro>()
+        SEED_CENTRI_LAVORO.forEach((c) => mappaCentri.set(c.id, c))
+        centriSalvati.forEach((c) => mappaCentri.set(c.id, c))
+        centriFinali = Array.from(mappaCentri.values())
+      }
+
+      // Assicura che la postazione speciale EXT-TERZISTI sia sempre presente in officina
+      if (!centriFinali.some((c) => c.id === 'mc-esterna-01' || c.codice === 'EXT-TERZISTI')) {
+        centriFinali.push(centroEsternoDefault)
+      }
+
+      setCentriLavoro(centriFinali)
 
       setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
       setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
