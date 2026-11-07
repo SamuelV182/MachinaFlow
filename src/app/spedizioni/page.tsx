@@ -229,6 +229,8 @@ export default function SpedizioniDdtPage() {
   // Caricamento Dati
   useEffect(() => {
     try {
+      const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+
       const parseSicuro = <T,>(chiave: string, fallback: T): T => {
         try {
           const item = localStorage.getItem(chiave)
@@ -240,9 +242,11 @@ export default function SpedizioniDdtPage() {
       }
 
       // 1. DDT Esterni Terzisti
-      const salvatiDdt = parseSicuro<DocumentoTrasportoEsterno[]>('machinaflow_ddt_esterni', SEED_DDT_ESTERNI)
+      const salvatiDdt = parseSicuro<DocumentoTrasportoEsterno[]>('machinaflow_ddt_esterni', azIsolata ? [] : SEED_DDT_ESTERNI)
       const mappaDdt = new Map<string, DocumentoTrasportoEsterno>()
-      SEED_DDT_ESTERNI.forEach((d) => mappaDdt.set(d.id, d))
+      if (!azIsolata) {
+        SEED_DDT_ESTERNI.forEach((d) => mappaDdt.set(d.id, d))
+      }
       salvatiDdt.forEach((d) => mappaDdt.set(d.id, d))
       setListaDdt(Array.from(mappaDdt.values()))
 
@@ -250,9 +254,13 @@ export default function SpedizioniDdtPage() {
       syncService.getDdtEsterni().then((ddtEstCloud) => {
         if (ddtEstCloud && ddtEstCloud.length > 0) {
           const mappa = new Map<string, DocumentoTrasportoEsterno>()
-          SEED_DDT_ESTERNI.forEach((d) => mappa.set(d.id, d))
+          if (!azIsolata) {
+            SEED_DDT_ESTERNI.forEach((d) => mappa.set(d.id, d))
+          }
           ddtEstCloud.forEach((d) => mappa.set(d.id, d))
           setListaDdt(Array.from(mappa.values()))
+        } else if (azIsolata) {
+          setListaDdt([])
         }
       })
 
@@ -262,14 +270,14 @@ export default function SpedizioniDdtPage() {
       setListaDdtClienti(ddtCliReali)
 
       // 3. Clienti, Ordini, OdP e Articoli
-      const cList = parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
-      const ordList = parseSicuro<typeof ordiniClienti>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
-      const odpLocali = parseSicuro<(OrdineProduzione & { fasi?: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
+      const cList = azIsolata ? [] : parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
+      const ordList = azIsolata ? [] : parseSicuro<typeof ordiniClienti>('machinaflow_ordini_clienti', SEED_ORDINI_CLIENTI)
+      const odpLocali = azIsolata ? [] : parseSicuro<(OrdineProduzione & { fasi?: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
 
       setClienti(cList)
       setOrdiniClienti(ordList)
       setOdpList(odpLocali)
-      setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
+      setArticoli(azIsolata ? [] : parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
 
       // Carica e sincronizza in parallelo OdP, DDT Clienti e Ordini Clienti da Supabase Cloud
       Promise.all([
@@ -316,24 +324,31 @@ export default function SpedizioniDdtPage() {
       })
 
       // 4. Anagrafica Fornitori Terzisti
-      const salvatiTerzisti = parseSicuro<FornitoreTerzista[]>('machinaflow_fornitori_terzisti', SEED_FORNITORI_TERZISTI)
+      const salvatiTerzisti = parseSicuro<FornitoreTerzista[]>('machinaflow_fornitori_terzisti', azIsolata ? [] : SEED_FORNITORI_TERZISTI)
       const mappaT = new Map<string, FornitoreTerzista>()
-      SEED_FORNITORI_TERZISTI.forEach((t) => mappaT.set(t.id, t))
+      if (!azIsolata) {
+        SEED_FORNITORI_TERZISTI.forEach((t) => mappaT.set(t.id, t))
+      }
       salvatiTerzisti.forEach((t) => mappaT.set(t.id, t))
       setTerzisti(Array.from(mappaT.values()))
 
       syncService.getFornitoriTerzisti().then((terzCloud) => {
         if (terzCloud && terzCloud.length > 0) {
           const mappa = new Map<string, FornitoreTerzista>()
-          SEED_FORNITORI_TERZISTI.forEach((t) => mappa.set(t.id, t))
+          if (!azIsolata) {
+            SEED_FORNITORI_TERZISTI.forEach((t) => mappa.set(t.id, t))
+          }
           terzCloud.forEach((t) => mappa.set(t.id, t))
           setTerzisti(Array.from(mappa.values()))
+        } else if (azIsolata) {
+          setTerzisti([])
         }
       })
     } catch {
-      setListaDdt(SEED_DDT_ESTERNI)
-      setListaDdtClienti(SEED_DDT_CLIENTI)
-      setTerzisti(SEED_FORNITORI_TERZISTI)
+      const azIsol = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+      setListaDdt(azIsol ? [] : SEED_DDT_ESTERNI)
+      setListaDdtClienti([])
+      setTerzisti(azIsol ? [] : SEED_FORNITORI_TERZISTI)
     }
 
     const disiscrivi = syncService.sottoscriviAvanzamentoProduzione(() => {

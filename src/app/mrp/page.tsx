@@ -306,7 +306,9 @@ export default function MRPPage() {
       }
     }
 
-    const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
+    const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+
+    const distinteList = azIsolata ? [] : parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
     setDistinte(distinteList)
 
     const ordiniFornitoreCaricati = parseSicuro<OrdineFornitore[]>('machinaflow_ordini_fornitori', [])
@@ -314,8 +316,8 @@ export default function MRPPage() {
 
     const caricaDatiRealtime = async () => {
       // 1. Carica prima dalla cache locale per reattività immediata
-      const articoliLocali = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
-      const odpLocali = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
+      const articoliLocali = azIsolata ? [] : parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
+      const odpLocali = azIsolata ? [] : parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
       setArticoli(articoliLocali)
       setOdpList(odpLocali)
       ricalcolaMrp(articoliLocali, distinteList, odpLocali, ordiniFornitoreCaricati)
@@ -327,8 +329,8 @@ export default function MRPPage() {
           syncService.getOrdiniProduzione(),
           syncService.getOrdiniFornitori()
         ])
-        const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : articoliLocali
-        const odpEffettivi = odpCloud && odpCloud.length > 0 ? (odpCloud as (OrdineProduzione & { fasi: FaseOdP[] })[]) : odpLocali
+        const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : (azIsolata ? [] : articoliLocali)
+        const odpEffettivi = odpCloud && odpCloud.length > 0 ? (odpCloud as (OrdineProduzione & { fasi: FaseOdP[] })[]) : (azIsolata ? [] : odpLocali)
         
         // Auto-push verso Cloud per eventuali ordini fornitore creati offline o in locale
         const idCloud = new Set((fornitoriCloud || []).map((f) => f.id))

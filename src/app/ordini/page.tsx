@@ -242,6 +242,8 @@ export default function OrdiniPage() {
 
   useEffect(() => {
     const caricaDati = async () => {
+      const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
+
       const parseSicuro = <T,>(chiave: string, fallback: T): T => {
         try {
           const item = localStorage.getItem(chiave)
@@ -252,13 +254,15 @@ export default function OrdiniPage() {
         }
       }
 
-      const clientiList = parseSicuro('machinaflow_clienti', SEED_CLIENTI)
+      const clientiList = azIsolata ? [] : parseSicuro('machinaflow_clienti', SEED_CLIENTI)
       setClienti(clientiList)
 
       // Unisci articoli salvati con seed
       const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
       const mappaArticoli = new Map<string, Articolo>()
-      SEED_ARTICOLI.forEach((a) => mappaArticoli.set(a.id, a))
+      if (!azIsolata) {
+        SEED_ARTICOLI.forEach((a) => mappaArticoli.set(a.id, a))
+      }
       articoliSalvati.forEach((a) => mappaArticoli.set(a.id, a))
       const articoliList = Array.from(mappaArticoli.values())
       setArticoli(articoliList)
@@ -266,7 +270,9 @@ export default function OrdiniPage() {
       // Unisci cicli salvati con seed
       const cicliSalvati = parseSicuro<FaseCicloStandard[]>('machinaflow_cicli', [])
       const mappaCicli = new Map<string, FaseCicloStandard>()
-      SEED_FASI_CICLO.forEach((c) => mappaCicli.set(c.id, c))
+      if (!azIsolata) {
+        SEED_FASI_CICLO.forEach((c) => mappaCicli.set(c.id, c))
+      }
       cicliSalvati.forEach((c) => mappaCicli.set(c.id, c))
       const cicliList = Array.from(mappaCicli.values())
       setCicli(cicliList)
@@ -274,12 +280,14 @@ export default function OrdiniPage() {
       // Unisci distinte salvate con seed
       const distinteSalvate = parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', [])
       const mappaDistinte = new Map<string, ComponenteDistintaBase>()
-      SEED_DISTINTA_BASE.forEach((d) => mappaDistinte.set(d.id, d))
+      if (!azIsolata) {
+        SEED_DISTINTA_BASE.forEach((d) => mappaDistinte.set(d.id, d))
+      }
       distinteSalvate.forEach((d) => mappaDistinte.set(d.id, d))
       const distinteList = Array.from(mappaDistinte.values())
       setDistinte(distinteList)
 
-      const centriList = parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
+      const centriList = azIsolata ? [] : parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
       setCentriLavoro(centriList)
 
       // Carica e sincronizza OdP da Supabase Cloud
