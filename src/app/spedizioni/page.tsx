@@ -584,12 +584,7 @@ export default function SpedizioniDdtPage() {
           })
           if (qtaSpeditaQuestoOdp >= odp.quantita_da_produrre) return
 
-          const eLottoRimpiazzatoDaScarto = lottiRimpiazzo.length > 0 && 
-            odp.codice_odp.endsWith('/B') && 
-            lottiRimpiazzo.some((r) => r.codice_odp.replace(/\/R$/, '') === odp.codice_odp.replace(/\/B$/, ''))
-
-          if (eLottoRimpiazzatoDaScarto) return
-
+          // Verifica se questo OdP è completato (tutte le fasi chiuse oppure stato 'completato')
           const tutteFasiCompletate = odp.fasi && odp.fasi.length > 0 && odp.fasi.every((f) => f.stato === 'completata')
           const isCompletato = odp.stato === 'completato' || tutteFasiCompletate
           // Pezzi pronti considerati SOLO se l'OdP è interamente completato
