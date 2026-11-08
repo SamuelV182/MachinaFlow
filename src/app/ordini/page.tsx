@@ -774,7 +774,14 @@ export default function OrdiniPage() {
 
         const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
         const nuovoOdpId = `odp-${Date.now()}-${rigaIdx}-${Math.random().toString(36).substring(2, 5)}`
-        const codiceOdp = syncService.formattaCodiceOdpPerAzienda(`ODP-2026-${String(tempOdpList.length + 1).padStart(3, '0')}`)
+        // Calcola il prossimo numero progressivo considerando solo le radici base (senza contare /A, /B, /R)
+        const radiciBase = new Set(tempOdpList.map((o) => o.codice_odp.replace(/\/.*$/, '').replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '')))
+        let maxNum = 0
+        radiciBase.forEach((r) => {
+          const m = r.match(/(\d+)$/)
+          if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10))
+        })
+        const codiceOdp = syncService.formattaCodiceOdpPerAzienda(`ODP-2026-${String(maxNum + 1).padStart(3, '0')}`)
 
         const fasiEsecutive: FaseOdP[] = fasiArticolo.map((faseStd, index) => {
           const tempoStimatoTotale = faseStd.is_esterna
@@ -879,7 +886,13 @@ export default function OrdiniPage() {
 
       const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
       const nuovoOdpId = `odp-${Date.now()}-${rigaIdx}`
-      const codiceOdp = syncService.formattaCodiceOdpPerAzienda(`ODP-2026-${String(tempOdpList.length + 1).padStart(3, '0')}`)
+      const radiciBase = new Set(tempOdpList.map((o) => o.codice_odp.replace(/\/.*$/, '').replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '')))
+      let maxNum = 0
+      radiciBase.forEach((r) => {
+        const m = r.match(/(\d+)$/)
+        if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10))
+      })
+      const codiceOdp = syncService.formattaCodiceOdpPerAzienda(`ODP-2026-${String(maxNum + 1).padStart(3, '0')}`)
 
       const fasiEsecutive: FaseOdP[] = fasiArticolo.map((faseStd, index) => {
         const tempoStimatoTotale = faseStd.is_esterna
@@ -988,7 +1001,13 @@ export default function OrdiniPage() {
     const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
 
     const nuovoOdpId = 'odp-' + Date.now()
-    const codiceOdp = syncService.formattaCodiceOdpPerAzienda(`ODP-2026-${String(odpList.length + 1).padStart(3, '0')}`)
+    const radiciBase = new Set(odpList.map((o) => o.codice_odp.replace(/\/.*$/, '').replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '')))
+    let maxNum = 0
+    radiciBase.forEach((r) => {
+      const m = r.match(/(\d+)$/)
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10))
+    })
+    const codiceOdp = syncService.formattaCodiceOdpPerAzienda(`ODP-2026-${String(maxNum + 1).padStart(3, '0')}`)
 
     // 2. Crea le fasi OdP moltiplicando i tempi ciclo per la quantità
     const fasiEsecutive: FaseOdP[] = fasiArticolo.map((faseStd, index) => {
