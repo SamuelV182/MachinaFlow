@@ -42,6 +42,32 @@ export function getCurrentAziendaId(): string | null {
   return null
 }
 
+// Restituisce una sigla o codice breve univoco per l'azienda corrente (es. 'BRB', 'PILOTA', ecc.)
+export function getSiglaAziendaCorrente(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    const azId = getCurrentAziendaId()
+    if (!azId || azId === 'az-pilota-01') return ''
+    const match = azId.match(/^az-([a-z0-9]+)/i)
+    if (match && match[1]) {
+      return match[1].slice(0, 5).toUpperCase()
+    }
+  } catch {}
+  return ''
+}
+
+// Costruisce o normalizza un codice OdP con sigla aziendale (es. 'ODP-BRB-2026-001' oppure 'ODP-2026-001' se pilota)
+export function formattaCodiceOdpPerAzienda(codiceBase: string): string {
+  const sigla = getSiglaAziendaCorrente()
+  if (!sigla) return codiceBase
+  if (codiceBase.includes(`-${sigla}-`)) return codiceBase
+  // Sostituisce 'ODP-2026-' o 'ODP-' con 'ODP-SIGLA-2026-'
+  if (codiceBase.startsWith('ODP-')) {
+    return codiceBase.replace(/^ODP-/, `ODP-${sigla}-`)
+  }
+  return `ODP-${sigla}-${codiceBase}`
+}
+
 // Verifica se siamo in modalità supporto o con un'azienda diversa da quella demo pilota
 export function isAziendaClienteIsolata(): boolean {
   const azId = getCurrentAziendaId()
@@ -50,6 +76,8 @@ export function isAziendaClienteIsolata(): boolean {
 
 export const syncService = {
   getCurrentAziendaId,
+  getSiglaAziendaCorrente,
+  formattaCodiceOdpPerAzienda,
   isAziendaClienteIsolata,
   // Sincronizza Seed iniziale nel Database Cloud se vuoto
   async inizializzaDatabaseSeVuoto() {
@@ -235,21 +263,27 @@ export const syncService = {
       }
 
       if (nuovoOdp.fasi && nuovoOdp.fasi.length > 0) {
-        const fasiPulite = nuovoOdp.fasi.map((f) => ({
-          id: f.id,
-          odp_id: nuovoOdp.id,
-          sequenza: f.sequenza,
-          nome_fase: f.nome_fase,
-          tipo_processo_id: f.tipo_processo_id || null,
-          centro_lavoro_id: f.centro_lavoro_id,
-          tempo_stimato_totale_min: f.tempo_stimato_totale_min || 0,
-          tempo_effettivo_min: f.tempo_effettivo_min || 0,
-          stato: f.stato || 'non_iniziata',
-          operatore_id: f.operatore_id || null,
-          data_inizio_reale: f.data_inizio_reale || null,
-          data_fine_reale: f.data_fine_reale || null,
-          note_officina: f.note_officina || null
-        }))
+        const fasiPulite = nuovoOdp.fasi.map((f) => {
+          const faseRow: any = {
+            id: f.id,
+            odp_id: nuovoOdp.id,
+            sequenza: f.sequenza,
+            nome_fase: f.nome_fase,
+            tipo_processo_id: f.tipo_processo_id || null,
+            centro_lavoro_id: f.centro_lavoro_id,
+            tempo_stimato_totale_min: f.tempo_stimato_totale_min || 0,
+            tempo_effettivo_min: f.tempo_effettivo_min || 0,
+            stato: f.stato || 'non_iniziata',
+            operatore_id: f.operatore_id || null,
+            data_inizio_reale: f.data_inizio_reale || null,
+            data_fine_reale: f.data_fine_reale || null,
+            note_officina: f.note_officina || null
+          }
+          if (azId) {
+            faseRow.azienda_id = azId
+          }
+          return faseRow
+        })
         const resFasi = await supabase.from('fasi_odp').upsert(fasiPulite)
         if (resFasi.error) {
           console.error('Errore inserimento fasi_odp:', JSON.stringify(resFasi.error, null, 2))
@@ -279,7 +313,8 @@ export const syncService = {
 
     // Aggiorna Cloud (solo colonne valide)
     try {
-      const fasePulita = {
+      const azId = getCurrentAziendaId()
+      const fasePulita: any = {
         id: fase.id,
         odp_id: fase.odp_id,
         sequenza: fase.sequenza,
@@ -293,6 +328,9 @@ export const syncService = {
         data_inizio_reale: fase.data_inizio_reale || null,
         data_fine_reale: fase.data_fine_reale || null,
         note_officina: fase.note_officina || null
+      }
+      if (azId) {
+        fasePulita.azienda_id = azId
       }
       await supabase.from('fasi_odp').upsert(fasePulita)
     } catch (e) {

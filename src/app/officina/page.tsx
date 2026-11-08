@@ -366,9 +366,22 @@ export default function TerminaleOfficinaPage() {
     nuovoStato: 'in_corso' | 'completata' | 'non_iniziata'
   ) => {
     ultimaAzioneLocaleTimestampRef.current = Date.now()
+    const odpTarget = odpList.find((o) => o.id === odpId)
+    const faseTarget = odpTarget?.fasi.find((f) => f.id === faseId)
+    const sequenzaTarget = faseTarget?.sequenza ?? 0
+
     const aggiornati = odpList.map((odp) => {
       if (odp.id === odpId) {
         const fasiAggiornate = odp.fasi.map((f) => {
+          // Se completiamo o avviamo una fase successiva, chiudi automaticamente le fasi fisiche precedenti rimaste aperte
+          if ((nuovoStato === 'in_corso' || nuovoStato === 'completata') && f.sequenza < sequenzaTarget && f.stato !== 'completata') {
+            return {
+              ...f,
+              stato: 'completata' as const,
+              data_fine_reale: f.data_fine_reale || new Date().toISOString(),
+              tempo_effettivo_min: f.tempo_effettivo_min || f.tempo_stimato_totale_min
+            }
+          }
           if (f.id === faseId) {
             return {
               ...f,
