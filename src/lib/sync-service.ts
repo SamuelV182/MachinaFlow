@@ -38,6 +38,16 @@ export function getCurrentAziendaId(): string | null {
     // 2. Azienda memorizzata dell'utente loggato
     const sessionAz = localStorage.getItem('machinaflow_session_azienda_id')
     if (sessionAz) return sessionAz
+
+    // 3. Fallback da Supabase auth session memorizzata nel browser
+    const sbKey = Object.keys(localStorage).find((k) => k.startsWith('sb-') && k.endsWith('-auth-token'))
+    if (sbKey) {
+      const tokenData = JSON.parse(localStorage.getItem(sbKey) || '{}')
+      const user = tokenData?.user
+      if (user?.user_metadata?.azienda_id) {
+        return user.user_metadata.azienda_id
+      }
+    }
   } catch {}
   return null
 }
@@ -462,13 +472,18 @@ export const syncService = {
 
       // Unisci le fonti:
       // 1. Base: SEED_ORDINI_CLIENTI solo se siamo nell'azienda demo pilota
-      // 2. Cloud: ordiniCompletiCloud
-      // 3. Locale: ordiniLocali
+      // 2. Cloud: ordiniCompletiCloud (autorità principale)
+      // 3. Locale: ordiniLocali (solo se appartengono alla stessa azienda)
       const mappa = new Map<string, any>()
       if (!isAziendaClienteIsolata()) {
         SEED_ORDINI_CLIENTI.forEach((o) => mappa.set(o.id, o))
+        ordiniLocali.forEach((o: any) => mappa.set(o.id, o))
+      } else if (azIdCorrente) {
+        // Se siamo su una nuova azienda isolata, accetta da localStorage solo quelli esplicitamente marchiati con il suo ID
+        ordiniLocali
+          .filter((o: any) => o.azienda_id === azIdCorrente)
+          .forEach((o: any) => mappa.set(o.id, o))
       }
-      ordiniLocali.forEach((o: any) => mappa.set(o.id, o))
       ordiniCompletiCloud.forEach((o: any) => mappa.set(o.id, o))
 
       const finale = Array.from(mappa.values())
