@@ -348,7 +348,7 @@ export const syncService = {
     }
   },
 
-  async aggiornaStatoOdP(odpId: string, nuovoStato: 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso' | 'scartato' | 'spedito', quantitaProdotta?: number) {
+  async aggiornaStatoOdP(odpId: string, nuovoStato: 'pianificato' | 'rilasciato' | 'in_lavorazione' | 'completato' | 'sospeso' | 'scartato' | 'spedito', quantitaProdotta?: number, quantitaDaProdurre?: number) {
     try {
       // Aggiorna localStorage
       const salvati = localStorage.getItem('machinaflow_odp')
@@ -357,6 +357,9 @@ export const syncService = {
         const odp = lista.find((o) => o.id === odpId)
         if (odp) {
           odp.stato = nuovoStato
+          if (quantitaDaProdurre !== undefined) {
+            odp.quantita_da_produrre = quantitaDaProdurre
+          }
           if (quantitaProdotta !== undefined) {
             odp.quantita_prodotta = quantitaProdotta
           } else if (nuovoStato === 'completato') {
@@ -368,6 +371,9 @@ export const syncService = {
 
       // Aggiorna Cloud Supabase
       const payload: any = { stato: nuovoStato }
+      if (quantitaDaProdurre !== undefined) {
+        payload.quantita_da_produrre = quantitaDaProdurre
+      }
       if (quantitaProdotta !== undefined) {
         payload.quantita_prodotta = quantitaProdotta
       }

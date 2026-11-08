@@ -270,13 +270,27 @@ export default function SpedizioniDdtPage() {
       setOdpList(odpLocali)
       setArticoli(azIsolata ? [] : parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
 
-      // Carica e sincronizza in parallelo OdP, DDT Clienti e Ordini Clienti da Supabase Cloud
+      // Carica e sincronizza in parallelo Clienti, OdP, DDT Clienti, Articoli e Ordini Clienti da Supabase Cloud
       Promise.all([
         syncService.getDdtClienti(),
         syncService.getOrdiniProduzione(),
-        syncService.getOrdiniClienti()
-      ]).then(async ([ddtCliCloud, odpCloud, ordiniCloud]) => {
+        syncService.getOrdiniClienti(),
+        syncService.getClienti(),
+        syncService.getArticoli()
+      ]).then(async ([ddtCliCloud, odpCloud, ordiniCloud, clientiCloud, articoliCloud]) => {
+        let listaClientiAggiornata = cList
+        if (clientiCloud && clientiCloud.length > 0) {
+          listaClientiAggiornata = clientiCloud
+          setClienti(clientiCloud)
+        }
+
+        if (articoliCloud && articoliCloud.length > 0) {
+          setArticoli(articoliCloud)
+        }
+
+        let listaOrdiniAggiornata = ordList
         if (ordiniCloud && ordiniCloud.length > 0) {
+          listaOrdiniAggiornata = ordiniCloud as any
           setOrdiniClienti(ordiniCloud as any)
         }
         // Allinea DDT Clienti Cloud
@@ -309,7 +323,7 @@ export default function SpedizioniDdtPage() {
           const params = new URLSearchParams(window.location.search)
           const paramClienteId = params.get('clienteId')
           if (paramClienteId) {
-            handleApriModaleDdtCliente(paramClienteId, listaOdpAggiornata, cList, ordList, listaDdtAggiornata)
+            handleApriModaleDdtCliente(paramClienteId, listaOdpAggiornata, listaClientiAggiornata, listaOrdiniAggiornata, listaDdtAggiornata)
           }
         }
       })

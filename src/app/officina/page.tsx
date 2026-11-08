@@ -675,11 +675,11 @@ export default function TerminaleOfficinaPage() {
       }
 
       // Altrimenti chiudi normalmente la fase
-      // Se ci sono stati scarti sul lotto chiuso al 100%, l'OdP originario prosegue con i pezzi buoni conformi
+      // Se ci sono stati scarti sul lotto chiuso al 100%, l'OdP originario riduce la quantità da produrre ai soli pezzi conformi
       if (pezziScarto > 0 && pezziBuoni < odp.quantita_da_produrre) {
         odp.quantita_da_produrre = pezziBuoni
         odp.quantita_prodotta = pezziBuoni
-        await syncService.aggiornaStatoOdP(odp.id, odp.stato, pezziBuoni)
+        await syncService.aggiornaStatoOdP(odp.id, odp.stato, pezziBuoni, pezziBuoni)
       }
       await handleCambiaStatoFase(odp.id, fase.id, 'completata')
 
@@ -688,7 +688,10 @@ export default function TerminaleOfficinaPage() {
         await syncService.salvaOrdineProduzione(nuovoOdpRipristino)
 
         setOdpList((prev) => {
-          const listaConRipristino = [nuovoOdpRipristino!, ...prev.filter((o) => o.id !== nuovoOdpRipristino!.id)]
+          const listaConRipristino = [
+            nuovoOdpRipristino!,
+            ...prev.map((o) => (o.id === odp.id ? { ...o, quantita_da_produrre: pezziBuoni, quantita_prodotta: pezziBuoni } : o))
+          ]
           localStorage.setItem('machinaflow_odp', JSON.stringify(listaConRipristino))
           return listaConRipristino
         })
