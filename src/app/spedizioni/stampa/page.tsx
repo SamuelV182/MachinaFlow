@@ -14,9 +14,17 @@ function DdtStampaContent() {
 
   const [ddt, setDdt] = useState<DocumentoTrasportoCliente | DocumentoTrasportoEsterno | null>(null)
   const [ordiniClienti, setOrdiniClienti] = useState<OrdineCliente[]>([])
+  const [azienda, setAzienda] = useState<any>(null)
   const [caricato, setCaricato] = useState(false)
 
   useEffect(() => {
+    try {
+      const azCache = localStorage.getItem('machinaflow_session_azienda_dati')
+      if (azCache) {
+        setAzienda(JSON.parse(azCache))
+      }
+    } catch {}
+
     try {
       const ordiniSalvati = localStorage.getItem('machinaflow_ordini_clienti')
       if (ordiniSalvati) {
@@ -174,8 +182,8 @@ function DdtStampaContent() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
               <span className="text-[10px] font-bold text-slate-500 uppercase block">LUOGO DI PARTENZA (MITTENTE)</span>
-              <strong className="text-slate-900 block">MachinaFlow Meccanica S.r.l. - Stabilimento 1</strong>
-              <span className="text-slate-600 block text-[11px]">Via dell&apos;Industria 14 - 41012 Carpi (MO)</span>
+              <strong className="text-slate-900 block">{azienda?.nome || 'BRB Meccanica SRL'}</strong>
+              <span className="text-slate-600 block text-[11px]">{azienda?.indirizzo ? `${azienda.indirizzo} - ${azienda.cap || ''} ${azienda.citta || ''} (${azienda.provincia || ''})` : 'Via Ciarpi 6 - 55016 Porcari (LU)'}</span>
               <span className="text-slate-500 text-[10px] block">Causale: {ddt.causale_trasporto} &bull; Porto: {ddt.porto}</span>
             </div>
 

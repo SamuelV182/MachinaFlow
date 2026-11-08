@@ -42,10 +42,10 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
           localStorage.setItem('machinaflow_session_email', user.email)
         } catch {}
 
-        // Recupera profilo e azienda
+        // Recupera profilo e azienda completa
         const { data: profilo } = await supabase
           .from('profili_utenti')
-          .select('ruolo, azienda_id, azienda:aziende(nome)')
+          .select('ruolo, azienda_id, azienda:aziende(*)')
           .eq('id', user.id)
           .single()
 
@@ -55,6 +55,9 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
             localStorage.setItem('machinaflow_session_ruolo', profilo.ruolo)
             if (profilo.azienda_id) {
               localStorage.setItem('machinaflow_session_azienda_id', profilo.azienda_id)
+            }
+            if ((profilo as any).azienda) {
+              localStorage.setItem('machinaflow_session_azienda_dati', JSON.stringify((profilo as any).azienda))
             }
           } catch {}
 

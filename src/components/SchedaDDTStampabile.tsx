@@ -30,22 +30,34 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
   // Recupera i dati dell'azienda corrente per l'intestazione personalizzata
   useEffect(() => {
+    // 1. Tenta subito da cache locale per evitare il "lampo" con dati demo
+    try {
+      const azCache = localStorage.getItem('machinaflow_session_azienda_dati')
+      if (azCache) {
+        setAzienda(JSON.parse(azCache))
+      }
+    } catch {}
+
     const caricaAzienda = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
-        const { data: profilo } = await supabase
-          .from('profili_utenti')
-          .select('azienda_id')
-          .eq('id', user.id)
-          .single()
-
-        let azId = profilo?.azienda_id || 'az-pilota-01'
+        let azId = ''
         try {
           const azSup = localStorage.getItem('machinaflow_supporto_azienda_id')
-          if (azSup) azId = azSup
+          const azSess = localStorage.getItem('machinaflow_session_azienda_id')
+          azId = azSup || azSess || ''
         } catch {}
+
+        if (!azId) {
+          const { data: profilo } = await supabase
+            .from('profili_utenti')
+            .select('azienda_id')
+            .eq('id', user.id)
+            .single()
+          azId = profilo?.azienda_id || 'az-pilota-01'
+        }
 
         const { data: azData } = await supabase
           .from('aziende')
@@ -55,6 +67,9 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
         if (azData) {
           setAzienda(azData as Azienda)
+          try {
+            localStorage.setItem('machinaflow_session_azienda_dati', JSON.stringify(azData))
+          } catch {}
         }
       } catch (err) {
         console.warn('Recupero azienda per DDT fallback:', err)
