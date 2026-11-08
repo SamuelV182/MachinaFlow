@@ -254,13 +254,14 @@ export default function OrdiniPage() {
         }
       }
 
-      const clientiList = azIsolata ? [] : parseSicuro('machinaflow_clienti', SEED_CLIENTI)
-      setClienti(clientiList)
-      syncService.getClienti().then((cList) => {
-        if (cList && cList.length > 0) {
-          setClienti(cList)
+      let clientiList = azIsolata ? [] : parseSicuro<Cliente[]>('machinaflow_clienti', SEED_CLIENTI)
+      try {
+        const cCloud = await syncService.getClienti()
+        if (cCloud && cCloud.length > 0) {
+          clientiList = cCloud
         }
-      })
+      } catch {}
+      setClienti(clientiList)
 
       // Unisci articoli salvati con seed
       const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
