@@ -256,6 +256,11 @@ export default function OrdiniPage() {
 
       const clientiList = azIsolata ? [] : parseSicuro('machinaflow_clienti', SEED_CLIENTI)
       setClienti(clientiList)
+      syncService.getClienti().then((cList) => {
+        if (cList && cList.length > 0) {
+          setClienti(cList)
+        }
+      })
 
       // Unisci articoli salvati con seed
       const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
@@ -547,6 +552,7 @@ export default function OrdiniPage() {
       clientiAggiornati = [nuovoCliente, ...clienti]
       setClienti(clientiAggiornati)
       localStorage.setItem('machinaflow_clienti', JSON.stringify(clientiAggiornati))
+      syncService.salvaCliente(nuovoCliente)
       finalClienteId = nuovoCliente.id
     }
 
@@ -1022,26 +1028,29 @@ export default function OrdiniPage() {
     if (!formCliente.ragione_sociale.trim()) return
 
     let aggiornati: Cliente[]
+    let clienteDaSalvare: Cliente
     if (clienteInModifica) {
+      clienteDaSalvare = { ...clienteInModifica, ...formCliente, ragione_sociale: formCliente.ragione_sociale.trim() }
       aggiornati = clienti.map((c) =>
         c.id === clienteInModifica.id
-          ? { ...c, ...formCliente, ragione_sociale: formCliente.ragione_sociale.trim() }
+          ? clienteDaSalvare
           : c
       )
       setNotifica(`✓ Cliente "${formCliente.ragione_sociale}" aggiornato con successo!`)
     } else {
-      const nuovoCliente: Cliente = {
+      clienteDaSalvare = {
         id: `cli-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         ...formCliente,
         ragione_sociale: formCliente.ragione_sociale.trim(),
         creato_il: new Date().toISOString()
       }
-      aggiornati = [nuovoCliente, ...clienti]
-      setNotifica(`✓ Nuovo cliente "${nuovoCliente.ragione_sociale}" inserito con successo!`)
+      aggiornati = [clienteDaSalvare, ...clienti]
+      setNotifica(`✓ Nuovo cliente "${clienteDaSalvare.ragione_sociale}" inserito con successo!`)
     }
 
     setClienti(aggiornati)
     localStorage.setItem('machinaflow_clienti', JSON.stringify(aggiornati))
+    syncService.salvaCliente(clienteDaSalvare)
     setModaleClienteAperta(false)
     setClienteInModifica(null)
     setTimeout(() => setNotifica(null), 4000)
@@ -1058,6 +1067,7 @@ export default function OrdiniPage() {
     const filtrati = clienti.filter((c) => c.id !== id)
     setClienti(filtrati)
     localStorage.setItem('machinaflow_clienti', JSON.stringify(filtrati))
+    syncService.eliminaCliente(id)
     setNotifica(`Cliente "${ragioneSociale}" rimosso dall'anagrafica.`)
     setTimeout(() => setNotifica(null), 3000)
   }

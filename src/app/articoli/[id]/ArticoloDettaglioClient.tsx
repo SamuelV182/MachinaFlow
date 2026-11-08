@@ -35,6 +35,7 @@ import {
   SEED_CENTRI_LAVORO,
   SEED_TIPI_PROCESSO
 } from '@/lib/data-service'
+import { syncService } from '@/lib/sync-service'
 
 export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) {
   const [articolo, setArticolo] = useState<Articolo | null>(null)
@@ -192,7 +193,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       }
     }
 
-    // 1. Carica Articoli
+    // 1. Carica Articoli (da cache immediata, poi sincronizza se necessario)
     const articoliList = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
     setTuttiArticoli(articoliList)
     const trovato = articoliList.find((a) => a.id === articoloId)
@@ -202,16 +203,26 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
     setTipiProcesso(parseSicuro('machinaflow_tipi_processo', SEED_TIPI_PROCESSO))
 
-    // 3. Carica Distinte Base
+    // 3. Carica Distinte Base (prima da cache, poi da Supabase Cloud)
     const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
     setDistinta(distinteList.filter((d) => d.articolo_padre_id === articoloId))
+    syncService.getDistinte(articoloId).then((cloudDistinte) => {
+      if (cloudDistinte && cloudDistinte.length > 0) {
+        setDistinta(cloudDistinte)
+      }
+    })
 
-    // 4. Carica Fasi Ciclo
+    // 4. Carica Fasi Ciclo (prima da cache, poi da Supabase Cloud)
     const cicliList = parseSicuro('machinaflow_cicli', SEED_FASI_CICLO)
     const delQuesto = cicliList
       .filter((c) => c.articolo_id === articoloId)
       .sort((a, b) => a.sequenza - b.sequenza)
     setFasiCiclo(delQuesto)
+    syncService.getFasiCiclo(articoloId).then((cloudFasi) => {
+      if (cloudFasi && cloudFasi.length > 0) {
+        setFasiCiclo(cloudFasi.sort((a, b) => a.sequenza - b.sequenza))
+      }
+    })
   }, [articoloId])
 
   // Aggiungi o Modifica Componente nella Distinta Base
@@ -246,6 +257,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
       const tuttiAggiornati = [nuovoArt, ...tuttiArticoli]
       setTuttiArticoli(tuttiAggiornati)
       localStorage.setItem('machinaflow_articoli', JSON.stringify(tuttiAggiornati))
+      syncService.salvaArticolo(nuovoArt)
 
       finalComponenteId = nuovoArt.id
       setNotificaSuccesso(`Articolo ${nuovoArt.codice_articolo} registrato in anagrafica e aggiunto alla distinta!`)
@@ -255,28 +267,27 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     if (!finalComponenteId) return
 
     let aggiornata: ComponenteDistintaBase[]
+    let componenteSalvato: ComponenteDistintaBase
     if (modificaBomId) {
-      aggiornata = distinta.map((comp) =>
-        comp.id === modificaBomId
-          ? {
-              ...comp,
-              articolo_componente_id: finalComponenteId,
-              quantita_necessaria: qtaValida,
-              note: formBom.note
-            }
-          : comp
-      )
+      componenteSalvato = {
+        id: modificaBomId,
+        articolo_padre_id: articoloId,
+        articolo_componente_id: finalComponenteId,
+        quantita_necessaria: qtaValida,
+        note: formBom.note
+      }
+      aggiornata = distinta.map((comp) => (comp.id === modificaBomId ? componenteSalvato : comp))
       setNotificaSuccesso('Componente della distinta base aggiornato con successo!')
       setTimeout(() => setNotificaSuccesso(null), 3000)
     } else {
-      const nuovoComp: ComponenteDistintaBase = {
+      componenteSalvato = {
         id: 'bom-' + Date.now(),
         articolo_padre_id: articoloId,
         articolo_componente_id: finalComponenteId,
         quantita_necessaria: qtaValida,
         note: formBom.note
       }
-      aggiornata = [...distinta, nuovoComp]
+      aggiornata = [...distinta, componenteSalvato]
     }
 
     setDistinta(aggiornata)
@@ -285,6 +296,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     const distinteList: ComponenteDistintaBase[] = salvateDistinte ? JSON.parse(salvateDistinte) : SEED_DISTINTA_BASE
     const filtrateGlobali = distinteList.filter((d) => d.articolo_padre_id !== articoloId)
     localStorage.setItem('machinaflow_distinte', JSON.stringify([...filtrateGlobali, ...aggiornata]))
+    syncService.salvaComponenteDistinta(componenteSalvato)
 
     setModaleBomAperta(false)
     setModificaBomId(null)
@@ -309,6 +321,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     const distinteList: ComponenteDistintaBase[] = salvateDistinte ? JSON.parse(salvateDistinte) : SEED_DISTINTA_BASE
     const filtrateGlobali = distinteList.filter((d) => d.id !== id)
     localStorage.setItem('machinaflow_distinte', JSON.stringify(filtrateGlobali))
+    syncService.eliminaComponenteDistinta(id)
   }
 
   // Aggiungi o Modifica Fase al Ciclo di Lavorazione
@@ -320,36 +333,35 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     const cicloPzMin = parseFloat(String(formCiclo.tempo_ciclo_pezzo_min).replace(',', '.').trim()) || 0
 
     let aggiornato: FaseCicloStandard[]
+    let faseSalvata: FaseCicloStandard
 
     if (modificaCicloId) {
+      faseSalvata = {
+        id: modificaCicloId,
+        articolo_id: articoloId,
+        sequenza: Number(formCiclo.sequenza),
+        nome_fase: formCiclo.nome_fase.trim(),
+        tipo_processo_id: formCiclo.tipo_processo_id || undefined,
+        centro_lavoro_id: formCiclo.is_esterna ? 'mc-esterna-01' : formCiclo.centro_lavoro_id,
+        centri_lavoro_alternativi_ids: formCiclo.is_esterna ? [] : formCiclo.centri_lavoro_alternativi_ids || [],
+        tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
+        tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
+        note_operative: formCiclo.note_operative,
+        preleva_materia_prima: formCiclo.preleva_materia_prima,
+        is_esterna: formCiclo.is_esterna,
+        fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
+        giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
+        modello_tariffa: formCiclo.is_esterna ? formCiclo.modello_tariffa : undefined,
+        costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
+        costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
+      }
       aggiornato = fasiCiclo
-        .map((fase) =>
-          fase.id === modificaCicloId
-            ? {
-                ...fase,
-                sequenza: Number(formCiclo.sequenza),
-                nome_fase: formCiclo.nome_fase.trim(),
-                tipo_processo_id: formCiclo.tipo_processo_id || undefined,
-                centro_lavoro_id: formCiclo.is_esterna ? 'mc-esterna-01' : formCiclo.centro_lavoro_id,
-                centri_lavoro_alternativi_ids: formCiclo.is_esterna ? [] : formCiclo.centri_lavoro_alternativi_ids || [],
-                tempo_attrezzaggio_min: formCiclo.is_esterna ? 0 : setupMin,
-                tempo_ciclo_pezzo_min: formCiclo.is_esterna ? 0 : cicloPzMin,
-                note_operative: formCiclo.note_operative,
-                preleva_materia_prima: formCiclo.preleva_materia_prima,
-                is_esterna: formCiclo.is_esterna,
-                fornitore_nome: formCiclo.is_esterna ? formCiclo.fornitore_nome.trim() : undefined,
-                giorni_rientro_previsti: formCiclo.is_esterna ? Number(formCiclo.giorni_rientro_previsti) || 5 : undefined,
-                modello_tariffa: formCiclo.is_esterna ? formCiclo.modello_tariffa : undefined,
-                costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
-                costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
-              }
-            : fase
-        )
+        .map((fase) => (fase.id === modificaCicloId ? faseSalvata : fase))
         .sort((a, b) => a.sequenza - b.sequenza)
       setNotificaSuccesso('Fase del ciclo di lavorazione aggiornata con successo!')
       setTimeout(() => setNotificaSuccesso(null), 3000)
     } else {
-      const nuovaFase: FaseCicloStandard = {
+      faseSalvata = {
         id: 'ciclo-' + Date.now(),
         articolo_id: articoloId,
         sequenza: Number(formCiclo.sequenza),
@@ -368,7 +380,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
         costo_tariffa_valore: formCiclo.is_esterna ? Number(formCiclo.costo_tariffa_valore) || 0 : undefined,
         costo_minimo_fornitura: formCiclo.is_esterna ? Number(formCiclo.costo_minimo_fornitura) || 0 : undefined
       }
-      aggiornato = [...fasiCiclo, nuovaFase].sort((a, b) => a.sequenza - b.sequenza)
+      aggiornato = [...fasiCiclo, faseSalvata].sort((a, b) => a.sequenza - b.sequenza)
     }
 
     setFasiCiclo(aggiornato)
@@ -377,6 +389,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     const cicliList: FaseCicloStandard[] = salvatiCicli ? JSON.parse(salvatiCicli) : SEED_FASI_CICLO
     const filtratiGlobali = cicliList.filter((c) => c.articolo_id !== articoloId)
     localStorage.setItem('machinaflow_cicli', JSON.stringify([...filtratiGlobali, ...aggiornato]))
+    syncService.salvaFaseCiclo(faseSalvata)
 
     setModaleCicloAperta(false)
     setModificaCicloId(null)
@@ -410,6 +423,7 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     const cicliList: FaseCicloStandard[] = salvatiCicli ? JSON.parse(salvatiCicli) : SEED_FASI_CICLO
     const filtratiGlobali = cicliList.filter((c) => c.id !== id)
     localStorage.setItem('machinaflow_cicli', JSON.stringify(filtratiGlobali))
+    syncService.eliminaFaseCiclo(id)
   }
 
   // Calcolo tempo totale per un lotto indicativo da 10 pezzi

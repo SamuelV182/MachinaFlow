@@ -206,7 +206,8 @@ export const syncService = {
 
     // 2. Salva su Supabase Cloud (solo colonne presenti nel database)
     try {
-      const datiOdpPuliti = {
+      const azId = getCurrentAziendaId()
+      const datiOdpPuliti: any = {
         id: nuovoOdp.id,
         codice_odp: nuovoOdp.codice_odp,
         riga_ordine_cliente_id: nuovoOdp.riga_ordine_cliente_id || null,
@@ -221,6 +222,9 @@ export const syncService = {
         note: nuovoOdp.note || null,
         materia_prima_scaricata: nuovoOdp.materia_prima_scaricata ?? false,
         data_scarico_materia_prima: nuovoOdp.data_scarico_materia_prima || null
+      }
+      if (azId) {
+        datiOdpPuliti.azienda_id = azId
       }
       const { error: errOdp } = await supabase
         .from('ordini_produzione')
@@ -458,6 +462,7 @@ export const syncService = {
 
     // 2. Tenta la sincronizzazione cloud su Supabase
     try {
+      const azId = getCurrentAziendaId()
       // Prepariamo il payload: proviamo con riferimento_ordine_cliente, con fallback se la colonna non esiste ancora nel DB
       const payloadOrdine: any = {
         id: ordine.id,
@@ -467,6 +472,9 @@ export const syncService = {
         data_consegna_concordata: ordine.data_consegna_concordata,
         stato: ordine.stato,
         note: ordine.note || null
+      }
+      if (azId) {
+        payloadOrdine.azienda_id = azId
       }
       if (ordine.riferimento_ordine_cliente !== undefined) {
         payloadOrdine.riferimento_ordine_cliente = ordine.riferimento_ordine_cliente
@@ -571,7 +579,8 @@ export const syncService = {
 
   async salvaArticolo(articolo: Articolo) {
     try {
-      await supabase.from('articoli').upsert({
+      const azId = getCurrentAziendaId()
+      const payload: any = {
         id: articolo.id,
         codice_articolo: articolo.codice_articolo,
         descrizione: articolo.descrizione,
@@ -580,9 +589,215 @@ export const syncService = {
         giacenza_attuale: articolo.giacenza_attuale,
         scorta_minima: articolo.scorta_minima,
         prezzo_riferimento: articolo.prezzo_riferimento || 0
-      })
+      }
+      if (azId) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('articoli').upsert(payload)
     } catch (e) {
       console.error('Errore salvataggio articolo su Supabase:', e)
+    }
+  },
+
+  // DISTINTA BASE (BOM)
+  async getDistinte(articoloPadreId?: string): Promise<ComponenteDistintaBase[]> {
+    try {
+      let query = supabase.from('distinta_base').select('*')
+      if (articoloPadreId) {
+        query = query.eq('articolo_padre_id', articoloPadreId)
+      }
+      const { data, error } = await query
+      if (error) {
+        console.warn('Errore lettura distinta_base da Supabase:', error.message)
+        const salvati = localStorage.getItem('machinaflow_distinte')
+        const lista: ComponenteDistintaBase[] = salvati ? JSON.parse(salvati) : (isAziendaClienteIsolata() ? [] : SEED_DISTINTA_BASE)
+        return articoloPadreId ? lista.filter((d) => d.articolo_padre_id === articoloPadreId) : lista
+      }
+
+      if (data && data.length > 0) {
+        return data as ComponenteDistintaBase[]
+      }
+
+      if (isAziendaClienteIsolata()) {
+        return []
+      }
+
+      const salvati = localStorage.getItem('machinaflow_distinte')
+      const lista: ComponenteDistintaBase[] = salvati ? JSON.parse(salvati) : SEED_DISTINTA_BASE
+      return articoloPadreId ? lista.filter((d) => d.articolo_padre_id === articoloPadreId) : lista
+    } catch (e) {
+      console.error('Errore getDistinte:', e)
+      const salvati = localStorage.getItem('machinaflow_distinte')
+      const lista: ComponenteDistintaBase[] = salvati ? JSON.parse(salvati) : (isAziendaClienteIsolata() ? [] : SEED_DISTINTA_BASE)
+      return articoloPadreId ? lista.filter((d) => d.articolo_padre_id === articoloPadreId) : lista
+    }
+  },
+
+  async salvaComponenteDistinta(comp: ComponenteDistintaBase) {
+    try {
+      await supabase.from('distinta_base').upsert({
+        id: comp.id,
+        articolo_padre_id: comp.articolo_padre_id,
+        articolo_componente_id: comp.articolo_componente_id,
+        quantita_necessaria: comp.quantita_necessaria,
+        note: comp.note || null
+      })
+    } catch (e) {
+      console.error('Errore salvataggio distinta base su Supabase:', e)
+    }
+  },
+
+  async eliminaComponenteDistinta(id: string) {
+    try {
+      await supabase.from('distinta_base').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione distinta base su Supabase:', e)
+    }
+  },
+
+  // CICLI DI LAVORAZIONE STANDARD (ROUTING)
+  async getFasiCiclo(articoloId?: string): Promise<FaseCicloStandard[]> {
+    try {
+      let query = supabase.from('fasi_ciclo_standard').select('*').order('sequenza', { ascending: true })
+      if (articoloId) {
+        query = query.eq('articolo_id', articoloId)
+      }
+      const { data, error } = await query
+      if (error) {
+        console.warn('Errore lettura fasi_ciclo_standard da Supabase:', error.message)
+        const salvati = localStorage.getItem('machinaflow_cicli')
+        const lista: FaseCicloStandard[] = salvati ? JSON.parse(salvati) : (isAziendaClienteIsolata() ? [] : SEED_FASI_CICLO)
+        return articoloId ? lista.filter((c) => c.articolo_id === articoloId).sort((a, b) => a.sequenza - b.sequenza) : lista
+      }
+
+      if (data && data.length > 0) {
+        return data as FaseCicloStandard[]
+      }
+
+      if (isAziendaClienteIsolata()) {
+        return []
+      }
+
+      const salvati = localStorage.getItem('machinaflow_cicli')
+      const lista: FaseCicloStandard[] = salvati ? JSON.parse(salvati) : SEED_FASI_CICLO
+      return articoloId ? lista.filter((c) => c.articolo_id === articoloId).sort((a, b) => a.sequenza - b.sequenza) : lista
+    } catch (e) {
+      console.error('Errore getFasiCiclo:', e)
+      const salvati = localStorage.getItem('machinaflow_cicli')
+      const lista: FaseCicloStandard[] = salvati ? JSON.parse(salvati) : (isAziendaClienteIsolata() ? [] : SEED_FASI_CICLO)
+      return articoloId ? lista.filter((c) => c.articolo_id === articoloId).sort((a, b) => a.sequenza - b.sequenza) : lista
+    }
+  },
+
+  async salvaFaseCiclo(fase: FaseCicloStandard) {
+    try {
+      const payload: any = {
+        id: fase.id,
+        articolo_id: fase.articolo_id,
+        sequenza: fase.sequenza,
+        nome_fase: fase.nome_fase,
+        tipo_processo_id: fase.tipo_processo_id || null,
+        centro_lavoro_id: fase.centro_lavoro_id,
+        tempo_attrezzaggio_min: fase.tempo_attrezzaggio_min || 0,
+        tempo_ciclo_pezzo_min: fase.tempo_ciclo_pezzo_min || 0,
+        note_operative: fase.note_operative || null
+      }
+      await supabase.from('fasi_ciclo_standard').upsert(payload)
+    } catch (e) {
+      console.error('Errore salvataggio fase ciclo standard su Supabase:', e)
+    }
+  },
+
+  async eliminaFaseCiclo(id: string) {
+    try {
+      await supabase.from('fasi_ciclo_standard').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione fase ciclo standard su Supabase:', e)
+    }
+  },
+
+  // CLIENTI
+  async getClienti(): Promise<Cliente[]> {
+    try {
+      let query = supabase.from('clienti').select('*').order('ragione_sociale')
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        query = query.eq('azienda_id', azIdCorrente)
+      }
+      const { data, error } = await query
+      if (error) {
+        console.warn('Errore lettura clienti da Supabase:', error.message)
+        if (isAziendaClienteIsolata()) return []
+        const salvati = localStorage.getItem('machinaflow_clienti')
+        return salvati ? JSON.parse(salvati) : SEED_CLIENTI
+      }
+
+      if (data && data.length > 0) {
+        localStorage.setItem('machinaflow_clienti', JSON.stringify(data))
+        return data as Cliente[]
+      }
+
+      if (isAziendaClienteIsolata()) {
+        return []
+      }
+
+      const salvati = localStorage.getItem('machinaflow_clienti')
+      return salvati ? JSON.parse(salvati) : SEED_CLIENTI
+    } catch (e) {
+      console.error('Errore getClienti:', e)
+      if (isAziendaClienteIsolata()) return []
+      const salvati = localStorage.getItem('machinaflow_clienti')
+      return salvati ? JSON.parse(salvati) : SEED_CLIENTI
+    }
+  },
+
+  async salvaCliente(cliente: Cliente) {
+    // 1. Salva in localStorage per reattività immediata
+    try {
+      const salvati = localStorage.getItem('machinaflow_clienti')
+      const lista: Cliente[] = salvati ? JSON.parse(salvati) : []
+      const idx = lista.findIndex((c) => c.id === cliente.id)
+      if (idx >= 0) {
+        lista[idx] = cliente
+      } else {
+        lista.unshift(cliente)
+      }
+      localStorage.setItem('machinaflow_clienti', JSON.stringify(lista))
+    } catch {}
+
+    // 2. Supabase Cloud con azienda_id
+    try {
+      const azId = getCurrentAziendaId()
+      const payload: any = {
+        id: cliente.id,
+        ragione_sociale: cliente.ragione_sociale,
+        partita_iva: cliente.partita_iva || null,
+        email: cliente.email || null,
+        telefono: cliente.telefono || null,
+        indirizzo: cliente.indirizzo || null
+      }
+      if (azId) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('clienti').upsert(payload)
+    } catch (e) {
+      console.error('Errore salvataggio cliente su Supabase:', e)
+    }
+  },
+
+  async eliminaCliente(id: string) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_clienti')
+      if (salvati) {
+        const lista: Cliente[] = JSON.parse(salvati)
+        localStorage.setItem('machinaflow_clienti', JSON.stringify(lista.filter((c) => c.id !== id)))
+      }
+    } catch {}
+
+    try {
+      await supabase.from('clienti').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione cliente su Supabase:', e)
     }
   },
 
@@ -629,7 +844,12 @@ export const syncService = {
 
   async salvaCentroLavoro(centro: CentroLavoro) {
     try {
-      await supabase.from('centri_lavoro').upsert(centro)
+      const azId = getCurrentAziendaId()
+      const payload: any = { ...centro }
+      if (azId && !payload.azienda_id) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('centri_lavoro').upsert(payload)
     } catch (e) {
       console.error('Errore salvataggio centro lavoro su Supabase:', e)
     }
@@ -637,7 +857,12 @@ export const syncService = {
 
   async salvaTipoProcesso(processo: TipoProcesso) {
     try {
-      await supabase.from('tipi_processo').upsert(processo)
+      const azId = getCurrentAziendaId()
+      const payload: any = { ...processo }
+      if (azId && !payload.azienda_id) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('tipi_processo').upsert(payload)
     } catch (e) {
       console.error('Errore salvataggio tipo processo su Supabase:', e)
     }
