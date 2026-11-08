@@ -308,29 +308,32 @@ export default function MRPPage() {
 
     const azIsolata = syncService.isAziendaClienteIsolata ? syncService.isAziendaClienteIsolata() : false
 
-    const distinteList = azIsolata ? [] : parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
-    setDistinte(distinteList)
+    const distinteLocali = parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', azIsolata ? [] : SEED_DISTINTA_BASE)
+    setDistinte(distinteLocali)
 
     const ordiniFornitoreCaricati = parseSicuro<OrdineFornitore[]>('machinaflow_ordini_fornitori', [])
     setOrdiniFornitori(ordiniFornitoreCaricati)
 
     const caricaDatiRealtime = async () => {
       // 1. Carica prima dalla cache locale per reattività immediata
-      const articoliLocali = azIsolata ? [] : parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
-      const odpLocali = azIsolata ? [] : parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', SEED_ODP)
+      const articoliLocali = parseSicuro<Articolo[]>('machinaflow_articoli', azIsolata ? [] : SEED_ARTICOLI)
+      const odpLocali = parseSicuro<(OrdineProduzione & { fasi: FaseOdP[] })[]>('machinaflow_odp', azIsolata ? [] : SEED_ODP)
       setArticoli(articoliLocali)
       setOdpList(odpLocali)
-      ricalcolaMrp(articoliLocali, distinteList, odpLocali, ordiniFornitoreCaricati)
+      ricalcolaMrp(articoliLocali, distinteLocali, odpLocali, ordiniFornitoreCaricati)
 
       // 2. Allinea con Supabase Cloud in background
       try {
-        const [articoliCloud, odpCloud, fornitoriCloud] = await Promise.all([
+        const [articoliCloud, odpCloud, fornitoriCloud, distinteCloud] = await Promise.all([
           syncService.getArticoli(),
           syncService.getOrdiniProduzione(),
-          syncService.getOrdiniFornitori()
+          syncService.getOrdiniFornitori(),
+          syncService.getDistinte()
         ])
         const articoliEffettivi = articoliCloud && articoliCloud.length > 0 ? articoliCloud : (azIsolata ? [] : articoliLocali)
         const odpEffettivi = odpCloud && odpCloud.length > 0 ? (odpCloud as (OrdineProduzione & { fasi: FaseOdP[] })[]) : (azIsolata ? [] : odpLocali)
+        const distinteEffettive = distinteCloud && distinteCloud.length > 0 ? distinteCloud : distinteLocali
+        setDistinte(distinteEffettive)
         
         // Auto-push verso Cloud per eventuali ordini fornitore creati offline o in locale
         const idCloud = new Set((fornitoriCloud || []).map((f) => f.id))
@@ -352,7 +355,7 @@ export default function MRPPage() {
         setOrdiniFornitori(fornitoriEffettivi)
         localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(fornitoriEffettivi))
 
-        ricalcolaMrp(articoliEffettivi, distinteList, odpEffettivi, fornitoriEffettivi)
+        ricalcolaMrp(articoliEffettivi, distinteEffettive, odpEffettivi, fornitoriEffettivi)
       } catch (err) {
         console.warn('Sync cloud MRP fallback locale:', err)
       }

@@ -208,8 +208,13 @@ export default function TerminaleOfficinaPage() {
 
       setCentriLavoro(centriFinali)
 
-      setArticoli(parseSicuro('machinaflow_articoli', SEED_ARTICOLI))
-      setDistinte(parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE))
+      setArticoli(parseSicuro('machinaflow_articoli', azIsolata ? [] : SEED_ARTICOLI))
+      setDistinte(parseSicuro('machinaflow_distinte', azIsolata ? [] : SEED_DISTINTA_BASE))
+      syncService.getDistinte().then((distCloud) => {
+        if (distCloud && distCloud.length > 0) {
+          setDistinte(distCloud)
+        }
+      })
 
       // Carica anagrafica terzisti aggiornata dall'ufficio
       const terzistiSalvati = parseSicuro<FornitoreTerzista[]>('machinaflow_fornitori_terzisti', [])
