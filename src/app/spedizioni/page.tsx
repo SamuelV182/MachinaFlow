@@ -242,23 +242,14 @@ export default function SpedizioniDdtPage() {
       }
 
       // 1. DDT Esterni Terzisti
-      const salvatiDdt = parseSicuro<DocumentoTrasportoEsterno[]>('machinaflow_ddt_esterni', azIsolata ? [] : SEED_DDT_ESTERNI)
-      const mappaDdt = new Map<string, DocumentoTrasportoEsterno>()
-      if (!azIsolata) {
-        SEED_DDT_ESTERNI.forEach((d) => mappaDdt.set(d.id, d))
-      }
-      salvatiDdt.forEach((d) => mappaDdt.set(d.id, d))
-      setListaDdt(Array.from(mappaDdt.values()))
+      const salvatiDdt = parseSicuro<DocumentoTrasportoEsterno[]>('machinaflow_ddt_esterni', [])
+      const ddtValidiIniziali = azIsolata ? salvatiDdt.filter((d) => d.id !== 'ddt-1793431406069-b9q' && d.id !== 'ddt-1793445854002-jp4') : salvatiDdt
+      setListaDdt(ddtValidiIniziali)
 
       // Sincronizza DDT Esterni da Supabase Cloud
       syncService.getDdtEsterni().then((ddtEstCloud) => {
         if (ddtEstCloud && ddtEstCloud.length > 0) {
-          const mappa = new Map<string, DocumentoTrasportoEsterno>()
-          if (!azIsolata) {
-            SEED_DDT_ESTERNI.forEach((d) => mappa.set(d.id, d))
-          }
-          ddtEstCloud.forEach((d) => mappa.set(d.id, d))
-          setListaDdt(Array.from(mappa.values()))
+          setListaDdt(ddtEstCloud)
         } else if (azIsolata) {
           setListaDdt([])
         }

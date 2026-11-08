@@ -603,6 +603,10 @@ export const syncService = {
   async getDistinte(articoloPadreId?: string): Promise<ComponenteDistintaBase[]> {
     try {
       let query = supabase.from('distinta_base').select('*')
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        query = query.eq('azienda_id', azIdCorrente)
+      }
       if (articoloPadreId) {
         query = query.eq('articolo_padre_id', articoloPadreId)
       }
@@ -635,13 +639,18 @@ export const syncService = {
 
   async salvaComponenteDistinta(comp: ComponenteDistintaBase) {
     try {
-      await supabase.from('distinta_base').upsert({
+      const azId = getCurrentAziendaId()
+      const payload: any = {
         id: comp.id,
         articolo_padre_id: comp.articolo_padre_id,
         articolo_componente_id: comp.articolo_componente_id,
         quantita_necessaria: comp.quantita_necessaria,
         note: comp.note || null
-      })
+      }
+      if (azId) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('distinta_base').upsert(payload)
     } catch (e) {
       console.error('Errore salvataggio distinta base su Supabase:', e)
     }
@@ -659,6 +668,10 @@ export const syncService = {
   async getFasiCiclo(articoloId?: string): Promise<FaseCicloStandard[]> {
     try {
       let query = supabase.from('fasi_ciclo_standard').select('*').order('sequenza', { ascending: true })
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        query = query.eq('azienda_id', azIdCorrente)
+      }
       if (articoloId) {
         query = query.eq('articolo_id', articoloId)
       }
@@ -691,6 +704,7 @@ export const syncService = {
 
   async salvaFaseCiclo(fase: FaseCicloStandard) {
     try {
+      const azId = getCurrentAziendaId()
       const payload: any = {
         id: fase.id,
         articolo_id: fase.articolo_id,
@@ -701,6 +715,9 @@ export const syncService = {
         tempo_attrezzaggio_min: fase.tempo_attrezzaggio_min || 0,
         tempo_ciclo_pezzo_min: fase.tempo_ciclo_pezzo_min || 0,
         note_operative: fase.note_operative || null
+      }
+      if (azId) {
+        payload.azienda_id = azId
       }
       await supabase.from('fasi_ciclo_standard').upsert(payload)
     } catch (e) {
@@ -1038,24 +1055,38 @@ export const syncService = {
   // 7. DOCUMENTI DI TRASPORTO (DDT) ESTERNI / TERZISTI
   async getDdtEsterni(): Promise<DocumentoTrasportoEsterno[]> {
     try {
-      const { data, error } = await supabase
+      let queryDdt = supabase
         .from('ddt_esterni')
         .select('*')
         .order('creato_il', { ascending: false })
 
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryDdt = queryDdt.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await queryDdt
+
       if (error) {
         console.warn('Errore lettura ddt_esterni da Supabase:', error.message)
+        if (isAziendaClienteIsolata()) return []
         const salvati = localStorage.getItem('machinaflow_ddt_esterni')
         return salvati ? JSON.parse(salvati) : []
       }
 
-      if (data) {
+      if (data && data.length > 0) {
         localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(data))
         return data as DocumentoTrasportoEsterno[]
       }
+
+      if (isAziendaClienteIsolata()) {
+        return []
+      }
+
       return []
     } catch (e) {
       console.error('Errore getDdtEsterni:', e)
+      if (isAziendaClienteIsolata()) return []
       const salvati = localStorage.getItem('machinaflow_ddt_esterni')
       return salvati ? JSON.parse(salvati) : []
     }
@@ -1063,6 +1094,7 @@ export const syncService = {
 
   async salvaDdtEsterno(ddt: DocumentoTrasportoEsterno) {
     try {
+      const azId = getCurrentAziendaId()
       // Aggiorna cache locale
       const salvati = localStorage.getItem('machinaflow_ddt_esterni')
       const lista: DocumentoTrasportoEsterno[] = salvati ? JSON.parse(salvati) : []
@@ -1074,8 +1106,8 @@ export const syncService = {
       }
       localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(lista))
 
-      // Salva nel Cloud Supabase
-      await supabase.from('ddt_esterni').upsert({
+      // Salva nel Cloud Supabase con azienda_id
+      const payload: any = {
         id: ddt.id,
         numero_ddt: ddt.numero_ddt,
         data_emissione: ddt.data_emissione,
@@ -1092,7 +1124,11 @@ export const syncService = {
         stato: ddt.stato || 'spedito',
         righe: ddt.righe || [],
         creato_il: ddt.creato_il || new Date().toISOString()
-      })
+      }
+      if (azId) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('ddt_esterni').upsert(payload)
     } catch (e) {
       console.error('Errore salvaDdtEsterno su Supabase:', e)
     }
@@ -1101,10 +1137,17 @@ export const syncService = {
   // 8. ANAGRAFICA FORNITORI TERZISTI
   async getFornitoriTerzisti(): Promise<FornitoreTerzista[]> {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('fornitori_terzisti')
         .select('*')
         .order('ragione_sociale')
+
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        query = query.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await query
 
       if (error) {
         console.warn('Errore lettura fornitori_terzisti:', error.message)
@@ -1126,17 +1169,23 @@ export const syncService = {
 
   async salvaFornitoreTerzista(terzista: FornitoreTerzista) {
     try {
+      const azId = getCurrentAziendaId()
+      const payload: any = { ...terzista }
+      if (azId && !payload.azienda_id) {
+        payload.azienda_id = azId
+      }
+
       const salvati = localStorage.getItem('machinaflow_fornitori_terzisti')
       const lista: FornitoreTerzista[] = salvati ? JSON.parse(salvati) : []
-      const idx = lista.findIndex((t) => t.id === terzista.id)
+      const idx = lista.findIndex((t) => t.id === payload.id)
       if (idx >= 0) {
-        lista[idx] = terzista
+        lista[idx] = payload
       } else {
-        lista.push(terzista)
+        lista.push(payload)
       }
       localStorage.setItem('machinaflow_fornitori_terzisti', JSON.stringify(lista))
 
-      await supabase.from('fornitori_terzisti').upsert(terzista)
+      await supabase.from('fornitori_terzisti').upsert(payload)
     } catch (e) {
       console.error('Errore salvaFornitoreTerzista su Supabase:', e)
     }

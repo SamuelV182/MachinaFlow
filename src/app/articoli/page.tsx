@@ -87,10 +87,27 @@ export default function ArticoliPage() {
       }
     })
 
+    // Carica distinte base sincronizzandole con Supabase Cloud
+    syncService.getDistinte().then((distinteCloud) => {
+      if (distinteCloud && distinteCloud.length > 0) {
+        setDistinte(distinteCloud)
+        localStorage.setItem('machinaflow_distinte', JSON.stringify(distinteCloud))
+      } else if (azIsolata) {
+        setDistinte([])
+      }
+    })
+
+    // Carica cicli standard sincronizzandoli con Supabase Cloud
+    syncService.getFasiCiclo().then((cicliCloud) => {
+      if (cicliCloud && cicliCloud.length > 0) {
+        setCicli(cicliCloud)
+        localStorage.setItem('machinaflow_cicli', JSON.stringify(cicliCloud))
+      } else if (azIsolata) {
+        setCicli([])
+      }
+    })
+
     if (azIsolata) {
-      setArticoli([])
-      setDistinte([])
-      setCicli([])
       return
     }
 

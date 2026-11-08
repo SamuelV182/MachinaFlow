@@ -26,7 +26,8 @@ import {
   CentroLavoro,
   TipoProcesso,
   TipoArticolo,
-  ModelloTariffaEsterna
+  ModelloTariffaEsterna,
+  FornitoreTerzista
 } from '@/types/database'
 import {
   SEED_ARTICOLI,
@@ -45,6 +46,9 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
 
   const [distinta, setDistinta] = useState<ComponenteDistintaBase[]>([])
   const [fasiCiclo, setFasiCiclo] = useState<FaseCicloStandard[]>([])
+  const [terzisti, setTerzisti] = useState<FornitoreTerzista[]>([])
+  const [filtroTerzistaTesto, setFiltroTerzistaTesto] = useState('')
+  const [mostraDropdownTerzisti, setMostraDropdownTerzisti] = useState(false)
 
   // Stato Modale Aggiungi/Modifica Componente BOM
   const [modaleBomAperta, setModaleBomAperta] = useState(false)
@@ -154,6 +158,8 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     })
     setFiltroProcessoTesto('')
     setFiltroMacchinaTesto('')
+    setFiltroTerzistaTesto('')
+    setMostraDropdownTerzisti(false)
     setModaleCicloAperta(true)
   }
 
@@ -178,6 +184,8 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     })
     setFiltroProcessoTesto('')
     setFiltroMacchinaTesto('')
+    setFiltroTerzistaTesto('')
+    setMostraDropdownTerzisti(false)
     setModaleCicloAperta(true)
   }
 
@@ -202,6 +210,12 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
     // 2. Carica Centri Lavoro & Processi
     setCentriLavoro(parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO))
     setTipiProcesso(parseSicuro('machinaflow_tipi_processo', SEED_TIPI_PROCESSO))
+    setTerzisti(parseSicuro('machinaflow_fornitori_terzisti', []))
+    syncService.getFornitoriTerzisti().then((tList) => {
+      if (tList && tList.length > 0) {
+        setTerzisti(tList)
+      }
+    })
 
     // 3. Carica Distinte Base (prima da cache, poi da Supabase Cloud)
     const distinteList = parseSicuro('machinaflow_distinte', SEED_DISTINTA_BASE)
@@ -1306,18 +1320,123 @@ export function ArticoloDettaglioClient({ articoloId }: { articoloId: string }) 
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
+                    <div className="relative">
                       <label className="block text-xs font-semibold text-slate-300 mb-1">
-                        Nome Terzista / Fornitore *
+                        Cerca e Assegna Terzista / Fornitore *
                       </label>
-                      <input
-                        type="text"
-                        required={formCiclo.is_esterna}
-                        placeholder="es: Zincatura Veneta Srl, Trattamenti Termici Spa..."
-                        value={formCiclo.fornitore_nome}
-                        onChange={(e) => setFormCiclo({ ...formCiclo, fornitore_nome: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
-                      />
+                      {formCiclo.fornitore_nome.trim() ? (
+                        // Terzista Selezionato
+                        <div className="p-2.5 rounded-xl bg-slate-950 border border-pink-500/50 flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-white">
+                                {formCiclo.fornitore_nome}
+                              </span>
+                            </div>
+                            {(() => {
+                              const tMatch = terzisti.find((t) => t.ragione_sociale.toLowerCase() === formCiclo.fornitore_nome.toLowerCase())
+                              return tMatch?.specialita ? (
+                                <span className="text-[10px] text-pink-300 block mt-0.5">
+                                  Specialità: <strong>{tMatch.specialita}</strong> {tMatch.citta ? `• ${tMatch.citta}` : ''}
+                                </span>
+                              ) : null
+                            })()}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormCiclo({ ...formCiclo, fornitore_nome: '' })
+                              setFiltroTerzistaTesto('')
+                              setMostraDropdownTerzisti(true)
+                            }}
+                            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1 text-xs cursor-pointer"
+                            title="Cambia fornitore terzista"
+                          >
+                            <X className="w-4 h-4" />
+                            <span className="text-[10px]">Cambia</span>
+                          </button>
+                        </div>
+                      ) : (
+                        // Input di Ricerca Live Terzista
+                        <div className="relative">
+                          <div className="relative">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              placeholder="Cerca terzista (es: TermoSteel, Zincatura, Trattamenti)..."
+                              value={filtroTerzistaTesto}
+                              onFocus={() => setMostraDropdownTerzisti(true)}
+                              onChange={(e) => {
+                                setFiltroTerzistaTesto(e.target.value)
+                                setMostraDropdownTerzisti(true)
+                              }}
+                              className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-pink-500"
+                            />
+                          </div>
+
+                          {/* Dropdown Fornitori Terzisti */}
+                          {mostraDropdownTerzisti && (
+                            <div className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-1">
+                              {(() => {
+                                const filtrati = terzisti.filter(
+                                  (t) =>
+                                    t.ragione_sociale.toLowerCase().includes(filtroTerzistaTesto.toLowerCase()) ||
+                                    (t.specialita && t.specialita.toLowerCase().includes(filtroTerzistaTesto.toLowerCase())) ||
+                                    (t.citta && t.citta.toLowerCase().includes(filtroTerzistaTesto.toLowerCase()))
+                                )
+
+                                if (filtrati.length === 0) {
+                                  return (
+                                    <div className="p-3 text-center">
+                                      <p className="text-xs text-slate-400 mb-2">Nessun fornitore terzista trovato.</p>
+                                      {filtroTerzistaTesto.trim() && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const nomeNuovo = filtroTerzistaTesto.trim()
+                                            setFormCiclo({ ...formCiclo, fornitore_nome: nomeNuovo })
+                                            setMostraDropdownTerzisti(false)
+                                            setFiltroTerzistaTesto('')
+                                          }}
+                                          className="text-xs font-bold text-pink-400 hover:text-pink-300 underline cursor-pointer"
+                                        >
+                                          Usa &quot;{filtroTerzistaTesto.trim()}&quot; come nome terzista
+                                        </button>
+                                      )}
+                                    </div>
+                                  )
+                                }
+
+                                return filtrati.map((t) => (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setFormCiclo({ ...formCiclo, fornitore_nome: t.ragione_sociale })
+                                      setMostraDropdownTerzisti(false)
+                                      setFiltroTerzistaTesto('')
+                                    }}
+                                    className="w-full p-2.5 rounded-lg hover:bg-slate-800/80 transition-colors flex items-center justify-between text-left cursor-pointer border border-transparent hover:border-slate-700 mb-1"
+                                  >
+                                    <div>
+                                      <span className="text-xs font-bold text-white block">
+                                        {t.ragione_sociale}
+                                      </span>
+                                      <span className="text-[11px] text-slate-400 block mt-0.5">
+                                        {t.specialita ? <strong className="text-pink-400 font-semibold">{t.specialita}</strong> : 'Terzista generale'}
+                                        {t.citta ? ` • ${t.citta}` : ''}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-pink-400 bg-pink-950/60 px-2 py-0.5 rounded border border-pink-800/40">
+                                      Seleziona
+                                    </span>
+                                  </button>
+                                ))
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div>
