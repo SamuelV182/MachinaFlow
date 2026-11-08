@@ -78,6 +78,17 @@ export function formattaCodiceOdpPerAzienda(codiceBase: string): string {
   return `ODP-${sigla}-${codiceBase}`
 }
 
+// Costruisce o normalizza un numero DDT cliente con sigla aziendale per evitare conflitti globali
+export function formattaNumeroDdtPerAzienda(numeroDdtBase: string): string {
+  const sigla = getSiglaAziendaCorrente()
+  if (!sigla) return numeroDdtBase
+  if (numeroDdtBase.includes(`-${sigla}-`)) return numeroDdtBase
+  if (numeroDdtBase.startsWith('DDT-')) {
+    return numeroDdtBase.replace(/^DDT-/, `DDT-${sigla}-`)
+  }
+  return `DDT-${sigla}-${numeroDdtBase}`
+}
+
 // Verifica se siamo in modalità supporto o con un'azienda diversa da quella demo pilota
 export function isAziendaClienteIsolata(): boolean {
   const azId = getCurrentAziendaId()
@@ -88,6 +99,7 @@ export const syncService = {
   getCurrentAziendaId,
   getSiglaAziendaCorrente,
   formattaCodiceOdpPerAzienda,
+  formattaNumeroDdtPerAzienda,
   isAziendaClienteIsolata,
   // Sincronizza Seed iniziale nel Database Cloud se vuoto
   async inizializzaDatabaseSeVuoto() {

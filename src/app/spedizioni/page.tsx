@@ -697,7 +697,7 @@ export default function SpedizioniDdtPage() {
 
     const annoCorrente = new Date().getFullYear()
     const progressivo = String(listaDdtClienti.length + 1).padStart(3, '0')
-    const numeroDdtGenerato = `DDT-${annoCorrente}/${progressivo}`
+    const numeroDdtGenerato = syncService.formattaNumeroDdtPerAzienda(`DDT-${annoCorrente}/${progressivo}`)
 
     const nuovoDdt: DocumentoTrasportoCliente = {
       id: `ddt-cli-${Date.now()}`,
