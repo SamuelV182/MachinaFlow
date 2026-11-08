@@ -845,26 +845,80 @@ export const syncService = {
   async salvaCentroLavoro(centro: CentroLavoro) {
     try {
       const azId = getCurrentAziendaId()
-      const payload: any = { ...centro }
-      if (azId && !payload.azienda_id) {
+      const payload: any = {
+        id: centro.id,
+        codice: centro.codice,
+        nome: centro.nome,
+        reparto: centro.reparto || 'Officina',
+        capacita_giornaliera_ore: centro.capacita_giornaliera_ore || 8,
+        costo_orario: centro.costo_orario || 0,
+        attivo: centro.attivo !== undefined ? centro.attivo : true
+      }
+      if (azId) {
         payload.azienda_id = azId
       }
-      await supabase.from('centri_lavoro').upsert(payload)
+      const { error } = await supabase.from('centri_lavoro').upsert(payload)
+      if (error) {
+        console.error('Errore upsert centri_lavoro su Supabase:', error.message)
+      }
     } catch (e) {
       console.error('Errore salvataggio centro lavoro su Supabase:', e)
+    }
+  },
+
+  async eliminaCentroLavoro(id: string) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_centri_lavoro')
+      if (salvati) {
+        const lista: CentroLavoro[] = JSON.parse(salvati)
+        localStorage.setItem('machinaflow_centri_lavoro', JSON.stringify(lista.filter((c) => c.id !== id)))
+      }
+    } catch {}
+
+    try {
+      await supabase.from('centri_lavoro').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione centro lavoro su Supabase:', e)
     }
   },
 
   async salvaTipoProcesso(processo: TipoProcesso) {
     try {
       const azId = getCurrentAziendaId()
-      const payload: any = { ...processo }
-      if (azId && !payload.azienda_id) {
+      const payload: any = {
+        id: processo.id,
+        codice: processo.codice,
+        nome: processo.nome,
+        descrizione: processo.descrizione || null,
+        centro_lavoro_predefinito_id: processo.centro_lavoro_predefinito_id || null,
+        colore_badge: processo.colore_badge || '#3b82f6',
+        attivo: processo.attivo !== undefined ? processo.attivo : true
+      }
+      if (azId) {
         payload.azienda_id = azId
       }
-      await supabase.from('tipi_processo').upsert(payload)
+      const { error } = await supabase.from('tipi_processo').upsert(payload)
+      if (error) {
+        console.error('Errore upsert tipi_processo su Supabase:', error.message)
+      }
     } catch (e) {
       console.error('Errore salvataggio tipo processo su Supabase:', e)
+    }
+  },
+
+  async eliminaTipoProcesso(id: string) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_tipi_processo')
+      if (salvati) {
+        const lista: TipoProcesso[] = JSON.parse(salvati)
+        localStorage.setItem('machinaflow_tipi_processo', JSON.stringify(lista.filter((p) => p.id !== id)))
+      }
+    } catch {}
+
+    try {
+      await supabase.from('tipi_processo').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione tipo processo su Supabase:', e)
     }
   },
 

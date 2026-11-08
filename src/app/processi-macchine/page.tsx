@@ -272,6 +272,10 @@ export default function ProcessiMacchinePage() {
     )
     setCentriLavoro(aggiornati)
     localStorage.setItem('machinaflow_centri_lavoro', JSON.stringify(aggiornati))
+    const modificata = aggiornati.find((m) => m.id === id)
+    if (modificata) {
+      syncService.salvaCentroLavoro(modificata)
+    }
   }
 
   const toggleStatoProcesso = (id: string) => {
@@ -280,6 +284,10 @@ export default function ProcessiMacchinePage() {
     )
     setTipiProcesso(aggiornati)
     localStorage.setItem('machinaflow_tipi_processo', JSON.stringify(aggiornati))
+    const modificato = aggiornati.find((p) => p.id === id)
+    if (modificato) {
+      syncService.salvaTipoProcesso(modificato)
+    }
   }
 
   // Filtro
