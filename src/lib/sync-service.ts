@@ -882,6 +882,46 @@ export const syncService = {
     }
   },
 
+  async getTipiProcesso(): Promise<TipoProcesso[]> {
+    try {
+      let queryProcessi = supabase
+        .from('tipi_processo')
+        .select('*')
+        .order('codice')
+
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        queryProcessi = queryProcessi.eq('azienda_id', azIdCorrente)
+      }
+
+      const { data, error } = await queryProcessi
+
+      if (error) {
+        console.warn('Errore lettura tipi_processo da Supabase:', error.message)
+        if (isAziendaClienteIsolata()) return []
+        const salvati = localStorage.getItem('machinaflow_tipi_processo')
+        return salvati ? JSON.parse(salvati) : SEED_TIPI_PROCESSO
+      }
+
+      if (data && data.length > 0) {
+        localStorage.setItem('machinaflow_tipi_processo', JSON.stringify(data))
+        return data as TipoProcesso[]
+      }
+
+      if (isAziendaClienteIsolata()) {
+        return []
+      }
+
+      const salvati = localStorage.getItem('machinaflow_tipi_processo')
+      return salvati ? JSON.parse(salvati) : SEED_TIPI_PROCESSO
+    } catch (e) {
+      console.error('Errore getTipiProcesso:', e)
+      if (isAziendaClienteIsolata()) return []
+      const salvati = localStorage.getItem('machinaflow_tipi_processo')
+      return salvati ? JSON.parse(salvati) : SEED_TIPI_PROCESSO
+    }
+  },
+
   async salvaTipoProcesso(processo: TipoProcesso) {
     try {
       const azId = getCurrentAziendaId()

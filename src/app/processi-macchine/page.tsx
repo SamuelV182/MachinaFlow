@@ -95,7 +95,10 @@ export default function ProcessiMacchinePage() {
         }
       }
 
-      if (azIsolata) {
+      const processiCloud = await syncService.getTipiProcesso()
+      if (processiCloud && processiCloud.length > 0) {
+        setTipiProcesso(processiCloud)
+      } else if (azIsolata) {
         setTipiProcesso([])
       } else {
         const salvatiProcessi = localStorage.getItem('machinaflow_tipi_processo')
