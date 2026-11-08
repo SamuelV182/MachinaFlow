@@ -684,7 +684,24 @@ export const syncService = {
       }
 
       if (data && data.length > 0) {
-        return data as FaseCicloStandard[]
+        // Deserializza eventuali metadati di conto terzi salvati in note_operative
+        const arricchite = data.map((f: any) => {
+          let note = f.note_operative || ''
+          let metaTerzista: any = {}
+          if (note && note.includes('__MF_TERZISTA__=')) {
+            try {
+              const parti = note.split('__MF_TERZISTA__=')
+              note = parti[0].trim()
+              metaTerzista = JSON.parse(parti[1])
+            } catch {}
+          }
+          return {
+            ...f,
+            note_operative: note,
+            ...metaTerzista
+          } as FaseCicloStandard
+        })
+        return arricchite
       }
 
       if (isAziendaClienteIsolata()) {
@@ -705,6 +722,21 @@ export const syncService = {
   async salvaFaseCiclo(fase: FaseCicloStandard) {
     try {
       const azId = getCurrentAziendaId()
+      
+      // Impacchetta i dati di conto terzi se presenti per garantirne la persistenza universale su Supabase
+      let noteFinali = fase.note_operative || ''
+      if (fase.is_esterna) {
+        const metaTerzista = {
+          is_esterna: true,
+          fornitore_nome: fase.fornitore_nome || '',
+          giorni_rientro_previsti: fase.giorni_rientro_previsti || 5,
+          modello_tariffa: fase.modello_tariffa || 'pezzo_fisso',
+          costo_tariffa_valore: fase.costo_tariffa_valore || 0,
+          costo_minimo_fornitura: fase.costo_minimo_fornitura || 0
+        }
+        noteFinali = `${noteFinali.trim()}\n__MF_TERZISTA__=${JSON.stringify(metaTerzista)}`
+      }
+
       const payload: any = {
         id: fase.id,
         articolo_id: fase.articolo_id,
@@ -714,7 +746,7 @@ export const syncService = {
         centro_lavoro_id: fase.centro_lavoro_id,
         tempo_attrezzaggio_min: fase.tempo_attrezzaggio_min || 0,
         tempo_ciclo_pezzo_min: fase.tempo_ciclo_pezzo_min || 0,
-        note_operative: fase.note_operative || null
+        note_operative: noteFinali || null
       }
       if (azId) {
         payload.azienda_id = azId
