@@ -1119,7 +1119,8 @@ export const syncService = {
       localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(lista))
 
       // Salva nel Cloud Supabase
-      await supabase.from('ddt_clienti').upsert({
+      const azId = getCurrentAziendaId()
+      const payload: any = {
         id: ddt.id,
         numero_ddt: ddt.numero_ddt,
         data_emissione: ddt.data_emissione,
@@ -1137,7 +1138,11 @@ export const syncService = {
         note_trasporto: ddt.note_trasporto || null,
         righe: ddt.righe || [],
         creato_il: ddt.creato_il || new Date().toISOString()
-      })
+      }
+      if (azId) {
+        payload.azienda_id = azId
+      }
+      await supabase.from('ddt_clienti').upsert(payload)
     } catch (e) {
       console.error('Errore salvaDdtCliente su Supabase:', e)
     }
