@@ -154,17 +154,26 @@ function DdtStampaContent() {
         <div className="scheda-a4-foglio space-y-6">
           {/* Header Azienda & Documento */}
           <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-5 gap-4">
-            <div>
-              <span className="text-[10px] font-black tracking-widest text-pink-700 uppercase block">
-                DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)
-              </span>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
-                MACHINAFLOW MECCANICA S.R.L.
-              </h1>
-              <p className="text-[11px] text-slate-600 leading-tight mt-1">
-                Lavorazioni Meccaniche di Precisione CNC &bull; Via dell&apos;Industria 14, 41012 Carpi (MO)<br />
-                P.IVA e C.F.: 03849200361 &bull; Tel: +39 059 849201 &bull; ordini@machinaflow.it
-              </p>
+            <div className="flex items-start gap-4">
+              {azienda?.logo_url && (
+                <img
+                  src={azienda.logo_url}
+                  alt={azienda.nome || 'Logo'}
+                  className="h-16 w-auto max-w-[120px] object-contain rounded"
+                />
+              )}
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-pink-700 uppercase block">
+                  DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)
+                </span>
+                <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
+                  {azienda?.nome || 'BRB MECCANICA SRL'}
+                </h1>
+                <p className="text-[11px] text-slate-600 leading-tight mt-1">
+                  {azienda?.indirizzo ? `${azienda.indirizzo}, ${azienda.cap || ''} ${azienda.citta || ''} (${azienda.provincia || ''})` : 'Via Ciarpi 6, 55016 Porcari (LU)'}<br />
+                  P.IVA: {azienda?.partita_iva || '02453430460'} {azienda?.telefono ? `• Tel: ${azienda.telefono}` : ''}
+                </p>
+              </div>
             </div>
 
             <div className="bg-slate-50 border border-slate-300 p-3.5 rounded-xl min-w-[240px] text-right space-y-1">

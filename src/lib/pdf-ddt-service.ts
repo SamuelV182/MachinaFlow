@@ -6,7 +6,8 @@ export function generaDdtPdf(
   ddt: DocumentoTrasportoCliente | DocumentoTrasportoEsterno,
   tipo: 'cliente' | 'terzista',
   ordiniClienti: OrdineCliente[] = [],
-  azienda?: Azienda | null
+  azienda?: Azienda | null,
+  logoBase64?: string | null
 ): jsPDF {
   const isCliente = tipo === 'cliente' || 'cliente_nome' in ddt
   const clienteDdt = isCliente ? (ddt as DocumentoTrasportoCliente) : null
@@ -33,22 +34,30 @@ export function generaDdtPdf(
   const colorMuted = [100, 116, 139] // Slate 500
   const colorLightBg = [248, 250, 252] // Slate 50
 
-  // 1. INTESTAZIONE AZIENDA
+  // 1. INTESTAZIONE AZIENDA E LOGO
+  let xOffsetTesto = 14
+  if (logoBase64) {
+    try {
+      doc.addImage(logoBase64, 'PNG', 14, 11, 24, 20)
+      xOffsetTesto = 42
+    } catch {}
+  }
+
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(8)
   doc.setTextColor(colorPrimario[0], colorPrimario[1], colorPrimario[2])
-  doc.text('DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)', 14, 14)
+  doc.text('DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)', xOffsetTesto, 14)
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(15)
+  doc.setFontSize(14)
   doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-  doc.text(nomeAzienda.toUpperCase(), 14, 21)
+  doc.text(nomeAzienda.toUpperCase(), xOffsetTesto, 20)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-  doc.text(indirizzoAzienda, 14, 26)
-  doc.text(`${pivaAzienda}${telAzienda}`, 14, 30)
+  doc.text(indirizzoAzienda, xOffsetTesto, 25)
+  doc.text(`${pivaAzienda}${telAzienda}`, xOffsetTesto, 29)
 
   // BOX NUMERO E DATA DOCUMENTO (A Destra)
   doc.setFillColor(colorLightBg[0], colorLightBg[1], colorLightBg[2])

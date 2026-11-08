@@ -20,6 +20,7 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
   const supabase = createClient()
   const [azienda, setAzienda] = useState<Azienda | null>(null)
+  const [logoBase64, setLogoBase64] = useState<string | null>(null)
 
   // URL del PDF generato dal template predefinito (< 0.1s)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
@@ -27,6 +28,30 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
   const ddtId = ddt.id || ddt.numero_ddt
   const ordiniCount = ordiniClienti?.length || 0
+
+  // Precarica il logo come Base64 per jsPDF
+  useEffect(() => {
+    if (!azienda?.logo_url) {
+      setLogoBase64(null)
+      return
+    }
+    const img = new Image()
+    img.crossOrigin = 'Anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(img, 0, 0)
+        try {
+          const dataURL = canvas.toDataURL('image/png')
+          setLogoBase64(dataURL)
+        } catch {}
+      }
+    }
+    img.src = azienda.logo_url
+  }, [azienda?.logo_url])
 
   // Recupera i dati dell'azienda corrente per l'intestazione personalizzata
   useEffect(() => {
@@ -89,7 +114,7 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
 
   useEffect(() => {
     try {
-      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda)
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64)
       const blobUrl = doc.output('bloburl')
       setPdfUrl(String(blobUrl))
 
@@ -99,12 +124,12 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
     } catch (e) {
       console.error('Errore generazione PDF DDT:', e)
     }
-  }, [ddtId, isCliente, ordiniCount, azienda])
+  }, [ddtId, isCliente, ordiniCount, azienda, logoBase64])
 
   // Scarica direttamente il file PDF già pronto
   const handleScaricaPdf = () => {
     try {
-      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti)
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64)
       doc.save(`${ddt.numero_ddt || 'DDT'}.pdf`)
     } catch {
       window.print()
@@ -114,7 +139,7 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
   // Apertura a schermo intero o in nuova scheda per smartphone
   const handleApriPdfEsterno = () => {
     try {
-      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti)
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64)
       const blob = doc.output('blob')
       const blobUrl = URL.createObjectURL(blob)
       window.open(blobUrl, '_blank')
