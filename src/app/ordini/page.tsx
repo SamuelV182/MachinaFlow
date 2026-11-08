@@ -500,6 +500,60 @@ export default function OrdiniPage() {
     }))
   }
 
+  // Funzione universale di Backward Scheduling (Pianificazione a ritroso)
+  // Calcola la reale data inizio pianificata per l'OdP a partire dalla data di consegna concordata
+  const calcolaDataInizioOdPAritroso = (
+    dataConsegnaIso: string,
+    fasiArticolo: FaseCicloStandard[],
+    quantita: number
+  ): string => {
+    if (!dataConsegnaIso) return new Date().toISOString().split('T')[0]
+
+    const [y, m, d] = dataConsegnaIso.split('-').map(Number)
+    let cursore = new Date(y, m - 1, d)
+
+    // 1. Buffer di sicurezza: 1 giorno lavorativo prima della consegna per collaudo/imballo
+    cursore.setDate(cursore.getDate() - 1)
+    while (cursore.getDay() === 0 || cursore.getDay() === 6) {
+      cursore.setDate(cursore.getDate() - 1)
+    }
+
+    // 2. Ordina le fasi a ritroso (dall'ultima alla prima)
+    const fasiInverse = [...fasiArticolo].sort((a, b) => b.sequenza - a.sequenza)
+
+    for (const fase of fasiInverse) {
+      if (fase.is_esterna) {
+        // Fase conto terzi: sottrae i giorni di rientro previsti (escludendo i weekend)
+        const giorniTerzista = Math.max(1, Number(fase.giorni_rientro_previsti) || 5)
+        let sottratti = 0
+        while (sottratti < giorniTerzista) {
+          cursore.setDate(cursore.getDate() - 1)
+          if (cursore.getDay() !== 0 && cursore.getDay() !== 6) {
+            sottratti++
+          }
+        }
+      } else {
+        // Fase interna: calcola minuti lavorazione e giorni macchina (turno da 8h/giorno)
+        const minutiTotali = (fase.tempo_attrezzaggio_min || 0) + (fase.tempo_ciclo_pezzo_min || 0) * quantita
+        const oreTotali = Math.max(0.2, minutiTotali / 60)
+        const giorniMacchina = Math.max(1, Math.ceil(oreTotali / 8))
+
+        let sottratti = 0
+        while (sottratti < giorniMacchina) {
+          cursore.setDate(cursore.getDate() - 1)
+          if (cursore.getDay() !== 0 && cursore.getDay() !== 6) {
+            sottratti++
+          }
+        }
+      }
+    }
+
+    const dataInizioCalcolata = cursore.toISOString().split('T')[0]
+    const oggiIso = new Date().toISOString().split('T')[0]
+    // Se la data calcolata a ritroso è già nel passato, l'OdP deve partire oggi stesso
+    return dataInizioCalcolata < oggiIso ? oggiIso : dataInizioCalcolata
+  }
+
   // Reset e apertura del form per un nuovo ordine
   const apriNuovoOrdine = () => {
     const dataDefault = new Date()
@@ -750,6 +804,12 @@ export default function OrdiniPage() {
           }
         })
 
+        const dataInizioOdPCalcolata = calcolaDataInizioOdPAritroso(
+          ord.data_consegna_concordata,
+          fasiArticolo,
+          riga.quantita
+        )
+
         const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
           id: nuovoOdpId,
           codice_odp: codiceOdp,
@@ -764,7 +824,7 @@ export default function OrdiniPage() {
           articolo_id: riga.articolo_id,
           quantita_da_produrre: riga.quantita,
           quantita_prodotta: 0,
-          data_inizio_pianificata: new Date().toISOString().split('T')[0],
+          data_inizio_pianificata: dataInizioOdPCalcolata,
           data_fine_pianificata: ord.data_consegna_concordata,
           stato: 'pianificato',
           priorita: 2,
@@ -849,6 +909,12 @@ export default function OrdiniPage() {
         }
       })
 
+      const dataInizioOdPCalcolata = calcolaDataInizioOdPAritroso(
+        ordine.data_consegna_concordata,
+        fasiArticolo,
+        riga.quantita
+      )
+
       const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
         id: nuovoOdpId,
         codice_odp: codiceOdp,
@@ -863,7 +929,7 @@ export default function OrdiniPage() {
         articolo_id: riga.articolo_id,
         quantita_da_produrre: riga.quantita,
         quantita_prodotta: 0,
-        data_inizio_pianificata: new Date().toISOString().split('T')[0],
+        data_inizio_pianificata: dataInizioOdPCalcolata,
         data_fine_pianificata: ordine.data_consegna_concordata,
         stato: 'pianificato',
         priorita: 2,
@@ -953,6 +1019,12 @@ export default function OrdiniPage() {
       }
     })
 
+    const dataInizioOdPCalcolata = calcolaDataInizioOdPAritroso(
+      ordine.data_consegna_concordata,
+      fasiArticolo,
+      riga.quantita
+    )
+
     // 3. Crea l'OdP
     const rigaIdx = ordine.righe.findIndex((r) => r.id === riga.id)
     const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
@@ -969,7 +1041,7 @@ export default function OrdiniPage() {
       articolo_id: riga.articolo_id,
       quantita_da_produrre: riga.quantita,
       quantita_prodotta: 0,
-      data_inizio_pianificata: new Date().toISOString().split('T')[0],
+      data_inizio_pianificata: dataInizioOdPCalcolata,
       data_fine_pianificata: ordine.data_consegna_concordata,
       stato: 'pianificato',
       priorita: 2, // Media
