@@ -35,22 +35,48 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
       setLogoBase64(null)
       return
     }
-    const img = new Image()
-    img.crossOrigin = 'Anonymous'
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = img.width
-      canvas.height = img.height
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.drawImage(img, 0, 0)
-        try {
-          const dataURL = canvas.toDataURL('image/png')
-          setLogoBase64(dataURL)
-        } catch {}
-      }
+
+    let isMounted = true
+    const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(azienda.logo_url)}`
+
+    fetch(proxyUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error('Errore fetch proxy')
+        return res.blob()
+      })
+      .then((blob) => {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          if (isMounted && typeof reader.result === 'string') {
+            setLogoBase64(reader.result)
+          }
+        }
+        reader.readAsDataURL(blob)
+      })
+      .catch(() => {
+        // Fallback: prova caricamento diretto via Image
+        const img = new Image()
+        img.crossOrigin = 'Anonymous'
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.width
+          canvas.height = img.height
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(img, 0, 0)
+            try {
+              if (isMounted) setLogoBase64(canvas.toDataURL('image/png'))
+            } catch {}
+          }
+        }
+        if (azienda?.logo_url) {
+          img.src = azienda.logo_url
+        }
+      })
+
+    return () => {
+      isMounted = false
     }
-    img.src = azienda.logo_url
   }, [azienda?.logo_url])
 
   // Recupera i dati dell'azienda corrente per l'intestazione personalizzata

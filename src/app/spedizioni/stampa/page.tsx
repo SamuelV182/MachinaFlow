@@ -14,6 +14,7 @@ function DdtStampaContent() {
 
   const [ddt, setDdt] = useState<DocumentoTrasportoCliente | DocumentoTrasportoEsterno | null>(null)
   const [ordiniClienti, setOrdiniClienti] = useState<OrdineCliente[]>([])
+  const [articoli, setArticoli] = useState<any[]>([])
   const [azienda, setAzienda] = useState<any>(null)
   const [caricato, setCaricato] = useState(false)
 
@@ -29,6 +30,13 @@ function DdtStampaContent() {
       const ordiniSalvati = localStorage.getItem('machinaflow_ordini_clienti')
       if (ordiniSalvati) {
         setOrdiniClienti(JSON.parse(ordiniSalvati))
+      }
+    } catch {}
+
+    try {
+      const artSalvati = localStorage.getItem('machinaflow_articoli')
+      if (artSalvati) {
+        setArticoli(JSON.parse(artSalvati))
       }
     } catch {}
 
@@ -150,38 +158,43 @@ function DdtStampaContent() {
       {/* ========================================================================= */}
       {/* FOGLIO A4 DDT RIGOROSO E IDENTICO A VIDEO                                 */}
       {/* ========================================================================= */}
-      <div className="scheda-a4-container bg-white text-slate-950 rounded-2xl p-8 sm:p-10 shadow-2xl border border-slate-200 text-xs space-y-6 max-w-4xl mx-auto print:p-0 print:border-none print:shadow-none print:max-w-none print:rounded-none">
-        <div className="scheda-a4-foglio space-y-6">
-          {/* Header Azienda & Documento */}
-          <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-5 gap-4">
-            <div className="flex items-start gap-4">
+      <div className="scheda-a4-container bg-white text-slate-950 rounded-2xl p-8 sm:p-10 shadow-2xl border border-slate-200 text-xs max-w-4xl mx-auto print:p-0 print:border-none print:shadow-none print:max-w-none print:rounded-none min-h-[297mm] flex flex-col justify-between">
+        <div className="scheda-a4-foglio space-y-6 flex-1 flex flex-col justify-between">
+          <div className="space-y-6">
+          {/* Header Azienda & Documento (Layout Standard a 3 Blocchi) */}
+          <div className="flex flex-col sm:flex-row justify-between items-center border-b-2 border-slate-900 pb-5 gap-6">
+            <div className="flex items-center gap-5 flex-1 min-w-0">
               {azienda?.logo_url && (
-                <img
-                  src={azienda.logo_url}
-                  alt={azienda.nome || 'Logo'}
-                  className="h-16 w-auto max-w-[120px] object-contain rounded"
-                />
+                <div className="w-[120px] max-w-[120px] flex-shrink-0 flex items-center justify-start">
+                  <img
+                    src={`/api/image-proxy?url=${encodeURIComponent(azienda.logo_url)}`}
+                    alt={azienda.nome || 'Logo'}
+                    className="max-h-14 w-auto max-w-full object-contain"
+                  />
+                </div>
               )}
-              <div>
+              <div className="min-w-0 flex-1">
                 <span className="text-[10px] font-black tracking-widest text-pink-700 uppercase block">
-                  DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)
+                  DOCUMENTO DI TRASPORTO (D.D.T.)
                 </span>
-                <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">
+                <h1 className="text-xl font-black text-slate-900 tracking-tight mt-0.5 truncate">
                   {azienda?.nome || 'BRB MECCANICA SRL'}
                 </h1>
-                <p className="text-[11px] text-slate-600 leading-tight mt-1">
-                  {azienda?.indirizzo ? `${azienda.indirizzo}, ${azienda.cap || ''} ${azienda.citta || ''} (${azienda.provincia || ''})` : 'Via Ciarpi 6, 55016 Porcari (LU)'}<br />
+                <p className="text-[11px] text-slate-600 leading-tight mt-1 truncate">
+                  {azienda?.indirizzo ? `${azienda.indirizzo}, ${azienda.cap || ''} ${azienda.citta || ''} (${azienda.provincia || ''})` : 'Via Ciarpi 6, 55016 Porcari (LU)'}
+                </p>
+                <p className="text-[10px] text-slate-500 leading-tight">
                   P.IVA: {azienda?.partita_iva || '02453430460'} {azienda?.telefono ? `• Tel: ${azienda.telefono}` : ''}
                 </p>
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-300 p-3.5 rounded-xl min-w-[240px] text-right space-y-1">
+            <div className="bg-slate-50 border border-slate-300 p-3 rounded-xl w-[210px] flex-shrink-0 text-right space-y-0.5">
               <span className="text-[10px] font-bold text-slate-500 uppercase block">NUMERO DOCUMENTO</span>
-              <span className="text-lg font-black text-pink-700 font-mono block">
+              <span className="text-base font-black text-pink-700 font-mono block">
                 {ddt.numero_ddt}
               </span>
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[10px] text-slate-600">
                 Data: <strong>{new Date(ddt.data_emissione).toLocaleDateString('it-IT')}</strong> &bull; Ore: <strong>{new Date(ddt.data_emissione).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</strong>
               </div>
             </div>
@@ -193,7 +206,7 @@ function DdtStampaContent() {
               <span className="text-[10px] font-bold text-slate-500 uppercase block">LUOGO DI PARTENZA (MITTENTE)</span>
               <strong className="text-slate-900 block">{azienda?.nome || 'BRB Meccanica SRL'}</strong>
               <span className="text-slate-600 block text-[11px]">{azienda?.indirizzo ? `${azienda.indirizzo} - ${azienda.cap || ''} ${azienda.citta || ''} (${azienda.provincia || ''})` : 'Via Ciarpi 6 - 55016 Porcari (LU)'}</span>
-              <span className="text-slate-500 text-[10px] block">Causale: {ddt.causale_trasporto} &bull; Porto: {ddt.porto}</span>
+              <span className="text-slate-500 text-[10px] block">P.IVA: {azienda?.partita_iva || '02453430460'}</span>
             </div>
 
             {isCliente && clienteDdt ? (
@@ -215,85 +228,90 @@ function DdtStampaContent() {
             )}
           </div>
 
-          {/* Dati Logistici Trasporto */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-100 p-3 rounded-xl text-[11px]">
-            <div>
-              <span className="text-[10px] text-slate-500 block uppercase font-bold">Vettore Incaricato:</span>
-              <strong className="text-slate-900">{ddt.vettore_nome}</strong>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block uppercase font-bold">Numero Colli:</span>
-              <strong className="text-slate-900">{ddt.numero_colli} cassa/e - colli</strong>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block uppercase font-bold">Peso Totale Lordo:</span>
-              <strong className="text-slate-900 font-mono">{ddt.peso_totale_kg ? `${ddt.peso_totale_kg.toFixed(1)} kg` : 'A vista'}</strong>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-500 block uppercase font-bold">Aspetto Esteriore Beni:</span>
-              <strong className="text-slate-900">{ddt.aspetto_beni}</strong>
-            </div>
-          </div>
-
-          {/* Tabella Dettaglio Merci & Trattamenti Richiesti */}
+          {/* Tabella Dettaglio Merci */}
           <div className="border border-slate-300 rounded-xl overflow-hidden shadow-xs">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900 text-white uppercase text-[10px] font-bold tracking-wider">
                 <tr>
                   {isCliente ? (
                     <>
-                      <th className="py-2.5 px-3">Ns. Ordine</th>
-                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Pos. / Item</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Commessa Cliente</th>
+                      <th className="py-2.5 px-3">Pos / OdP</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Commessa</th>
                     </>
                   ) : (
                     <th className="py-2.5 px-3"># OdP / Rif.</th>
                   )}
-                  <th className="py-2.5 px-3">Codice Particolare</th>
-                  <th className="py-2.5 px-3">Descrizione Tecnica</th>
-                  <th className="py-2.5 px-3">{isCliente ? 'Note Consegna / Rif.' : 'Trattamento Richiesto'}</th>
-                  <th className="py-2.5 px-3 text-center">Quantità Spedita</th>
-                  <th className="py-2.5 px-3 text-right">Peso Stima</th>
+                  <th className="py-2.5 px-3">Codice Articolo</th>
+                  <th className="py-2.5 px-3">Descrizione Particolare</th>
+                  <th className="py-2.5 px-3">{isCliente ? 'Note / Saldo' : 'Trattamento Richiesto'}</th>
+                  <th className="py-2.5 px-3 text-center">Quantità</th>
+                  {isCliente ? (
+                    <>
+                      <th className="py-2.5 px-3 text-right whitespace-nowrap">Prezzo Unit.</th>
+                      <th className="py-2.5 px-3 text-right whitespace-nowrap">Totale Riga</th>
+                    </>
+                  ) : (
+                    <th className="py-2.5 px-3 text-right">Peso Stima</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {isCliente && clienteDdt
-                  ? clienteDdt.righe.map((r, i) => (
-                      <tr key={r.id || i} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span className="font-mono font-black text-slate-900 text-xs block">
-                            {r.codice_ordine_cliente || 'N/D'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-2 text-center whitespace-nowrap">
-                          {getItemRigaCliente(r) ? (
-                            <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[11px] border border-slate-200">
-                              #{getItemRigaCliente(r)}
+                  ? clienteDdt.righe.map((r, i) => {
+                      let commessa = r.riferimento_ordine_cliente || ''
+                      let prezzoUnit = r.prezzo_unitario || 0
+                      if (ordiniClienti) {
+                        const ord = ordiniClienti.find((o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente)
+                        if (ord) {
+                          if (!commessa && ord.riferimento_ordine_cliente) commessa = ord.riferimento_ordine_cliente
+                          if (!prezzoUnit && (ord as any).righe) {
+                            const rigaOrd = (ord as any).righe.find((ro: any) => ro.id === r.riga_ordine_cliente_id || ro.articolo_id === r.articolo_id)
+                            if (rigaOrd?.prezzo_unitario) prezzoUnit = rigaOrd.prezzo_unitario
+                          }
+                        }
+                      }
+                      const totRiga = r.totale_riga !== undefined ? r.totale_riga : (prezzoUnit * r.quantita_spedita)
+                      const labelOdp = r.codice_odp ? r.codice_odp.replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '') : (r.codice_ordine_cliente || '-')
+                      const labelPos = r.pos_riga_cliente ? `#${r.pos_riga_cliente} • ` : ''
+
+                      const codiceVisualizzato = (!r.articolo_codice || r.articolo_codice === 'N/D')
+                        ? (articoli.find(a => a.id === r.articolo_id)?.codice_articolo || (articoli.length > 0 ? articoli[0].codice_articolo : r.articolo_codice))
+                        : r.articolo_codice
+                      const descVisualizzata = (!r.articolo_descrizione || r.articolo_descrizione === 'Particolare Meccanico')
+                        ? (articoli.find(a => a.id === r.articolo_id)?.descrizione || r.articolo_descrizione)
+                        : r.articolo_descrizione
+
+                      return (
+                        <tr key={r.id || i} className="hover:bg-slate-50">
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className="font-mono font-black text-slate-900 text-xs block">
+                              {labelPos}{labelOdp}
                             </span>
-                          ) : (
-                            <span className="text-slate-400 text-[11px]">-</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 text-xs whitespace-nowrap">
-                          {getCommessaCliente(r)}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                          {r.articolo_codice}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-800 font-medium">
-                          {r.articolo_descrizione}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-700">
-                          {r.note_riga || (r.quantita_ordinata ? `Consegna parziale (Tot. Ordine: ${r.quantita_ordinata} ${r.unita_misura})` : 'Consegna Prodotto Finito')}
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-black text-slate-900 text-sm whitespace-nowrap font-mono">
-                          {r.quantita_spedita} {r.unita_misura}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap">
-                          {r.peso_kg_riga ? `${r.peso_kg_riga.toFixed(1)} kg` : '-'}
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900 text-xs whitespace-nowrap">
+                            {commessa || '-'}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">
+                            {codiceVisualizzato}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-800 font-medium">
+                            {descVisualizzata}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700">
+                            {r.note_riga || (r.quantita_ordinata ? `Saldo (${r.quantita_spedita}/${r.quantita_ordinata})` : 'Consegna')}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-black text-slate-900 text-sm whitespace-nowrap font-mono">
+                            {r.quantita_spedita} {r.unita_misura}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap">
+                            {prezzoUnit > 0 ? `€ ${prezzoUnit.toFixed(2)}` : '€ 0,00'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+                            {totRiga > 0 ? `€ ${totRiga.toFixed(2)}` : '€ 0,00'}
+                          </td>
+                        </tr>
+                      )
+                    })
                   : terzistaDdt?.righe.map((r, i) => (
                       <tr key={r.id || i} className="hover:bg-slate-50">
                         <td className="py-2.5 px-3 font-mono font-bold text-pink-700 whitespace-nowrap">
@@ -325,37 +343,115 @@ function DdtStampaContent() {
             </table>
           </div>
 
-          {/* Note Speciali / Istruzioni di Spedizione */}
-          {ddt.note_trasporto && (
-            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs">
-              <strong>Istruzioni Speciali & Note di Consegna:</strong> {ddt.note_trasporto}
-            </div>
-          )}
+          {/* Box Riepilogo Totali Imponibile e IVA (Solo per DDT Cliente) */}
+          {isCliente && clienteDdt && (() => {
+            let imponibile = 0
+            clienteDdt.righe.forEach((r) => {
+              let p = r.prezzo_unitario || 0
+              if (!p && ordiniClienti) {
+                const ord = ordiniClienti.find((o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente)
+                const ro = (ord as any)?.righe?.find((row: any) => row.id === r.riga_ordine_cliente_id || row.articolo_id === r.articolo_id)
+                if (ro?.prezzo_unitario) p = ro.prezzo_unitario
+              }
+              imponibile += r.totale_riga !== undefined ? r.totale_riga : (p * r.quantita_spedita)
+            })
+            const iva = Number((imponibile * 0.22).toFixed(2))
+            const totale = Number((imponibile + iva).toFixed(2))
 
-          {/* Riquadro Firme Conducente e Ricezione */}
-          <div className="grid grid-cols-3 gap-4 pt-6 border-t border-slate-300 text-[10px]">
-            <div className="space-y-10 border border-slate-300 p-3 rounded-lg">
-              <span className="font-bold text-slate-500 uppercase block">Firma del Mittente</span>
-              <div className="border-b border-dashed border-slate-400"></div>
+            return (
+              <div className="flex justify-end">
+                <div className="bg-slate-50 border border-slate-300 rounded-xl p-3 w-72 space-y-1.5 text-xs">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Totale Imponibile:</span>
+                    <span className="font-mono font-bold text-slate-900">€ {imponibile.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>IVA Ordinaria (22%):</span>
+                    <span className="font-mono font-bold text-slate-900">€ {iva.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200 text-sm font-black text-emerald-800">
+                    <span>TOTALE DOCUMENTO:</span>
+                    <span className="font-mono text-base">€ {totale.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
+              {/* Note Speciali / Istruzioni di Spedizione */}
+              {ddt.note_trasporto && (
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs">
+                  <strong>Istruzioni Speciali & Note di Consegna:</strong> {ddt.note_trasporto}
+                </div>
+              )}
             </div>
 
-            <div className="space-y-10 border border-slate-300 p-3 rounded-lg">
-              <span className="font-bold text-slate-500 uppercase block">Firma del Vettore / Conducente</span>
-              <div className="border-b border-dashed border-slate-400"></div>
-            </div>
+            {/* Sezione Basso Pagina ancorata in fondo (mt-auto) */}
+            <div className="mt-auto pt-6 space-y-4">
+              {/* Dati Logistici (Sinistra, 2 righe x 3 col) e Firme Impilate (Destra) */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+                {/* Box Logistica Sinistra (8 colonne) */}
+                <div className="md:col-span-8 bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2 block border-b border-slate-200 pb-1">
+                    Dati Logistici e di Trasporto
+                  </span>
+                  <div className="grid grid-cols-3 gap-3 text-[11px]">
+                    {/* Riga 1 */}
+                    <div>
+                      <span className="text-[9px] text-slate-500 block uppercase font-bold">Causale:</span>
+                      <strong className="text-slate-900 text-xs block leading-tight">{ddt.causale_trasporto || 'Vendita'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 block uppercase font-bold">Porto:</span>
+                      <strong className="text-slate-900 text-xs block leading-tight">{ddt.porto || 'Franco'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 block uppercase font-bold">Aspetto Beni:</span>
+                      <strong className="text-slate-900 text-xs block leading-tight">{ddt.aspetto_beni || 'A vista'}</strong>
+                    </div>
 
-            <div className="space-y-10 border border-slate-300 p-3 rounded-lg">
-              <span className="font-bold text-slate-500 uppercase block">
-                {isCliente ? 'Firma per Ricezione Cliente' : 'Firma per Ricezione Fornitore'}
-              </span>
-              <div className="border-b border-dashed border-slate-400"></div>
-            </div>
-          </div>
+                    {/* Riga 2 */}
+                    <div>
+                      <span className="text-[9px] text-slate-500 block uppercase font-bold">Colli:</span>
+                      <strong className="text-slate-900 text-xs block leading-tight">{ddt.numero_colli} collo/i</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 block uppercase font-bold">Peso Totale:</span>
+                      <strong className="text-slate-900 font-mono text-xs block leading-tight">{ddt.peso_totale_kg ? `${ddt.peso_totale_kg.toFixed(1)} kg` : 'A vista'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-500 block uppercase font-bold">Vettore:</span>
+                      <strong className="text-slate-900 text-xs block leading-tight">{ddt.vettore_nome || 'Mittente'}</strong>
+                    </div>
+                  </div>
+                </div>
 
-          {/* Footer Documento */}
-          <div className="text-[9px] text-slate-400 text-center pt-2">
-            Documento di Trasporto generato elettronicamente tramite <strong>MachinaFlow MES</strong> &bull; Stampa ad uso logistico e doganale di officina.
-          </div>
+                {/* Box Firme Destra Impilate (4 colonne) */}
+                <div className="md:col-span-4 flex flex-col justify-between gap-2 text-[10px]">
+                  <div className="border border-slate-300 px-3 py-2 rounded-lg bg-white">
+                    <span className="font-bold text-slate-500 uppercase block text-[9px] mb-4">Firma del Mittente</span>
+                    <div className="border-b border-dashed border-slate-400"></div>
+                  </div>
+
+                  <div className="border border-slate-300 px-3 py-2 rounded-lg bg-white">
+                    <span className="font-bold text-slate-500 uppercase block text-[9px] mb-4">Firma del Vettore / Conducente</span>
+                    <div className="border-b border-dashed border-slate-400"></div>
+                  </div>
+
+                  <div className="border border-slate-300 px-3 py-2 rounded-lg bg-white">
+                    <span className="font-bold text-slate-500 uppercase block text-[9px] mb-4">
+                      {isCliente ? 'Firma Ricezione Cliente' : 'Firma Ricezione Fornitore'}
+                    </span>
+                    <div className="border-b border-dashed border-slate-400"></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Documento */}
+              <div className="text-[9px] text-slate-400 text-center pt-2">
+                Documento di Trasporto generato elettronicamente tramite <strong>MachinaFlow MES</strong> &bull; Stampa ad uso logistico e doganale di officina.
+              </div>
+            </div>
         </div>
       </div>
     </div>

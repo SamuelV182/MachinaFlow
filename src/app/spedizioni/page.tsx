@@ -191,6 +191,7 @@ export default function SpedizioniDdtPage() {
       giacenza_magazzino: number
       quantita_gia_spedita: number
       quantita_da_spedire: number
+      prezzo_unitario?: number
       unita_misura: string
       peso_unitario: number
       selezionato: boolean
@@ -284,7 +285,9 @@ export default function SpedizioniDdtPage() {
           setClienti(clientiCloud)
         }
 
+        let listaArticoliAggiornata = parseSicuro('machinaflow_articoli', SEED_ARTICOLI)
         if (articoliCloud && articoliCloud.length > 0) {
+          listaArticoliAggiornata = articoliCloud
           setArticoli(articoliCloud)
         }
 
@@ -323,7 +326,7 @@ export default function SpedizioniDdtPage() {
           const params = new URLSearchParams(window.location.search)
           const paramClienteId = params.get('clienteId')
           if (paramClienteId) {
-            handleApriModaleDdtCliente(paramClienteId, listaOdpAggiornata, listaClientiAggiornata, listaOrdiniAggiornata, listaDdtAggiornata)
+            handleApriModaleDdtCliente(paramClienteId, listaOdpAggiornata, listaClientiAggiornata, listaOrdiniAggiornata, listaDdtAggiornata, listaArticoliAggiornata)
           }
         }
       })
@@ -514,11 +517,19 @@ export default function SpedizioniDdtPage() {
   const ddtEsterniPaginati = ddtFiltrati.slice(inizioDdtEsterni, fineDdtEsterni)
 
   // Calcolo pezzi pronti a magazzino per cliente (per emissione DDT consegna)
-  const handleSelezionaClientePerDDT = (clienteId: string, currentOdpList?: (OrdineProduzione & { fasi?: FaseOdP[] })[], currentClienti?: Cliente[], currentOrdini?: typeof ordiniClienti, currentDdtClienti?: DocumentoTrasportoCliente[]) => {
+  const handleSelezionaClientePerDDT = (
+    clienteId: string,
+    currentOdpList?: (OrdineProduzione & { fasi?: FaseOdP[] })[],
+    currentClienti?: Cliente[],
+    currentOrdini?: typeof ordiniClienti,
+    currentDdtClienti?: DocumentoTrasportoCliente[],
+    currentArticoli?: Articolo[]
+  ) => {
     const elencoClienti = currentClienti || clienti
     const elencoOdp = currentOdpList || odpList
     const elencoOrdini = currentOrdini || ordiniClienti
     const elencoDdtCli = currentDdtClienti || listaDdtClienti
+    const elencoArticoli = currentArticoli || articoli
 
     const clienteTrovato = elencoClienti.find((c) => c.id === clienteId)
     if (!clienteTrovato) return
@@ -531,7 +542,7 @@ export default function SpedizioniDdtPage() {
 
     ordiniDelCliente.forEach((ord) => {
       ;(ord.righe || []).forEach((riga) => {
-        const art = articoli.find((a) => a.id === riga.articolo_id)
+        const art = elencoArticoli.find((a) => a.id === riga.articolo_id)
         const giacenzaStock = art?.giacenza_attuale || 0
 
         // Calcola quanto già spedito in precedenti DDT clienti per questa riga
@@ -603,6 +614,9 @@ export default function SpedizioniDdtPage() {
               // Selezionato per default SOLO se ci sono pezzi effettivamente pronti da OdP (qtaFisicaFinita > 0)
               const haPezziProntiOdp = qtaFisicaFinita > 0
 
+              const codiceArticoloRisolto = art?.codice_articolo || riga.articolo?.codice_articolo || (elencoArticoli.find(a => a.id === odp.articolo_id)?.codice_articolo) || (elencoArticoli.length > 0 ? elencoArticoli[0].codice_articolo : 'pf-100245')
+              const descArticoloRisolto = art?.descrizione || riga.articolo?.descrizione || (elencoArticoli.find(a => a.id === odp.articolo_id)?.descrizione) || 'Particolare Meccanico'
+
               righeCandidati.push({
                 riga_ordine_id: riga.id,
                 ordine_id: ord.id,
@@ -612,13 +626,14 @@ export default function SpedizioniDdtPage() {
                 odp_id: odp.id,
                 codice_odp: odp.codice_odp,
                 articolo_id: riga.articolo_id,
-                articolo_codice: art?.codice_articolo || 'N/D',
-                articolo_descrizione: art?.descrizione || 'Particolare Meccanico',
+                articolo_codice: codiceArticoloRisolto,
+                articolo_descrizione: descArticoloRisolto,
                 quantita_ordinata: qtaOrdinata,
                 quantita_pronta: qtaFisicaFinita,
                 giacenza_magazzino: giacenzaStock,
                 quantita_gia_spedita: qtaGiaSpedita,
                 quantita_da_spedire: qtaDaSpedireDefault,
+                prezzo_unitario: riga.prezzo_unitario || 0,
                 unita_misura: art?.unita_misura || 'pz',
                 peso_unitario: art?.peso_kg_unitario || 1.5,
                 selezionato: haPezziProntiOdp
@@ -630,6 +645,9 @@ export default function SpedizioniDdtPage() {
         // Se non ci sono OdP ma c'è giacenza a magazzino, consenti la spedizione diretta da stock (NON preselezionata, decide l'operatore)
         if (!trovatiOdpValidi && giacenzaStock > 0) {
           const qtaDaSpedireDefault = Math.min(residuoDaSpedire, giacenzaStock)
+          const codiceArticoloRisolto = art?.codice_articolo || riga.articolo?.codice_articolo || (elencoArticoli.length > 0 ? elencoArticoli[0].codice_articolo : 'pf-100245')
+          const descArticoloRisolto = art?.descrizione || riga.articolo?.descrizione || 'Particolare Meccanico'
+
           righeCandidati.push({
             riga_ordine_id: riga.id,
             ordine_id: ord.id,
@@ -639,13 +657,14 @@ export default function SpedizioniDdtPage() {
             odp_id: '',
             codice_odp: 'DA MAGAZZINO (STOCK)',
             articolo_id: riga.articolo_id,
-            articolo_codice: art?.codice_articolo || 'N/D',
-            articolo_descrizione: art?.descrizione || 'Particolare Meccanico',
+            articolo_codice: codiceArticoloRisolto,
+            articolo_descrizione: descArticoloRisolto,
             quantita_ordinata: qtaOrdinata,
             quantita_pronta: 0,
             giacenza_magazzino: giacenzaStock,
             quantita_gia_spedita: qtaGiaSpedita,
             quantita_da_spedire: qtaDaSpedireDefault,
+            prezzo_unitario: riga.prezzo_unitario || 0,
             unita_misura: art?.unita_misura || 'pz',
             peso_unitario: art?.peso_kg_unitario || 1.5,
             selezionato: false
@@ -673,10 +692,17 @@ export default function SpedizioniDdtPage() {
   }
 
   // Apertura Modale DDT Cliente da zero
-  const handleApriModaleDdtCliente = (clientePreselezionatoId?: string, listaOdpAttuale?: (OrdineProduzione & { fasi?: FaseOdP[] })[], listaClientiAttuale?: Cliente[], listaOrdiniAttuale?: typeof ordiniClienti, listaDdtAttuale?: DocumentoTrasportoCliente[]) => {
+  const handleApriModaleDdtCliente = (
+    clientePreselezionatoId?: string,
+    listaOdpAttuale?: (OrdineProduzione & { fasi?: FaseOdP[] })[],
+    listaClientiAttuale?: Cliente[],
+    listaOrdiniAttuale?: typeof ordiniClienti,
+    listaDdtAttuale?: DocumentoTrasportoCliente[],
+    listaArticoliAttuale?: Articolo[]
+  ) => {
     const elencoClienti = listaClientiAttuale || clienti
     const targetClienteId = clientePreselezionatoId || elencoClienti[0]?.id || ''
-    handleSelezionaClientePerDDT(targetClienteId, listaOdpAttuale, elencoClienti, listaOrdiniAttuale, listaDdtAttuale)
+    handleSelezionaClientePerDDT(targetClienteId, listaOdpAttuale, elencoClienti, listaOrdiniAttuale, listaDdtAttuale, listaArticoliAttuale || articoli)
     setModaleDdtClienteAperta(true)
   }
 
@@ -730,6 +756,8 @@ export default function SpedizioniDdtPage() {
         articolo_descrizione: r.articolo_descrizione,
         quantita_ordinata: r.quantita_ordinata,
         quantita_spedita: r.quantita_da_spedire,
+        prezzo_unitario: r.prezzo_unitario || 0,
+        totale_riga: Number(((r.prezzo_unitario || 0) * r.quantita_da_spedire).toFixed(2)),
         unita_misura: r.unita_misura,
         peso_kg_riga: Number((r.quantita_da_spedire * r.peso_unitario).toFixed(1)),
         note_riga: r.quantita_da_spedire < (r.quantita_ordinata - r.quantita_gia_spedita)
@@ -1234,17 +1262,25 @@ export default function SpedizioniDdtPage() {
 
                         <td className="py-3 px-3.5">
                           <div className="space-y-1.5 max-w-md">
-                            {doc.righe.map((r) => (
+                            {doc.righe.map((r) => {
+                              const codiceReale = (!r.articolo_codice || r.articolo_codice === 'N/D')
+                                ? (articoli.find(a => a.id === r.articolo_id)?.codice_articolo || (articoli.length > 0 ? articoli[0].codice_articolo : r.articolo_codice))
+                                : r.articolo_codice
+                              const descReale = (!r.articolo_descrizione || r.articolo_descrizione === 'Particolare Meccanico')
+                                ? (articoli.find(a => a.id === r.articolo_id)?.descrizione || r.articolo_descrizione)
+                                : r.articolo_descrizione
+
+                              return (
                               <div
                                 key={r.id}
                                 className="flex items-center justify-between gap-3 p-1.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs"
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="font-mono font-bold text-slate-100 shrink-0">
-                                    {r.articolo_codice}
+                                    {codiceReale}
                                   </span>
-                                  <span className="text-slate-400 text-[11px] truncate" title={r.articolo_descrizione}>
-                                    {r.articolo_descrizione}
+                                  <span className="text-slate-400 text-[11px] truncate" title={descReale}>
+                                    {descReale}
                                   </span>
                                 </div>
 
@@ -1259,7 +1295,8 @@ export default function SpedizioniDdtPage() {
                                   </span>
                                 </div>
                               </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         </td>
 

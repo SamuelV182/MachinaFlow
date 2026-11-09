@@ -306,6 +306,8 @@ export interface RigaDDTCliente {
   articolo_descrizione: string
   quantita_ordinata?: number
   quantita_spedita: number
+  prezzo_unitario?: number
+  totale_riga?: number
   unita_misura: string
   peso_kg_riga?: number
   note_riga?: string

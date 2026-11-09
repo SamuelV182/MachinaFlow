@@ -35,6 +35,7 @@ import {
   UserCheck
 } from 'lucide-react'
 import { MockupTabletOfficina } from '@/components/landing/MockupTabletOfficina'
+import { SimulatoreFlussoCompleto } from '@/components/landing/SimulatoreFlussoCompleto'
 import { MockupMrpDashboard } from '@/components/landing/MockupMrpDashboard'
 import { MockupMatriceCarico } from '@/components/landing/MockupMatriceCarico'
 import { MockupDdtWorkflow } from '@/components/landing/MockupDdtWorkflow'
@@ -94,6 +95,10 @@ export default function LandingPage() {
           </Link>
 
           <nav className="hidden xl:flex items-center gap-6 2xl:gap-8 text-xs font-semibold text-slate-300">
+            <a href="#come-funziona" className="hover:text-orange-400 transition-colors whitespace-nowrap text-orange-400 flex items-center gap-1">
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>Come Funziona (Demo)</span>
+            </a>
             <a href="#perche" className="hover:text-orange-400 transition-colors whitespace-nowrap">Perché MachinaFlow</a>
             <a href="#adozione-flessibile" className="hover:text-orange-400 transition-colors whitespace-nowrap">Tablet o Ufficio</a>
             <a href="#mrp-section" className="hover:text-orange-400 transition-colors whitespace-nowrap">MRP Anti-Doppio Ordine</a>
@@ -191,6 +196,16 @@ export default function LandingPage() {
             </span>
           </div>
           <MockupTabletOfficina />
+        </div>
+      </section>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* 2.5 SIMULATORE FLUSSO COMPLETO (VIDEO-LIKE INTERACTIVE DEMO)           */}
+      {/* ---------------------------------------------------------------------- */}
+      <section id="come-funziona" className="py-16 sm:py-24 bg-slate-900/40 border-t border-slate-800/80 px-4 sm:px-6 relative">
+        <div className="absolute inset-0 bg-gradient-to-b from-orange-500/5 via-transparent to-transparent pointer-events-none" />
+        <div className="relative z-10">
+          <SimulatoreFlussoCompleto />
         </div>
       </section>
 

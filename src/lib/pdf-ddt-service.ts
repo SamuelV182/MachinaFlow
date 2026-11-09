@@ -34,64 +34,85 @@ export function generaDdtPdf(
   const colorMuted = [100, 116, 139] // Slate 500
   const colorLightBg = [248, 250, 252] // Slate 50
 
-  // 1. INTESTAZIONE AZIENDA E LOGO
-  let xOffsetTesto = 14
+  // 1. INTESTAZIONE AZIENDA (STRUTTURA STANDARD A 3 COLONNE INDIPENDENTI)
+  // Colonna 1: Area Logo (X: 14 -> 54, maxW: 40mm, maxH: 17mm)
+  // Colonna 2: Dati Azienda (X: 58 -> 136)
+  // Colonna 3: Box Documento (X: 140 -> 196)
+
+  const hasLogo = Boolean(logoBase64)
+  const xOffsetTesto = hasLogo ? 58 : 14
+
   if (logoBase64) {
     try {
-      doc.addImage(logoBase64, 'PNG', 14, 11, 24, 20)
-      xOffsetTesto = 42
-    } catch {}
+      const imgProps = doc.getImageProperties(logoBase64)
+      const ratio = imgProps.width / imgProps.height
+      const maxH = 16
+      const maxW = 38
+      let logoW = maxH * ratio
+      let logoH = maxH
+      if (logoW > maxW) {
+        logoW = maxW
+        logoH = logoW / ratio
+      }
+      // Centra verticalmente il logo nello slot di testata
+      const yLogo = 12 + Math.max(0, (18 - logoH) / 2)
+      doc.addImage(logoBase64, 'PNG', 14, yLogo, logoW, logoH)
+    } catch {
+      try {
+        doc.addImage(logoBase64, 'PNG', 14, 13, 36, 12)
+      } catch {}
+    }
   }
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(8)
+  doc.setFontSize(7.5)
   doc.setTextColor(colorPrimario[0], colorPrimario[1], colorPrimario[2])
-  doc.text('DOCUMENTO DI TRASPORTO OPERATIVO (D.D.T.)', xOffsetTesto, 14)
+  doc.text('DOCUMENTO DI TRASPORTO (D.D.T.)', xOffsetTesto, 13)
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
+  doc.setFontSize(12.5)
   doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-  doc.text(nomeAzienda.toUpperCase(), xOffsetTesto, 20)
+  doc.text(nomeAzienda.toUpperCase(), xOffsetTesto, 19)
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-  doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-  doc.text(indirizzoAzienda, xOffsetTesto, 25)
-  doc.text(`${pivaAzienda}${telAzienda}`, xOffsetTesto, 29)
-
-  // BOX NUMERO E DATA DOCUMENTO (A Destra)
-  doc.setFillColor(colorLightBg[0], colorLightBg[1], colorLightBg[2])
-  doc.setDrawColor(203, 213, 225)
-  doc.roundedRect(132, 10, 64, 22, 2, 2, 'FD')
-
-  doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.5)
   doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-  doc.text('NUMERO DOCUMENTO', 192, 15, { align: 'right' })
+  doc.text(indirizzoAzienda, xOffsetTesto, 24)
+  doc.text(`${pivaAzienda}${telAzienda}`, xOffsetTesto, 28)
+
+  // BOX NUMERO E DATA DOCUMENTO (Colonna 3 a Destra: X=140, W=56mm)
+  doc.setFillColor(colorLightBg[0], colorLightBg[1], colorLightBg[2])
+  doc.setDrawColor(203, 213, 225)
+  doc.roundedRect(140, 10, 56, 21, 2, 2, 'FD')
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7)
+  doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
+  doc.text('NUMERO DOCUMENTO', 192, 14.5, { align: 'right' })
 
   doc.setFont('courier', 'bold')
-  doc.setFontSize(13)
+  doc.setFontSize(12)
   doc.setTextColor(colorPrimario[0], colorPrimario[1], colorPrimario[2])
-  doc.text(ddt.numero_ddt || 'N/D', 192, 22, { align: 'right' })
+  doc.text(ddt.numero_ddt || 'N/D', 192, 21, { align: 'right' })
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
+  doc.setFontSize(7.5)
   doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-  const dataOra = `${new Date(ddt.data_emissione).toLocaleDateString('it-IT')}  ore ${new Date(ddt.data_emissione).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-  doc.text(`Data: ${dataOra}`, 192, 28, { align: 'right' })
+  const dataOra = `${new Date(ddt.data_emissione).toLocaleDateString('it-IT')}  ${new Date(ddt.data_emissione).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
+  doc.text(`Data: ${dataOra}`, 192, 27, { align: 'right' })
 
   // Linea divisoria nera
   doc.setDrawColor(colorDark[0], colorDark[1], colorDark[2])
   doc.setLineWidth(0.6)
-  doc.line(14, 35, 196, 35)
+  doc.line(14, 34, 196, 34)
 
-  // 2. BLOCCO MITTENTE / DESTINATARIO (2 Colonne affiancate)
+  // 2. BLOCCO MITTENTE / DESTINATARIO (Subito sotto la testata)
   const yMittente = 39
 
   // Box Mittente (Sinistra)
   doc.setFillColor(colorLightBg[0], colorLightBg[1], colorLightBg[2])
   doc.setDrawColor(226, 232, 240)
-  doc.roundedRect(14, yMittente, 88, 26, 2, 2, 'FD')
+  doc.roundedRect(14, yMittente, 88, 25, 2, 2, 'FD')
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.5)
@@ -101,19 +122,19 @@ export function generaDdtPdf(
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(9)
   doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-  doc.text(nomeAzienda, 17, yMittente + 10)
+  doc.text(nomeAzienda, 17, yMittente + 10.5)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-  doc.text(indirizzoAzienda, 17, yMittente + 15)
-  doc.text(`Causale: ${ddt.causale_trasporto} • Porto: ${ddt.porto}`, 17, yMittente + 20)
+  doc.text(indirizzoAzienda, 17, yMittente + 15.5)
+  doc.text(`P.IVA: ${azienda?.partita_iva || '02453430460'}`, 17, yMittente + 20)
 
   // Box Destinatario (Destra)
   doc.setFillColor(isCliente ? 240 : 253, isCliente ? 253 : 242, isCliente ? 244 : 248) // Verde chiaro o rosa chiaro
   doc.setDrawColor(colorPrimario[0], colorPrimario[1], colorPrimario[2])
   doc.setLineWidth(0.4)
-  doc.roundedRect(106, yMittente, 90, 26, 2, 2, 'FD')
+  doc.roundedRect(106, yMittente, 90, 25, 2, 2, 'FD')
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.5)
@@ -139,56 +160,69 @@ export function generaDdtPdf(
     : `P.IVA: ${terzistaDdt?.fornitore_piva || 'Come in anagrafica'}`
   doc.text(pivaDest, 109, yMittente + 21)
 
-  // 3. DATI LOGISTICI TRASPORTO (Fascia a 4 sezioni)
-  const yLog = 69
-  doc.setFillColor(241, 245, 249)
-  doc.setDrawColor(226, 232, 240)
-  doc.roundedRect(14, yLog, 182, 13, 2, 2, 'FD')
-
-  const sezioniLog = [
-    { label: 'VETTORE INCARICATO:', val: ddt.vettore_nome || 'Vettore' },
-    { label: 'NUMERO COLLI:', val: `${ddt.numero_colli || 1} cassa/e` },
-    { label: 'PESO TOTALE LORDO:', val: ddt.peso_totale_kg ? `${ddt.peso_totale_kg.toFixed(1)} kg` : 'A vista' },
-    { label: 'ASPETTO DEI BENI:', val: ddt.aspetto_beni || 'A vista' }
-  ]
-
-  sezioniLog.forEach((s, idx) => {
-    const xPos = 17 + idx * 45
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(6.5)
-    doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-    doc.text(s.label, xPos, yLog + 4.5)
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(8)
-    doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-    doc.text(s.val, xPos, yLog + 9.5)
-  })
-
-  // 4. TABELLA DETTAGLIO MERCI
+  // 3. TABELLA DETTAGLIO MERCI (Inizia subito sotto i box mittente/destinatario a Y = 68)
   const headers = isCliente
-    ? [['Ns. Ordine', 'Item', 'Commessa Cliente', 'Codice Particolare', 'Descrizione Tecnica', 'Note Consegna', 'Q.tà', 'Peso']]
+    ? [['Pos / OdP', 'Commessa', 'Codice Articolo', 'Descrizione Particolare', 'Note / Saldo', 'Q.tà', 'Prezzo (€)', 'Totale (€)']]
     : [['# OdP / Rif.', 'Codice Particolare', 'Descrizione Tecnica', 'Trattamento Richiesto', 'Q.tà Spedita', 'Peso Stima']]
 
   const righeDati: any[] = []
+  let totaleImponibileDoc = 0
 
   if (isCliente && clienteDdt) {
     clienteDdt.righe.forEach((r) => {
       let commessa = r.riferimento_ordine_cliente || ''
-      if (!commessa && ordiniClienti) {
-        const m = ordiniClienti.find((o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente)
-        if (m?.riferimento_ordine_cliente) commessa = m.riferimento_ordine_cliente
+      let prezzoUnitario = r.prezzo_unitario || 0
+
+      if (ordiniClienti) {
+        const ord = ordiniClienti.find((o) => o.id === r.ordine_cliente_id || o.numero_ordine === r.codice_ordine_cliente)
+        if (ord) {
+          if (!commessa && ord.riferimento_ordine_cliente) commessa = ord.riferimento_ordine_cliente
+          if (!prezzoUnitario && (ord as any).righe) {
+            const rigaOrd = (ord as any).righe.find((ro: any) => ro.id === r.riga_ordine_cliente_id || ro.articolo_id === r.articolo_id)
+            if (rigaOrd?.prezzo_unitario) prezzoUnitario = rigaOrd.prezzo_unitario
+          }
+        }
+      }
+
+      const totRiga = r.totale_riga !== undefined ? r.totale_riga : (prezzoUnitario * r.quantita_spedita)
+      totaleImponibileDoc += totRiga
+
+      const labelOdp = r.codice_odp ? r.codice_odp.replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '') : (r.codice_ordine_cliente || '-')
+      const labelPos = r.pos_riga_cliente ? `#${r.pos_riga_cliente} • ` : ''
+
+      let codArt = r.articolo_codice || ''
+      if (!codArt || codArt === 'N/D') {
+        try {
+          const artSalvati = localStorage.getItem('machinaflow_articoli')
+          if (artSalvati) {
+            const listArt: any[] = JSON.parse(artSalvati)
+            const trovato = listArt.find((a) => a.id === r.articolo_id) || listArt[0]
+            if (trovato?.codice_articolo) codArt = trovato.codice_articolo
+          }
+        } catch {}
+      }
+
+      let descArt = r.articolo_descrizione || ''
+      if (!descArt || descArt === 'Particolare Meccanico') {
+        try {
+          const artSalvati = localStorage.getItem('machinaflow_articoli')
+          if (artSalvati) {
+            const listArt: any[] = JSON.parse(artSalvati)
+            const trovato = listArt.find((a) => a.id === r.articolo_id) || listArt[0]
+            if (trovato?.descrizione) descArt = trovato.descrizione
+          }
+        } catch {}
       }
 
       righeDati.push([
-        r.codice_ordine_cliente || 'N/D',
-        r.pos_riga_cliente ? `#${r.pos_riga_cliente}` : '-',
+        `${labelPos}${labelOdp}`,
         commessa || '-',
-        r.articolo_codice || '',
-        r.articolo_descrizione || '',
-        r.note_riga || (r.quantita_ordinata ? `Parziale (Tot: ${r.quantita_ordinata})` : 'Consegna'),
+        codArt || 'pf-100245',
+        descArt || 'Particolare Meccanico',
+        r.note_riga || (r.quantita_ordinata ? `Saldo (${r.quantita_spedita}/${r.quantita_ordinata})` : 'Consegna'),
         `${r.quantita_spedita} ${r.unita_misura}`,
-        r.peso_kg_riga ? `${r.peso_kg_riga.toFixed(1)} kg` : '-'
+        prezzoUnitario > 0 ? `€ ${prezzoUnitario.toFixed(2)}` : '€ 0,00',
+        totRiga > 0 ? `€ ${totRiga.toFixed(2)}` : '€ 0,00'
       ])
     })
   } else if (terzistaDdt) {
@@ -205,7 +239,7 @@ export function generaDdtPdf(
   }
 
   autoTable(doc, {
-    startY: 86,
+    startY: 68,
     head: headers,
     body: righeDati,
     theme: 'grid',
@@ -227,14 +261,14 @@ export function generaDdtPdf(
     },
     columnStyles: isCliente
       ? {
-          0: { fontStyle: 'bold', cellWidth: 22 },
-          1: { halign: 'center', cellWidth: 12 },
-          2: { fontStyle: 'bold', cellWidth: 26 },
-          3: { fontStyle: 'bold', cellWidth: 26 },
-          4: { cellWidth: 40 },
-          5: { cellWidth: 26 },
-          6: { halign: 'center', fontStyle: 'bold', cellWidth: 16 },
-          7: { halign: 'right', cellWidth: 14 }
+          0: { fontStyle: 'bold', cellWidth: 26 },
+          1: { fontStyle: 'bold', cellWidth: 20 },
+          2: { fontStyle: 'bold', cellWidth: 24 },
+          3: { cellWidth: 44 },
+          4: { cellWidth: 24, fontSize: 7.5 },
+          5: { halign: 'center', fontStyle: 'bold', cellWidth: 16 },
+          6: { halign: 'right', cellWidth: 14 },
+          7: { halign: 'right', fontStyle: 'bold', cellWidth: 14 }
         }
       : {
           0: { fontStyle: 'bold', textColor: [190, 24, 93], cellWidth: 28 },
@@ -248,44 +282,133 @@ export function generaDdtPdf(
   })
 
   // Calcolo posizione successiva alla tabella
-  const finalY = (doc as any).lastAutoTable.finalY + 6
+  let currentY = (doc as any).lastAutoTable.finalY + 3
+
+  // Box Riepilogo Totali (Solo per DDT Cliente)
+  if (isCliente) {
+    const totaleIvaDoc = Number((totaleImponibileDoc * 0.22).toFixed(2))
+    const totaleFinaleDoc = Number((totaleImponibileDoc + totaleIvaDoc).toFixed(2))
+
+    const xTot = 120
+    const wTot = 76
+    doc.setFillColor(colorLightBg[0], colorLightBg[1], colorLightBg[2])
+    doc.setDrawColor(203, 213, 225)
+    doc.roundedRect(xTot, currentY, wTot, 16, 1.5, 1.5, 'FD')
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
+    doc.text('Totale Imponibile Merce:', xTot + 3, currentY + 4.5)
+    doc.text('IVA Ordinaria (22%):', xTot + 3, currentY + 9)
+
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
+    doc.text(`€ ${totaleImponibileDoc.toFixed(2)}`, xTot + wTot - 3, currentY + 4.5, { align: 'right' })
+    doc.text(`€ ${totaleIvaDoc.toFixed(2)}`, xTot + wTot - 3, currentY + 9, { align: 'right' })
+
+    doc.setFontSize(8.5)
+    doc.setTextColor(colorPrimario[0], colorPrimario[1], colorPrimario[2])
+    doc.text('TOTALE DOCUMENTO:', xTot + 3, currentY + 13.5)
+    doc.text(`€ ${totaleFinaleDoc.toFixed(2)}`, xTot + wTot - 3, currentY + 13.5, { align: 'right' })
+
+    currentY += 19
+  }
 
   // Note di Trasporto (se presenti)
-  let yFirme = finalY
   if (ddt.note_trasporto) {
     doc.setFillColor(254, 243, 199) // Giallo ambra chiaro
     doc.setDrawColor(253, 230, 138)
-    doc.roundedRect(14, finalY, 182, 9, 2, 2, 'FD')
-
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(7.5)
-    doc.setTextColor(146, 64, 14)
-    doc.text(`Note & Istruzioni: ${ddt.note_trasporto}`, 17, finalY + 5.5)
-    yFirme += 14
-  }
-
-  // 5. RIQUADRO FIRME (3 Colonne)
-  // Assicura che le firme non sforino a fondo pagina
-  const yBoxFirme = Math.min(Math.max(yFirme, 235), 255)
-  const boxWidth = 58
-  const titoliFirme = ['FIRMA DEL MITTENTE', 'FIRMA DEL VETTORE', isCliente ? 'FIRMA CLIENTE RICEZIONE' : 'FIRMA FORNITORE RICEZIONE']
-
-  titoliFirme.forEach((titolo, i) => {
-    const xBox = 14 + i * 62
-    doc.setFillColor(255, 255, 255)
-    doc.setDrawColor(203, 213, 225)
-    doc.roundedRect(xBox, yBoxFirme, boxWidth, 24, 2, 2, 'D')
+    doc.roundedRect(14, currentY, 182, 7.5, 1.5, 1.5, 'FD')
 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(7)
+    doc.setTextColor(146, 64, 14)
+    doc.text(`Note & Istruzioni: ${ddt.note_trasporto}`, 17, currentY + 4.8)
+    currentY += 10.5
+  }
+
+  // 4. DATI LOGISTICI TRASPORTO & FIRME (LAYOUT SPLIT A FONDO PAGINA)
+  // Sinistra: Logistica su 2 righe da 3 colonne (W: 114mm)
+  // Destra: 3 Firme impilate (W: 64mm, da X=132 a X=196)
+  const hBottom = 38 // Altezza totale del blocco combinato
+  // Ancoraggio a fondo pagina: Y = 243 mm così il blocco finisce a 281 mm, lasciando 5 mm prima del footer (286 mm)
+  const yBottom = Math.max(currentY + 2, 243)
+
+  // --- BLOCCO LOGISTICA (Sinistra: X=14, W=114, H=38) ---
+  doc.setFillColor(248, 250, 252)
+  doc.setDrawColor(203, 213, 225)
+  doc.roundedRect(14, yBottom, 114, hBottom, 1.5, 1.5, 'FD')
+
+  // Griglia 2 righe x 3 colonne
+  const riga1 = [
+    { label: 'CAUSALE TRASPORTO', val: ddt.causale_trasporto || 'Vendita' },
+    { label: 'PORTO', val: ddt.porto || 'Franco' },
+    { label: 'ASPETTO DEI BENI', val: ddt.aspetto_beni || 'A vista' }
+  ]
+  const riga2 = [
+    { label: 'NUMERO COLLI', val: `${ddt.numero_colli || 1} collo/i` },
+    { label: 'PESO TOTALE LORDO', val: ddt.peso_totale_kg ? `${ddt.peso_totale_kg.toFixed(1)} kg` : 'A vista' },
+    { label: 'VETTORE INCARICATO', val: ddt.vettore_nome || 'Mittente' }
+  ]
+
+  const colW = 37
+  riga1.forEach((item, idx) => {
+    const x = 16 + idx * colW
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(6.5)
     doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
-    doc.text(titolo, xBox + 4, yBoxFirme + 5.5)
+    doc.text(item.label, x, yBottom + 5.5)
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7)
+    doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
+    const lines = doc.splitTextToSize(item.val, colW - 3)
+    doc.text(lines.slice(0, 2), x, yBottom + 10.5)
+  })
+
+  // Linea orizzontale divisoria interna tra riga 1 e riga 2
+  doc.setDrawColor(226, 232, 240)
+  doc.setLineWidth(0.3)
+  doc.line(16, yBottom + 19, 126, yBottom + 19)
+
+  riga2.forEach((item, idx) => {
+    const x = 16 + idx * colW
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(6.5)
+    doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
+    doc.text(item.label, x, yBottom + 24.5)
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7)
+    doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
+    const lines = doc.splitTextToSize(item.val, colW - 3)
+    doc.text(lines.slice(0, 2), x, yBottom + 29.5)
+  })
+
+  // --- BLOCCO 3 FIRME IMPILATE (Destra: X=132, W=64, H=38) ---
+  const titoliFirme = [
+    'FIRMA MITTENTE / CONDUCENTE',
+    'FIRMA VETTORE (RITIRO)',
+    isCliente ? 'FIRMA CLIENTE (RICEVUTA)' : 'FIRMA FORNITORE (RICEVUTA)'
+  ]
+  const hFirma = 11.2
+
+  titoliFirme.forEach((titolo, i) => {
+    const yF = yBottom + i * (hFirma + 1.8)
+    doc.setFillColor(255, 255, 255)
+    doc.setDrawColor(203, 213, 225)
+    doc.roundedRect(132, yF, 64, hFirma, 1.5, 1.5, 'D')
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(6)
+    doc.setTextColor(colorMuted[0], colorMuted[1], colorMuted[2])
+    doc.text(titolo, 135, yF + 3.8)
 
     // Linea tratteggiata per la firma
     doc.setDrawColor(148, 163, 184)
     doc.setLineDashPattern([1.5, 1.5], 0)
-    doc.line(xBox + 4, yBoxFirme + 19, xBox + boxWidth - 4, yBoxFirme + 19)
-    doc.setLineDashPattern([], 0) // Ripristina linea continua
+    doc.line(135, yF + 9.2, 193, yF + 9.2)
+    doc.setLineDashPattern([], 0)
   })
 
   // 6. FOOTER DOCUMENTO
