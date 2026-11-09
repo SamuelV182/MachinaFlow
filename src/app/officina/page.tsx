@@ -469,6 +469,9 @@ export default function TerminaleOfficinaPage() {
       }
     }
 
+    // Invia segnale broadcast leggero a tutti gli altri terminali/telefoni connessi
+    syncService.inviaSegnaleAvanzamento()
+
     const messaggio =
       nuovoStato === 'in_corso'
         ? 'Lavorazione avviata!'
@@ -968,6 +971,9 @@ export default function TerminaleOfficinaPage() {
     if (odpModificato) {
       await syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
     }
+
+    // Invia segnale broadcast leggero a tutti gli altri terminali/telefoni connessi
+    syncService.inviaSegnaleAvanzamento()
 
     setModaleEsternaAperta(false)
     setDatiEsterna(null)

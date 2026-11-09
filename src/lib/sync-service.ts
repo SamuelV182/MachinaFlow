@@ -755,20 +755,34 @@ export const syncService = {
       }
 
       if (data && data.length > 0) {
-        // Deserializza eventuali metadati di conto terzi salvati in note_operative
+        // Deserializza eventuali metadati di conto terzi e prelievo materia prima salvati in note_operative
         const arricchite = data.map((f: any) => {
           let note = f.note_operative || ''
           let metaTerzista: any = {}
+          let prelevaMateriaPrima: boolean | undefined = f.preleva_materia_prima
+
           if (note && note.includes('__MF_TERZISTA__=')) {
             try {
               const parti = note.split('__MF_TERZISTA__=')
               note = parti[0].trim()
-              metaTerzista = JSON.parse(parti[1])
+              const resto = parti[1].split('\n')[0]
+              metaTerzista = JSON.parse(resto)
             } catch {}
           }
+
+          if (note && note.includes('__MF_PRELEVA__=')) {
+            try {
+              const parti = note.split('__MF_PRELEVA__=')
+              note = parti[0].trim()
+              const val = parti[1].split('\n')[0].trim()
+              prelevaMateriaPrima = val === 'true'
+            } catch {}
+          }
+
           return {
             ...f,
             note_operative: note,
+            preleva_materia_prima: prelevaMateriaPrima,
             ...metaTerzista
           } as FaseCicloStandard
         })
@@ -794,8 +808,17 @@ export const syncService = {
     try {
       const azId = getCurrentAziendaId()
       
-      // Impacchetta i dati di conto terzi se presenti per garantirne la persistenza universale su Supabase
+      // Impacchetta i metadati estesi (conto terzi e prelievo materia prima) in note_operative per persistenza universale su Supabase
       let noteFinali = fase.note_operative || ''
+      
+      // Pulisce eventuali vecchi tag metadati se presenti
+      if (noteFinali.includes('__MF_TERZISTA__=')) {
+        noteFinali = noteFinali.split('__MF_TERZISTA__=')[0].trim()
+      }
+      if (noteFinali.includes('__MF_PRELEVA__=')) {
+        noteFinali = noteFinali.split('__MF_PRELEVA__=')[0].trim()
+      }
+
       if (fase.is_esterna) {
         const metaTerzista = {
           is_esterna: true,
@@ -808,6 +831,10 @@ export const syncService = {
         noteFinali = `${noteFinali.trim()}\n__MF_TERZISTA__=${JSON.stringify(metaTerzista)}`
       }
 
+      if (fase.preleva_materia_prima !== undefined) {
+        noteFinali = `${noteFinali.trim()}\n__MF_PRELEVA__=${fase.preleva_materia_prima ? 'true' : 'false'}`
+      }
+
       const payload: any = {
         id: fase.id,
         articolo_id: fase.articolo_id,
@@ -817,7 +844,7 @@ export const syncService = {
         centro_lavoro_id: fase.centro_lavoro_id,
         tempo_attrezzaggio_min: fase.tempo_attrezzaggio_min || 0,
         tempo_ciclo_pezzo_min: fase.tempo_ciclo_pezzo_min || 0,
-        note_operative: noteFinali || null
+        note_operative: noteFinali.trim() || null
       }
       if (azId) {
         payload.azienda_id = azId
@@ -1352,24 +1379,57 @@ export const syncService = {
     }
   },
 
-  // 6. REAL-TIME SUBSCRIPTIONS
+  // 6. REAL-TIME SUBSCRIPTIONS & BROADCAST LEGGERO
   // Permette a tutti i client (desktop, cellulari, postazioni) di ricevere aggiornamenti
-  // istantanei in tempo reale quando qualsiasi postazione compie un'azione (avvio/chiusura fase, emissione DDT, ecc.)
+  // istantanei in tempo reale quando qualsiasi postazione compie un'azione (avvio/chiusura fase, ecc.)
+  // senza polling continuo e senza appesantire il sistema (evento puro "evento-su-richiesta").
+  inviaSegnaleAvanzamento() {
+    try {
+      const azId = getCurrentAziendaId() || 'generale'
+      const broadcastChannel = supabase.channel(`mf-broadcast-${azId}`)
+      broadcastChannel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          broadcastChannel.send({
+            type: 'broadcast',
+            event: 'cambio_fase',
+            payload: { timestamp: Date.now() }
+          }).then(() => {
+            supabase.removeChannel(broadcastChannel)
+          }).catch(() => {
+            supabase.removeChannel(broadcastChannel)
+          })
+        }
+      })
+    } catch (e) {
+      console.warn('Errore invio segnale broadcast:', e)
+    }
+  },
+
   sottoscriviAvanzamentoProduzione(suAggiornamento: () => void) {
     let timerDebounce: any = null
 
     const eseguiAggiornamentoPulito = () => {
       if (timerDebounce) clearTimeout(timerDebounce)
-      // Debounce di 400ms: raggruppa le notifiche a raffica in un'unica sincronizzazione pulita
+      // Debounce di 300ms: se arrivano eventi simultanei, esegue 1 solo aggiornamento
       timerDebounce = setTimeout(() => {
         suAggiornamento()
-      }, 400)
+      }, 300)
     }
 
-    // Canale unico dedicato per le tabelle operative con Realtime attivo
-    const channelId = `mf-realtime-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`
+    const azId = getCurrentAziendaId() || 'generale'
+    const channelId = `mf-realtime-officina-${azId}`
+
     const channel = supabase
-      .channel(channelId)
+      .channel(channelId, {
+        config: {
+          broadcast: { self: false }
+        }
+      })
+      // 1. Canale Broadcast ad altissima velocità e zero impatto database (tra telefoni/terminali)
+      .on('broadcast', { event: 'cambio_fase' }, () => {
+        eseguiAggiornamentoPulito()
+      })
+      // 2. Canale CDC Database Postgres Changes (se abilitata la publication su Supabase)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'fasi_odp' },
@@ -1378,26 +1438,6 @@ export const syncService = {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'ordini_produzione' },
-        eseguiAggiornamentoPulito
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'ordini_fornitori' },
-        eseguiAggiornamentoPulito
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'articoli' },
-        eseguiAggiornamentoPulito
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'ordini_clienti' },
-        eseguiAggiornamentoPulito
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'righe_ordine_cliente' },
         eseguiAggiornamentoPulito
       )
       .subscribe()

@@ -263,37 +263,54 @@ export default function OrdiniPage() {
       } catch {}
       setClienti(clientiList)
 
-      // Unisci articoli salvati con seed
-      const articoliSalvati = parseSicuro<Articolo[]>('machinaflow_articoli', [])
-      const mappaArticoli = new Map<string, Articolo>()
-      if (!azIsolata) {
-        SEED_ARTICOLI.forEach((a) => mappaArticoli.set(a.id, a))
-      }
-      articoliSalvati.forEach((a) => mappaArticoli.set(a.id, a))
-      const articoliList = Array.from(mappaArticoli.values())
+      // Carica articoli da Supabase Cloud
+      let articoliList = azIsolata ? [] : parseSicuro<Articolo[]>('machinaflow_articoli', [])
+      try {
+        const artCloud = await syncService.getArticoli()
+        if (artCloud && artCloud.length > 0) {
+          articoliList = artCloud
+          localStorage.setItem('machinaflow_articoli', JSON.stringify(artCloud))
+        } else if (!azIsolata && articoliList.length === 0) {
+          articoliList = SEED_ARTICOLI
+        }
+      } catch {}
       setArticoli(articoliList)
 
-      // Unisci cicli salvati con seed
-      const cicliSalvati = parseSicuro<FaseCicloStandard[]>('machinaflow_cicli', [])
-      const mappaCicli = new Map<string, FaseCicloStandard>()
-      if (!azIsolata) {
-        SEED_FASI_CICLO.forEach((c) => mappaCicli.set(c.id, c))
-      }
-      cicliSalvati.forEach((c) => mappaCicli.set(c.id, c))
-      const cicliList = Array.from(mappaCicli.values())
+      // Carica cicli standard da Supabase Cloud
+      let cicliList = azIsolata ? [] : parseSicuro<FaseCicloStandard[]>('machinaflow_cicli', [])
+      try {
+        const cicliCloud = await syncService.getFasiCiclo()
+        if (cicliCloud && cicliCloud.length > 0) {
+          cicliList = cicliCloud
+          localStorage.setItem('machinaflow_cicli', JSON.stringify(cicliCloud))
+        } else if (!azIsolata && cicliList.length === 0) {
+          cicliList = SEED_FASI_CICLO
+        }
+      } catch {}
       setCicli(cicliList)
 
-      // Unisci distinte salvate con seed
-      const distinteSalvate = parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', [])
-      const mappaDistinte = new Map<string, ComponenteDistintaBase>()
-      if (!azIsolata) {
-        SEED_DISTINTA_BASE.forEach((d) => mappaDistinte.set(d.id, d))
-      }
-      distinteSalvate.forEach((d) => mappaDistinte.set(d.id, d))
-      const distinteList = Array.from(mappaDistinte.values())
+      // Carica distinte base da Supabase Cloud
+      let distinteList = azIsolata ? [] : parseSicuro<ComponenteDistintaBase[]>('machinaflow_distinte', [])
+      try {
+        const distinteCloud = await syncService.getDistinte()
+        if (distinteCloud && distinteCloud.length > 0) {
+          distinteList = distinteCloud
+          localStorage.setItem('machinaflow_distinte', JSON.stringify(distinteCloud))
+        } else if (!azIsolata && distinteList.length === 0) {
+          distinteList = SEED_DISTINTA_BASE
+        }
+      } catch {}
       setDistinte(distinteList)
 
-      const centriList = azIsolata ? [] : parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
+      // Carica macchine / centri di lavoro da Supabase Cloud
+      let centriList = azIsolata ? [] : parseSicuro('machinaflow_centri_lavoro', SEED_CENTRI_LAVORO)
+      try {
+        const centriCloud = await syncService.getCentriLavoro()
+        if (centriCloud && centriCloud.length > 0) {
+          centriList = centriCloud
+          localStorage.setItem('machinaflow_centri_lavoro', JSON.stringify(centriCloud))
+        }
+      } catch {}
       setCentriLavoro(centriList)
 
       // Carica e sincronizza OdP da Supabase Cloud
@@ -759,20 +776,41 @@ export default function OrdiniPage() {
   }
 
   // Generazione Massiva OdP per tutte le righe selezionate con Checkbox
-  const handleLanciaSelezionati = () => {
+  const handleLanciaSelezionati = async () => {
     if (righeSelezionate.length === 0) return
 
     let countCreati = 0
     let tempOdpList = [...odpList]
     const ordiniCoinvoltiIds = new Set<string>()
 
-    // Trova le righe corrispondenti
-    ordini.forEach((ord) => {
-      ord.righe.forEach((riga, rigaIdx) => {
-        if (!righeSelezionate.includes(riga.id)) return
-        if (tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ord.id && o.articolo_id === riga.articolo_id))) return
+    // Recupera cicli freschi da Supabase per sicurezza assoluta
+    let cicliDisponibili = cicli
+    if (cicliDisponibili.length === 0) {
+      try {
+        const cicliCloud = await syncService.getFasiCiclo()
+        if (cicliCloud && cicliCloud.length > 0) {
+          cicliDisponibili = cicliCloud
+          setCicli(cicliCloud)
+        }
+      } catch {}
+    }
 
-        const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
+    // Trova le righe corrispondenti
+    for (const ord of ordini) {
+      for (let rigaIdx = 0; rigaIdx < ord.righe.length; rigaIdx++) {
+        const riga = ord.righe[rigaIdx]
+        if (!righeSelezionate.includes(riga.id)) continue
+        if (tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ord.id && o.articolo_id === riga.articolo_id))) continue
+
+        let fasiArticolo = cicliDisponibili.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
+        if (fasiArticolo.length === 0) {
+          try {
+            const fasiCloud = await syncService.getFasiCiclo(riga.articolo_id)
+            if (fasiCloud && fasiCloud.length > 0) {
+              fasiArticolo = fasiCloud.sort((a, b) => a.sequenza - b.sequenza)
+            }
+          } catch {}
+        }
         const nuovoOdpId = `odp-${Date.now()}-${rigaIdx}-${Math.random().toString(36).substring(2, 5)}`
         // Calcola il prossimo numero progressivo considerando solo le radici base (senza contare /A, /B, /R)
         const radiciBase = new Set(tempOdpList.map((o) => o.codice_odp.replace(/\/.*$/, '').replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '')))
@@ -845,8 +883,8 @@ export default function OrdiniPage() {
         tempOdpList = [nuovoOdP, ...tempOdpList]
         ordiniCoinvoltiIds.add(ord.id)
         countCreati++
-      })
-    })
+      }
+    }
 
     if (countCreati > 0) {
       setOdpList(tempOdpList)
@@ -875,16 +913,37 @@ export default function OrdiniPage() {
   }
 
   // Generazione Automatica di TUTTI gli OdP dell'ordine con 1 click
-  const handleGeneraTuttiOdP = (ordine: OrdineCompleto) => {
+  const handleGeneraTuttiOdP = async (ordine: OrdineCompleto) => {
     let countCreati = 0
     let tempOdpList = [...odpList]
 
-    ordine.righe.forEach((riga, rigaIdx) => {
+    // Recupera cicli freschi da Supabase
+    let cicliDisponibili = cicli
+    if (cicliDisponibili.length === 0) {
+      try {
+        const cicliCloud = await syncService.getFasiCiclo()
+        if (cicliCloud && cicliCloud.length > 0) {
+          cicliDisponibili = cicliCloud
+          setCicli(cicliCloud)
+        }
+      } catch {}
+    }
+
+    for (let rigaIdx = 0; rigaIdx < ordine.righe.length; rigaIdx++) {
+      const riga = ordine.righe[rigaIdx]
       // Controlla se esiste già un OdP per questa riga
       const esisteGia = tempOdpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id))
-      if (esisteGia) return
+      if (esisteGia) continue
 
-      const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
+      let fasiArticolo = cicliDisponibili.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
+      if (fasiArticolo.length === 0) {
+        try {
+          const fasiCloud = await syncService.getFasiCiclo(riga.articolo_id)
+          if (fasiCloud && fasiCloud.length > 0) {
+            fasiArticolo = fasiCloud.sort((a, b) => a.sequenza - b.sequenza)
+          }
+        } catch {}
+      }
       const nuovoOdpId = `odp-${Date.now()}-${rigaIdx}`
       const radiciBase = new Set(tempOdpList.map((o) => o.codice_odp.replace(/\/.*$/, '').replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '')))
       let maxNum = 0
@@ -955,7 +1014,7 @@ export default function OrdiniPage() {
 
       tempOdpList = [nuovoOdP, ...tempOdpList]
       countCreati++
-    })
+    }
 
     if (countCreati > 0) {
       setOdpList(tempOdpList)
@@ -990,15 +1049,25 @@ export default function OrdiniPage() {
   }
 
   // Generazione Automatica OdP dalla riga d'ordine
-  const handleGeneraOdP = (ordine: OrdineCompleto, riga: RigaOrdineCliente & { articolo?: Articolo }) => {
+  const handleGeneraOdP = async (ordine: OrdineCompleto, riga: RigaOrdineCliente & { articolo?: Articolo }) => {
     // Controllo preventivo: se esiste già un OdP per questa riga o articolo/ordine, non ricrearlo
     const esisteGiaOdP = odpList.some((o) => o.riga_ordine_cliente_id === riga.id || (o.ordine_cliente_id === ordine.id && o.articolo_id === riga.articolo_id))
     if (esisteGiaOdP) {
       alert(`Un OdP per l'articolo ${riga.articolo?.codice_articolo || ''} dell'ordine ${ordine.numero_ordine} è già presente in officina.`)
       return
     }
-    // 1. Trova le fasi del ciclo standard dell'articolo
-    const fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
+    // 1. Trova le fasi del ciclo standard dell'articolo (direttamente da Supabase se non presenti nello stato)
+    let fasiArticolo = cicli.filter((c) => c.articolo_id === riga.articolo_id).sort((a, b) => a.sequenza - b.sequenza)
+    if (fasiArticolo.length === 0) {
+      try {
+        const fasiCloud = await syncService.getFasiCiclo(riga.articolo_id)
+        if (fasiCloud && fasiCloud.length > 0) {
+          fasiArticolo = fasiCloud.sort((a, b) => a.sequenza - b.sequenza)
+        }
+      } catch (err) {
+        console.error('Errore recupero fasi da Supabase:', err)
+      }
+    }
 
     const nuovoOdpId = 'odp-' + Date.now()
     const radiciBase = new Set(odpList.map((o) => o.codice_odp.replace(/\/.*$/, '').replace(/^[A-Z0-9]+-[A-Z0-9]+-/, '')))
