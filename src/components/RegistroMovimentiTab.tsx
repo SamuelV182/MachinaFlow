@@ -14,7 +14,9 @@ import {
   Truck,
   CheckCircle2,
   Calendar,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import { MovimentoMagazzino, TipoMovimentoMagazzino, Articolo } from '@/types/database'
 
@@ -32,6 +34,24 @@ export function RegistroMovimentiTab({
   const [filtroTipo, setFiltroTipo] = useState<string>('tutti')
   const [filtroPeriodo, setFiltroPeriodo] = useState<string>('tutto')
   const [filtroRicerca, setFiltroRicerca] = useState<string>('')
+
+  // Paginazione Intelligente
+  const [paginaCorrente, setPaginaCorrente] = useState<number>(1)
+  const [perPagina, setPerPagina] = useState<number>(25)
+
+  // Reset a pagina 1 quando cambiano i filtri
+  const impostaFiltroTipo = (tipo: string) => {
+    setFiltroTipo(tipo)
+    setPaginaCorrente(1)
+  }
+  const impostaFiltroPeriodo = (periodo: string) => {
+    setFiltroPeriodo(periodo)
+    setPaginaCorrente(1)
+  }
+  const impostaFiltroRicerca = (ricerca: string) => {
+    setFiltroRicerca(ricerca)
+    setPaginaCorrente(1)
+  }
 
   // Mappa articoli per recupero rapido
   const mappaArticoli = useMemo(() => {
@@ -130,6 +150,15 @@ export function RegistroMovimentiTab({
     document.body.removeChild(link)
   }
 
+  // Paginazione
+  const totaleMovimenti = movimentiFiltrati.length
+  const totalePagine = Math.max(1, Math.ceil(totaleMovimenti / perPagina))
+  const indiceInizio = (paginaCorrente - 1) * perPagina
+  const indiceFine = Math.min(indiceInizio + perPagina, totaleMovimenti)
+  const movimentiPaginati = useMemo(() => {
+    return movimentiFiltrati.slice(indiceInizio, indiceFine)
+  }, [movimentiFiltrati, indiceInizio, indiceFine])
+
   const getBadgeTipo = (tipo: TipoMovimentoMagazzino) => {
     switch (tipo) {
       case 'carico_fornitore':
@@ -188,13 +217,13 @@ export function RegistroMovimentiTab({
             { id: 'tutti', label: 'Tutti' },
             { id: 'carico_fornitore', label: 'Entrate DDT' },
             { id: 'scarico_produzione', label: 'Prelievi OdP' },
-            { id: 'carico_finito', label: 'Versamenti Finiti' },
+            { id: 'carico_produzione', label: 'Versamenti Finiti' },
             { id: 'scarico_ddt_cliente', label: 'Spedizioni' },
             { id: 'rettifica_inventario', label: 'Rettifiche' }
           ].map((pillola) => (
             <button
               key={pillola.id}
-              onClick={() => setFiltroTipo(pillola.id)}
+              onClick={() => impostaFiltroTipo(pillola.id)}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 filtroTipo === pillola.id
                   ? 'bg-orange-600 text-white shadow-sm'
@@ -211,7 +240,7 @@ export function RegistroMovimentiTab({
           {/* Selettore Periodo Minimal */}
           <select
             value={filtroPeriodo}
-            onChange={(e) => setFiltroPeriodo(e.target.value)}
+            onChange={(e) => impostaFiltroPeriodo(e.target.value)}
             className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-medium focus:outline-none focus:border-orange-500"
           >
             <option value="tutto">Tutto lo storico</option>
@@ -226,7 +255,7 @@ export function RegistroMovimentiTab({
             <input
               type="text"
               value={filtroRicerca}
-              onChange={(e) => setFiltroRicerca(e.target.value)}
+              onChange={(e) => impostaFiltroRicerca(e.target.value)}
               placeholder="Cerca OdP, DDT, colata..."
               className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-orange-500"
             />
@@ -270,7 +299,7 @@ export function RegistroMovimentiTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {movimentiFiltrati.map((m) => {
+                {movimentiPaginati.map((m) => {
                   const badge = getBadgeTipo(m.tipo_movimento)
                   const Icon = badge.icon
                   const isPositivo = m.quantita > 0
@@ -354,9 +383,83 @@ export function RegistroMovimentiTab({
             </table>
           </div>
 
-          <div className="p-3 bg-slate-950/60 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
-            <span>Totale movimenti mostrati: {movimentiFiltrati.length}</span>
-            <span>Archivio Cloud Supabase</span>
+          {/* BARRA CONTROLLI PAGINAZIONE INTELLIGENTE */}
+          <div className="p-3 sm:p-4 bg-slate-950/70 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+            <div className="flex items-center gap-2">
+              <span>
+                Visualizzati <strong className="text-white">{totaleMovimenti > 0 ? indiceInizio + 1 : 0} - {indiceFine}</strong> di{' '}
+                <strong className="text-white">{totaleMovimenti}</strong> movimenti
+              </span>
+              <span className="text-slate-600">•</span>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <span>Per pagina:</span>
+                <select
+                  value={perPagina}
+                  onChange={(e) => {
+                    setPerPagina(Number(e.target.value))
+                    setPaginaCorrente(1)
+                  }}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-orange-500 cursor-pointer"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </label>
+            </div>
+
+            {totalePagine > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={paginaCorrente === 1}
+                  onClick={() => setPaginaCorrente((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Precedente</span>
+                </button>
+
+                <div className="flex items-center gap-1 px-1">
+                  {Array.from({ length: totalePagine }, (_, i) => i + 1)
+                    .filter((p) => {
+                      // Mostra prima, ultima e le 2 vicine alla corrente
+                      return p === 1 || p === totalePagine || Math.abs(p - paginaCorrente) <= 1
+                    })
+                    .map((p, idx, arr) => {
+                      const prev = arr[idx - 1]
+                      const mostraPuntini = prev && p - prev > 1
+                      return (
+                        <div key={p} className="flex items-center gap-1">
+                          {mostraPuntini && <span className="px-1 text-slate-600">...</span>}
+                          <button
+                            type="button"
+                            onClick={() => setPaginaCorrente(p)}
+                            className={`min-w-7 h-7 rounded-lg text-xs font-mono font-bold transition-all ${
+                              paginaCorrente === p
+                                ? 'bg-orange-600 text-white shadow-xs'
+                                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </div>
+                      )
+                    })}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={paginaCorrente === totalePagine}
+                  onClick={() => setPaginaCorrente((p) => Math.min(totalePagine, p + 1))}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1"
+                >
+                  <span className="hidden sm:inline">Successiva</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
