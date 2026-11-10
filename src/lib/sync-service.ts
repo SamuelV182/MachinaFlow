@@ -13,7 +13,8 @@ import {
   DocumentoTrasportoCliente,
   DocumentoTrasportoEsterno,
   FornitoreTerzista,
-  OrdineFornitore
+  OrdineFornitore,
+  MovimentoMagazzino
 } from '@/types/database'
 import {
   SEED_CENTRI_LAVORO,
@@ -1187,6 +1188,22 @@ export const syncService = {
     }
   },
 
+  async eliminaDdtCliente(id: string) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_ddt_clienti')
+      if (salvati) {
+        const lista: DocumentoTrasportoCliente[] = JSON.parse(salvati)
+        localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(lista.filter((d) => d.id !== id)))
+      }
+    } catch {}
+
+    try {
+      await supabase.from('ddt_clienti').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione ddt cliente su Supabase:', e)
+    }
+  },
+
   // 7. DOCUMENTI DI TRASPORTO (DDT) ESTERNI / TERZISTI
   async getDdtEsterni(): Promise<DocumentoTrasportoEsterno[]> {
     try {
@@ -1266,6 +1283,22 @@ export const syncService = {
       await supabase.from('ddt_esterni').upsert(payload)
     } catch (e) {
       console.error('Errore salvaDdtEsterno su Supabase:', e)
+    }
+  },
+
+  async eliminaDdtEsterno(id: string) {
+    try {
+      const salvati = localStorage.getItem('machinaflow_ddt_esterni')
+      if (salvati) {
+        const lista: DocumentoTrasportoEsterno[] = JSON.parse(salvati)
+        localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(lista.filter((d) => d.id !== id)))
+      }
+    } catch {}
+
+    try {
+      await supabase.from('ddt_esterni').delete().eq('id', id)
+    } catch (e) {
+      console.error('Errore eliminazione ddt esterno su Supabase:', e)
     }
   },
 
@@ -1446,5 +1479,95 @@ export const syncService = {
       if (timerDebounce) clearTimeout(timerDebounce)
       supabase.removeChannel(channel)
     }
+  },
+
+  // 7. REGISTRO MOVIMENTI DI MAGAZZINO (Cloud-First Supabase)
+  async getMovimentiMagazzino(articoloId?: string): Promise<MovimentoMagazzino[]> {
+    try {
+      let query = supabase
+        .from('movimenti_magazzino')
+        .select('*')
+        .order('creato_il', { ascending: false })
+
+      const azIdCorrente = getCurrentAziendaId()
+      if (azIdCorrente) {
+        query = query.eq('azienda_id', azIdCorrente)
+      }
+      if (articoloId) {
+        query = query.eq('articolo_id', articoloId)
+      }
+
+      const { data, error } = await query
+      if (error) {
+        console.warn('Lettura movimenti_magazzino da Supabase:', error.message)
+        const salvati = localStorage.getItem('machinaflow_movimenti_magazzino')
+        const lista: MovimentoMagazzino[] = salvati ? JSON.parse(salvati) : []
+        return articoloId ? lista.filter((m) => m.articolo_id === articoloId) : lista
+      }
+
+      if (data && data.length >= 0) {
+        localStorage.setItem('machinaflow_movimenti_magazzino', JSON.stringify(data))
+        return data as MovimentoMagazzino[]
+      }
+
+      return []
+    } catch (e) {
+      console.error('Errore getMovimentiMagazzino:', e)
+      const salvati = localStorage.getItem('machinaflow_movimenti_magazzino')
+      const lista: MovimentoMagazzino[] = salvati ? JSON.parse(salvati) : []
+      return articoloId ? lista.filter((m) => m.articolo_id === articoloId) : lista
+    }
+  },
+
+  async registraMovimentoMagazzino(movimento: Omit<MovimentoMagazzino, 'id' | 'creato_il'>): Promise<MovimentoMagazzino> {
+    const id = `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`
+    const creato_il = new Date().toISOString()
+    const azId = getCurrentAziendaId()
+
+    const nuovoMovimento: MovimentoMagazzino = {
+      ...movimento,
+      id,
+      creato_il,
+      azienda_id: azId || undefined
+    }
+
+    // 1. Salva in cache locale per reattività
+    try {
+      const salvati = localStorage.getItem('machinaflow_movimenti_magazzino')
+      const lista: MovimentoMagazzino[] = salvati ? JSON.parse(salvati) : []
+      lista.unshift(nuovoMovimento)
+      localStorage.setItem('machinaflow_movimenti_magazzino', JSON.stringify(lista))
+    } catch {}
+
+    // 2. Salva direttamente su Supabase Cloud
+    try {
+      const payload: any = {
+        id: nuovoMovimento.id,
+        articolo_id: nuovoMovimento.articolo_id,
+        tipo_movimento: nuovoMovimento.tipo_movimento,
+        quantita: nuovoMovimento.quantita,
+        giacenza_precedente: nuovoMovimento.giacenza_precedente,
+        giacenza_risultante: nuovoMovimento.giacenza_risultante,
+        unita_misura: nuovoMovimento.unita_misura || 'pz',
+        riferimento_documento: nuovoMovimento.riferimento_documento || null,
+        codice_odp: nuovoMovimento.codice_odp || null,
+        lotto_colata: nuovoMovimento.lotto_colata || null,
+        operatore_nome: nuovoMovimento.operatore_nome || null,
+        note: nuovoMovimento.note || null,
+        creato_il: nuovoMovimento.creato_il
+      }
+      if (azId) {
+        payload.azienda_id = azId
+      }
+
+      const { error } = await supabase.from('movimenti_magazzino').insert(payload)
+      if (error) {
+        console.warn('Avviso: movimenti_magazzino su Supabase:', error.message)
+      }
+    } catch (e) {
+      console.error('Errore registrazione cloud movimento magazzino:', e)
+    }
+
+    return nuovoMovimento
   }
 }

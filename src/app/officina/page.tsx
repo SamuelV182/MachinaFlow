@@ -441,6 +441,20 @@ export default function TerminaleOfficinaPage() {
             const nuovaGiacenza = Math.max(0, Number((a.giacenza_attuale - consumo).toFixed(3)))
             const articoloScaricato = { ...a, giacenza_attuale: nuovaGiacenza }
             syncService.salvaArticolo(articoloScaricato)
+
+            // Registra movimento di magazzino su Supabase (Scarico Materia Prima per OdP)
+            syncService.registraMovimentoMagazzino({
+              articolo_id: a.id,
+              tipo_movimento: 'scarico_produzione',
+              quantita: -Number(consumo),
+              giacenza_precedente: a.giacenza_attuale,
+              giacenza_risultante: nuovaGiacenza,
+              unita_misura: a.unita_misura,
+              codice_odp: odpDaScaricare.codice_odp,
+              riferimento_documento: `OdP ${odpDaScaricare.codice_odp}`,
+              note: `Prelievo per produzione OdP ${odpDaScaricare.codice_odp} (${odpDaScaricare.quantita_da_produrre} pz)`
+            })
+
             return articoloScaricato
           }
           return a
@@ -466,6 +480,48 @@ export default function TerminaleOfficinaPage() {
       await syncService.aggiornaStatoOdP(odpModificato.id, odpModificato.stato, odpModificato.quantita_prodotta)
       if (odpModificato.materia_prima_scaricata) {
         await syncService.segnaMateriaPrimaScaricata(odpModificato.id)
+      }
+
+      // Versamento automatico a magazzino del Prodotto Finito alla chiusura dell'OdP
+      if (odpModificato.stato === 'completato' && odpTarget?.stato !== 'completato') {
+        const qtaFinita = odpModificato.quantita_prodotta || odpModificato.quantita_da_produrre || 0
+        if (qtaFinita > 0) {
+          const articoloFinito = articoli.find((a) => a.id === odpModificato.articolo_id)
+          if (articoloFinito) {
+            const giacenzaPrec = articoloFinito.giacenza_attuale || 0
+            const nuovaGiacenza = Number((giacenzaPrec + qtaFinita).toFixed(3))
+            const articoloAggiornato = { ...articoloFinito, giacenza_attuale: nuovaGiacenza }
+
+            // Salva articolo aggiornato su Cloud e LocalStorage
+            syncService.salvaArticolo(articoloAggiornato)
+            setArticoli((prev) =>
+              prev.map((a) => (a.id === articoloAggiornato.id ? articoloAggiornato : a))
+            )
+            const salvatiArt = localStorage.getItem('machinaflow_articoli')
+            if (salvatiArt) {
+              const list: any[] = JSON.parse(salvatiArt)
+              localStorage.setItem(
+                'machinaflow_articoli',
+                JSON.stringify(list.map((a) => (a.id === articoloAggiornato.id ? articoloAggiornato : a)))
+              )
+            }
+
+            // Registra movimento di magazzino carico_produzione sincronizzato su Supabase
+            const nomePostazione = centriLavoro.find((c) => c.id === postazioneLoginId)?.nome || (postazioneLoginId === 'supervisore' ? 'Supervisore Officina' : 'Terminale Officina')
+            await syncService.registraMovimentoMagazzino({
+              articolo_id: articoloFinito.id,
+              tipo_movimento: 'carico_produzione',
+              quantita: qtaFinita,
+              giacenza_precedente: giacenzaPrec,
+              giacenza_risultante: nuovaGiacenza,
+              unita_misura: articoloFinito.unita_misura || 'pz',
+              codice_odp: odpModificato.codice_odp,
+              riferimento_documento: `OdP ${odpModificato.codice_odp}`,
+              operatore_nome: nomePostazione,
+              note: `Versamento produzione a fine ciclo OdP ${odpModificato.codice_odp} (+${qtaFinita} ${articoloFinito.unita_misura || 'pz'})`
+            })
+          }
+        }
       }
     }
 

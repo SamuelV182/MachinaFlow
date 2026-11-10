@@ -24,11 +24,14 @@ import {
   History,
   RotateCcw
 } from 'lucide-react'
-import { Articolo, TipoArticolo, ComponenteDistintaBase, FaseCicloStandard } from '@/types/database'
+import { Articolo, TipoArticolo, ComponenteDistintaBase, FaseCicloStandard, MovimentoMagazzino } from '@/types/database'
 import { SEED_ARTICOLI, SEED_DISTINTA_BASE, SEED_FASI_CICLO } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
+import { RegistroMovimentiTab } from '@/components/RegistroMovimentiTab'
 
 export default function ArticoliPage() {
+  const [tabSezione, setTabSezione] = useState<'anagrafica' | 'registro_movimenti'>('anagrafica')
+  const [movimentiMagazzino, setMovimentiMagazzino] = useState<MovimentoMagazzino[]>([])
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [cicli, setCicli] = useState<FaseCicloStandard[]>([])
@@ -104,6 +107,13 @@ export default function ArticoliPage() {
         localStorage.setItem('machinaflow_cicli', JSON.stringify(cicliCloud))
       } else if (azIsolata) {
         setCicli([])
+      }
+    })
+
+    // Carica movimenti di magazzino da Supabase Cloud
+    syncService.getMovimentiMagazzino().then((movCloud) => {
+      if (movCloud) {
+        setMovimentiMagazzino(movCloud)
       }
     })
 
@@ -239,6 +249,18 @@ export default function ArticoliPage() {
     // Sincronizza subito su Supabase Cloud per aggiornare tutti i computer
     syncService.salvaArticolo(articoloAggiornato)
 
+    // Registra movimento di magazzino su Supabase Cloud (Rettifica / Inventario)
+    syncService.registraMovimentoMagazzino({
+      articolo_id: articoloDaRettificare.id,
+      tipo_movimento: 'rettifica_inventario',
+      quantita: delta,
+      giacenza_precedente: articoloDaRettificare.giacenza_attuale,
+      giacenza_risultante: nuovaQta,
+      unita_misura: articoloDaRettificare.unita_misura,
+      riferimento_documento: formRettifica.causale || 'Inventario Fisico',
+      note: formRettifica.note.trim() || `Rettifica manuale giacenza da ${articoloDaRettificare.giacenza_attuale} a ${nuovaQta}`
+    })
+
     // Salva record nello storico movimenti locale
     try {
       const storicoKey = `machinaflow_movimenti_magazzino_${articoloDaRettificare.id}`
@@ -310,29 +332,78 @@ export default function ArticoliPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header Pagina */}
+      {/* Header Pagina con Switch Tab Senza Peggiorare la Navigazione */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-3">
             <Boxes className="w-8 h-8 text-orange-500" />
-            Anagrafica Articoli, Distinta Base (BOM) & Cicli
+            Anagrafica Articoli, Distinte &amp; Magazzino
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Gestisci codici prodotto, materie prime, distinta dei componenti e sequenze operative di lavorazione.
+            Gestisci anagrafiche articoli, distinte base, cicli standard e consulta la tracciabilità completa dei movimenti di magazzino.
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            chiudiModale()
-            setModaleAperta(true)
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold shadow-md shadow-orange-600/30 transition-all cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Nuovo Articolo
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Selettore Tab Anagrafica / Registro Movimenti */}
+          <div className="flex items-center gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setTabSezione('anagrafica')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                tabSezione === 'anagrafica'
+                  ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Boxes className="w-3.5 h-3.5" />
+              <span>Articoli &amp; Distinte</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTabSezione('registro_movimenti')
+                syncService.getMovimentiMagazzino().then(setMovimentiMagazzino)
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                tabSezione === 'registro_movimenti'
+                  ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>Registro Movimenti</span>
+            </button>
+          </div>
+
+          {tabSezione === 'anagrafica' && (
+            <button
+              onClick={() => {
+                chiudiModale()
+                setModaleAperta(true)
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold shadow-md shadow-orange-600/30 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Nuovo Articolo</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* VISTA REGISTRO MOVIMENTI DI MAGAZZINO */}
+      {tabSezione === 'registro_movimenti' && (
+        <RegistroMovimentiTab
+          movimenti={movimentiMagazzino}
+          articoli={articoli}
+          onRicarica={() => syncService.getMovimentiMagazzino().then(setMovimentiMagazzino)}
+        />
+      )}
+
+      {/* VISTA ANAGRAFICA ARTICOLI */}
+      {tabSezione === 'anagrafica' && (
+        <div className="space-y-6">
 
       {/* Barra Filtri, Switch Vista e Ricerca */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
@@ -1095,6 +1166,8 @@ export default function ArticoliPage() {
           </div>
         )
       })()}
+      </div>
+      )}
 
       {/* Notifica Toast */}
       {notifica && (

@@ -332,3 +332,33 @@ export interface DocumentoTrasportoCliente {
   righe: RigaDDTCliente[]
   creato_il: string
 }
+
+// -----------------------------------------------------------------------------
+// 10. MOVIMENTI DI MAGAZZINO (Registro & Tracciabilità Cloud-First)
+// -----------------------------------------------------------------------------
+export type TipoMovimentoMagazzino =
+  | 'carico_fornitore'
+  | 'scarico_produzione'
+  | 'carico_finito'
+  | 'carico_produzione'
+  | 'scarico_ddt_cliente'
+  | 'rettifica_inventario'
+
+export interface MovimentoMagazzino {
+  id: string
+  azienda_id?: string
+  articolo_id: string
+  tipo_movimento: TipoMovimentoMagazzino
+  quantita: number // Positiva (+) per carichi, negativa (-) per scarichi
+  giacenza_precedente: number
+  giacenza_risultante: number
+  unita_misura?: string
+  riferimento_documento?: string // es: 'DDT Fornitore #84920' o 'DDT Cliente #DDT-2026-004'
+  codice_odp?: string // es: 'ODP-BRBME-2026-005'
+  lotto_colata?: string // es: 'Colata #K9942'
+  operatore_nome?: string
+  note?: string
+  creato_il: string
+  // Risolto per la UI
+  articolo?: Articolo
+}

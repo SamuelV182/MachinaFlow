@@ -773,23 +773,32 @@ export default function SpedizioniDdtPage() {
     // Salva DDT Cliente su Supabase Cloud (condivisione istantanea tra dispositivi)
     syncService.salvaDdtCliente(nuovoDdt)
 
-    // Aggiorna giacenza a magazzino per la quota eventualmente spedita da stock
+    // 1. Registra su movimenti_magazzino tutte le righe spedite con il DDT
+    righeDaSpedire.forEach((rigaSped) => {
+      const art = articoli.find((a) => a.id === rigaSped.articolo_id)
+      syncService.registraMovimentoMagazzino({
+        articolo_id: rigaSped.articolo_id,
+        tipo_movimento: 'scarico_ddt_cliente',
+        quantita: -Number(rigaSped.quantita_da_spedire),
+        giacenza_precedente: art?.giacenza_attuale || 0,
+        giacenza_risultante: Math.max(0, (art?.giacenza_attuale || 0) - rigaSped.quantita_da_spedire),
+        unita_misura: rigaSped.unita_misura,
+        riferimento_documento: `DDT Cliente #${nuovoDdt.numero_ddt}`,
+        codice_odp: rigaSped.codice_odp || undefined,
+        note: `Spedizione a ${clienteTrovato.ragione_sociale} con DDT ${nuovoDdt.numero_ddt} (${rigaSped.quantita_da_spedire} pz)`
+      })
+    })
+
+    // Aggiorna giacenza a magazzino per i pezzi spediti con il DDT
     let articoliModificati = false
     const articoliAggiornati = articoli.map((art) => {
-      // Calcola quanti pezzi sono stati prelevati da stock per questo articolo
       const righeArticolo = righeDaSpedire.filter((r) => r.articolo_id === art.id)
       if (righeArticolo.length === 0) return art
 
-      let prelievoDaStock = 0
-      righeArticolo.forEach((r) => {
-        // Se la quantità spedita supera i pezzi pronti da OdP (o non c'è OdP), la differenza scala il magazzino stock
-        const daStock = Math.max(0, r.quantita_da_spedire - r.quantita_pronta)
-        prelievoDaStock += daStock
-      })
-
-      if (prelievoDaStock > 0) {
+      const qtaTotaleSpedita = righeArticolo.reduce((acc, r) => acc + Number(r.quantita_da_spedire || 0), 0)
+      if (qtaTotaleSpedita > 0) {
         articoliModificati = true
-        const nuovaGiacenza = Math.max(0, art.giacenza_attuale - prelievoDaStock)
+        const nuovaGiacenza = Math.max(0, Number((art.giacenza_attuale - qtaTotaleSpedita).toFixed(3)))
         const artAggiornato = { ...art, giacenza_attuale: nuovaGiacenza }
         syncService.salvaArticolo(artAggiornato)
         return artAggiornato
@@ -937,6 +946,157 @@ export default function SpedizioniDdtPage() {
 
     setNotifica('✓ File DDT Clienti esportato con successo per la fatturazione!')
     setTimeout(() => setNotifica(null), 4000)
+  }
+
+  // Annullamento / Cancellazione DDT Cliente con ripristino giacenze e stati
+  const handleEliminaDdtCliente = async (ddt: DocumentoTrasportoCliente) => {
+    const conferma = window.confirm(
+      `Sei sicuro di voler eliminare il DDT Cliente ${ddt.numero_ddt}?\n\nQuesta azione:\n- Ripristinerà le quantità a magazzino dei prodotti finiti spediti\n- Riaprirà gli Ordini di Produzione e Ordini Clienti collegati\n- Registrerà una rettifica di ripristino nel Registro Movimenti\n- Sincronizzerà tutto immediatamente su Supabase Cloud.`
+    )
+    if (!conferma) return
+
+    try {
+      // 1. Ripristina giacenze articoli ed emette movimenti di storno
+      let articoliModificati = false
+      let listaArticoliAggiornata = [...articoli]
+
+      for (const riga of ddt.righe) {
+        const art = listaArticoliAggiornata.find((a) => a.id === riga.articolo_id)
+        if (art) {
+          articoliModificati = true
+          const qtaDaRipristinare = Number(riga.quantita_spedita || 0)
+          const giacenzaPrec = art.giacenza_attuale || 0
+          const nuovaGiacenza = Number((giacenzaPrec + qtaDaRipristinare).toFixed(3))
+          const artAgg = { ...art, giacenza_attuale: nuovaGiacenza }
+
+          listaArticoliAggiornata = listaArticoliAggiornata.map((a) => (a.id === art.id ? artAgg : a))
+          await syncService.salvaArticolo(artAgg)
+
+          // Registra movimento di storno magazzino su Supabase
+          await syncService.registraMovimentoMagazzino({
+            articolo_id: art.id,
+            tipo_movimento: 'rettifica_inventario',
+            quantita: qtaDaRipristinare,
+            giacenza_precedente: giacenzaPrec,
+            giacenza_risultante: nuovaGiacenza,
+            unita_misura: art.unita_misura || 'pz',
+            riferimento_documento: `Storno DDT #${ddt.numero_ddt}`,
+            codice_odp: riga.codice_odp || undefined,
+            note: `Ripristino per annullamento DDT Cliente #${ddt.numero_ddt}`
+          })
+        }
+      }
+
+      if (articoliModificati) {
+        setArticoli(listaArticoliAggiornata)
+        localStorage.setItem('machinaflow_articoli', JSON.stringify(listaArticoliAggiornata))
+      }
+
+      // 2. Riapri gli OdP coinvolti se erano stati marcati come 'spedito'
+      const odpIds = new Set(ddt.righe.map((r) => r.odp_id).filter(Boolean))
+      if (odpIds.size > 0) {
+        const odpAggiornati = odpList.map((odp) => {
+          if (odpIds.has(odp.id) && odp.stato === 'spedito') {
+            syncService.aggiornaStatoOdP(odp.id, 'completato', odp.quantita_prodotta)
+            return { ...odp, stato: 'completato' as const }
+          }
+          return odp
+        })
+        setOdpList(odpAggiornati)
+        localStorage.setItem('machinaflow_odp', JSON.stringify(odpAggiornati))
+      }
+
+      // 3. Ricalcola stato degli Ordini Clienti
+      const nuovaListaDdt = listaDdtClienti.filter((d) => d.id !== ddt.id)
+      const ordiniCoinvolti = new Set(ddt.righe.map((r) => r.ordine_cliente_id).filter(Boolean))
+      const ordiniAggiornati = ordiniClienti.map((ord) => {
+        if (!ordiniCoinvolti.has(ord.id)) return ord
+        const totaleOrdinato = (ord.righe || []).reduce((acc, r) => acc + (r.quantita || 0), 0)
+        let totaleSpedito = 0
+        nuovaListaDdt.forEach((doc) => {
+          doc.righe.forEach((r) => {
+            if (r.ordine_cliente_id === ord.id) totaleSpedito += r.quantita_spedita
+          })
+        })
+        const nuovoStato =
+          totaleSpedito >= totaleOrdinato && totaleOrdinato > 0
+            ? ('evaso' as const)
+            : totaleSpedito > 0
+            ? ('parzialmente_evaso' as const)
+            : ('confermato' as const)
+        const ordAgg = { ...ord, stato: nuovoStato }
+        syncService.salvaOrdineCliente(ordAgg)
+        return ordAgg
+      })
+      setOrdiniClienti(ordiniAggiornati)
+      localStorage.setItem('machinaflow_ordini_clienti', JSON.stringify(ordiniAggiornati))
+
+      // 4. Rimuovi DDT Cliente dal Cloud e da locale
+      await syncService.eliminaDdtCliente(ddt.id)
+      setListaDdtClienti(nuovaListaDdt)
+      localStorage.setItem('machinaflow_ddt_clienti', JSON.stringify(nuovaListaDdt))
+
+      setNotifica(`✓ DDT Cliente #${ddt.numero_ddt} eliminato. Giacenze e stati ripristinati correttamente!`)
+      setTimeout(() => setNotifica(null), 5000)
+    } catch (e) {
+      console.error('Errore annullamento DDT Cliente:', e)
+      alert('Si è verificato un errore durante l\'annullamento del DDT.')
+    }
+  }
+
+  // Annullamento / Cancellazione DDT Terzista con ripristino fasi OdP
+  const handleEliminaDdtEsterno = async (ddt: DocumentoTrasportoEsterno) => {
+    const conferma = window.confirm(
+      `Sei sicuro di voler eliminare il DDT Terzista ${ddt.numero_ddt}?\n\nQuesta azione riporterà le fasi OdP coinvolte allo stato precedente (in sede / non spedite al terzista) ed eliminerà il documento da Supabase Cloud.`
+    )
+    if (!conferma) return
+
+    try {
+      // 1. Ripristina fasi OdP coinvolte
+      const odpModificati = new Set<string>()
+      const odpAggiornati = odpList.map((odp) => {
+        const righeQuestoOdp = ddt.righe.filter((r) => r.odp_id === odp.id || r.codice_odp === odp.codice_odp)
+        if (righeQuestoOdp.length === 0 || !odp.fasi) return odp
+
+        odpModificati.add(odp.id)
+        const fasiAggiornate = odp.fasi.map((f) => {
+          const rigaFase = righeQuestoOdp.find(
+            (r) => (r.fase_sequenza && r.fase_sequenza === f.sequenza) || r.nome_fase.toLowerCase().trim() === f.nome_fase.toLowerCase().trim()
+          )
+          if (rigaFase) {
+            const faseRipristinata: FaseOdP = {
+              ...f,
+              stato_esterna: 'in_attesa_uscita'
+            }
+            syncService.aggiornaFaseOdP(faseRipristinata)
+            return faseRipristinata
+          }
+          return f
+        })
+
+        return { ...odp, fasi: fasiAggiornate }
+      })
+
+      if (odpModificati.size > 0) {
+        setOdpList(odpAggiornati)
+        localStorage.setItem('machinaflow_odp', JSON.stringify(odpAggiornati))
+      }
+
+      // 2. Rimuovi DDT Terzista da Cloud e Locale
+      await syncService.eliminaDdtEsterno(ddt.id)
+      const nuovaLista = listaDdt.filter((d) => d.id !== ddt.id)
+      setListaDdt(nuovaLista)
+      localStorage.setItem('machinaflow_ddt_esterni', JSON.stringify(nuovaLista))
+
+      // Invia segnale broadcast ai terminali
+      syncService.inviaSegnaleAvanzamento()
+
+      setNotifica(`✓ DDT Terzista #${ddt.numero_ddt} eliminato con successo. Fasi OdP ripristinate.`)
+      setTimeout(() => setNotifica(null), 5000)
+    } catch (e) {
+      console.error('Errore annullamento DDT Esterno:', e)
+      alert('Si è verificato un errore durante l\'annullamento del DDT Terzista.')
+    }
   }
   const handleEsportaTuttiCsv = () => {
     const separatore = ';'
@@ -1306,15 +1466,25 @@ export default function SpedizioniDdtPage() {
                         </td>
 
                         <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => setDdtClientePerStampa(doc)}
-                            className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ml-auto"
-                            title="Visualizza e Stampa A4 del DDT"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                            <span>Stampa A4</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDdtClientePerStampa(doc)}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                              title="Visualizza e Stampa A4 del DDT"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Stampa A4</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEliminaDdtCliente(doc)}
+                              className="p-1.5 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-rose-950/60 hover:border-rose-600/60 text-slate-400 hover:text-rose-400 transition-all cursor-pointer"
+                              title="Annulla DDT ed effettua ripristino giacenze"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1589,9 +1759,9 @@ export default function SpedizioniDdtPage() {
                           </span>
                         </td>
 
-                        {/* Azioni: Stampa A4 e Dettaglio */}
+                        {/* Azioni: Stampa A4 ed Elimina/Annulla */}
                         <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end">
+                          <div className="flex items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => setDdtSelezionatoPerStampa(doc)}
@@ -1600,6 +1770,14 @@ export default function SpedizioniDdtPage() {
                             >
                               <Printer className="w-3.5 h-3.5" />
                               <span>Stampa A4</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEliminaDdtEsterno(doc)}
+                              className="p-1.5 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-rose-950/60 hover:border-rose-600/60 text-slate-400 hover:text-rose-400 transition-all cursor-pointer"
+                              title="Annulla DDT Terzista e ripristina fasi OdP"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -2067,7 +2245,7 @@ export default function SpedizioniDdtPage() {
       {/* MODALE EMISSIONE NUOVO DDT CONSEGNA CLIENTE */}
       {modaleDdtClienteAperta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
             {/* Header Modale */}
             <div className="p-5 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -2227,8 +2405,8 @@ export default function SpedizioniDdtPage() {
                     Nessuna commessa con pezzi in attesa di consegna per questo cliente.
                   </div>
                 ) : (
-                  <div className="border border-slate-800 rounded-xl overflow-hidden shadow-inner">
-                    <table className="w-full text-left text-xs">
+                  <div className="border border-slate-800 rounded-xl overflow-x-auto shadow-inner">
+                    <table className="w-full text-left text-xs min-w-[850px]">
                       <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold">
                         <tr>
                           <th className="py-2.5 px-3 text-center w-10">Includi</th>
@@ -2247,7 +2425,10 @@ export default function SpedizioniDdtPage() {
                       <tbody className="divide-y divide-slate-800/80 bg-slate-900/60">
                         {formDdtCliente.righeSelezionate.map((r, idx) => {
                           const residuoMassimo = r.quantita_ordinata - r.quantita_gia_spedita
-                          const totaleFisicoDisponibile = r.quantita_pronta + r.giacenza_magazzino
+                          // I pezzi dell'OdP completato sono già versati a magazzino, per cui non vanno sommati due volte.
+                          // Lo stock libero aggiuntivo sono solo i pezzi a magazzino che eccedono l'OdP.
+                          const stockLiberoAggiuntivo = Math.max(0, r.giacenza_magazzino - r.quantita_pronta)
+                          const totaleFisicoDisponibile = r.quantita_pronta + stockLiberoAggiuntivo
                           const copribile = Math.min(residuoMassimo, totaleFisicoDisponibile)
 
                           return (
@@ -2332,9 +2513,14 @@ export default function SpedizioniDdtPage() {
                                   }`}>
                                     {totaleFisicoDisponibile} {r.unita_misura}
                                   </span>
-                                  {r.giacenza_magazzino > 0 && r.quantita_pronta > 0 && (
+                                  {stockLiberoAggiuntivo > 0 && r.quantita_pronta > 0 && (
                                     <span className="text-[10px] text-amber-300/80 mt-0.5 font-medium">
-                                      ({r.quantita_pronta} OdP + {r.giacenza_magazzino} Stock)
+                                      ({r.quantita_pronta} OdP + {stockLiberoAggiuntivo} Stock libero)
+                                    </span>
+                                  )}
+                                  {r.quantita_pronta > 0 && stockLiberoAggiuntivo === 0 && (
+                                    <span className="text-[10px] text-emerald-400/80 mt-0.5 font-medium">
+                                      (da OdP versato)
                                     </span>
                                   )}
                                   {r.quantita_pronta === 0 && r.giacenza_magazzino > 0 && (

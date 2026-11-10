@@ -536,6 +536,18 @@ export default function MRPPage() {
       syncService.salvaArticolo(artDaSalvare)
     }
 
+    // Registra movimento di magazzino su Supabase Cloud (Carico da Fornitore)
+    syncService.registraMovimentoMagazzino({
+      articolo_id: artTarget.id,
+      tipo_movimento: 'carico_fornitore',
+      quantita: Number(formCarico.quantita_entrata),
+      giacenza_precedente: vecchiaGiacenza,
+      giacenza_risultante: nuovaGiacenza,
+      unita_misura: artTarget.unita_misura,
+      riferimento_documento: formCarico.ddt_riferimento ? `DDT Fornitore #${formCarico.ddt_riferimento}` : 'Carico Merci Diretto',
+      note: formCarico.note || `Ricevimento da ${formCarico.fornitore_nome || 'fornitore'} per ${artTarget.codice_articolo}`
+    })
+
     // Se il carico è legato a uno o più ordini fornitore aperti, chiudili come 'ricevuto'
     let ordiniAggiornati = ordiniFornitori
     if (ordineFornitoreInRicezioneId) {
