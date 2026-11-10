@@ -345,36 +345,73 @@ export default function DashboardPage() {
           continue
         }
 
-        // Assicurati che il cursore sia su un giorno lavorativo per questa macchina
-        while (!isGiornoLavorativo(fase.centro_lavoro_id, cursoreData)) {
-          cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
-          oreConsumateOdpNelGiorno = 0
-        }
+        // GESTIONE SPECIFICA FASI ESTERNE (Conto Terzi / Trattamenti / Verniciatura)
+        if (fase.is_esterna) {
+          // I giorni richiesti dal terzista (da giorni_rientro_previsti oppure calcolati da tempo_stimato_totale_min / 8h)
+          const giorniTerzista = Math.max(
+            1,
+            fase.giorni_rientro_previsti || Math.ceil(Number(fase.tempo_stimato_totale_min || 2400) / 480)
+          )
 
-        // Se la fase si incastra nelle ore residue di questo giorno
-        if (oreConsumateOdpNelGiorno + oreFase <= turnoMaxOdp) {
-          const dataIsoAssegnata = cursoreData.toISOString().split('T')[0]
-          // Se la data calcolata è già nel passato rispetto ad oggi, accumulala su OGGI
-          const targetDataIso = dataIsoAssegnata < dataOggiIso ? dataOggiIso : dataIsoAssegnata
-          aggiungiCarico(fase.centro_lavoro_id, targetDataIso, oreFase, odp.codice_odp)
-          oreConsumateOdpNelGiorno += oreFase
-        } else {
-          // Divisione fase se supera il turno:
-          const oreOggi = Math.max(0, turnoMaxOdp - oreConsumateOdpNelGiorno)
-          if (oreOggi > 0) {
-            const dataIsoAssegnata = cursoreData.toISOString().split('T')[0]
-            const targetDataIso = dataIsoAssegnata < dataOggiIso ? dataOggiIso : dataIsoAssegnata
-            aggiungiCarico(fase.centro_lavoro_id, targetDataIso, oreOggi, odp.codice_odp)
+          // Distribuisci il carico sulle giornate esterne e fai arretrare il cursore di tutti i giorni lavorativi
+          let giorniSottratti = 0
+          while (giorniSottratti < giorniTerzista) {
+            // Assicurati che il cursore sia su un giorno lavorativo
+            while (!isGiornoLavorativo(fase.centro_lavoro_id, cursoreData)) {
+              cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
+            }
+            const dataIsoCorrente = cursoreData.toISOString().split('T')[0]
+            const targetDataIso = dataIsoCorrente < dataOggiIso ? dataOggiIso : dataIsoCorrente
+
+            // Aggiungi carico indicativo al centro esterno (8h al giorno o quota parte)
+            const oreGiornoEsterno = Math.min(8, oreFase / giorniTerzista)
+            aggiungiCarico(fase.centro_lavoro_id, targetDataIso, oreGiornoEsterno, odp.codice_odp)
+
+            giorniSottratti++
+            if (giorniSottratti < giorniTerzista) {
+              cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
+            }
           }
 
-          const oreResiduo = oreFase - oreOggi
-          // Retrocedi al giorno lavorativo precedente per questa macchina
+          // Per la fase interna precedente, si arretra ulteriormente al giorno lavorativo prima dell'invio al terzista
           cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
-          oreConsumateOdpNelGiorno = oreResiduo
+          oreConsumateOdpNelGiorno = 0
+          continue
+        }
 
-          const dataIsoPrec = cursoreData.toISOString().split('T')[0]
-          const targetDataIsoPrec = dataIsoPrec < dataOggiIso ? dataOggiIso : dataIsoPrec
-          aggiungiCarico(fase.centro_lavoro_id, targetDataIsoPrec, oreResiduo, odp.codice_odp)
+        // FASI INTERNE (Macchine d'officina)
+        let oreRimanentiFase = oreFase
+
+        while (oreRimanentiFase > 0.01) {
+          // Assicurati che il cursore sia su un giorno lavorativo per questa macchina
+          while (!isGiornoLavorativo(fase.centro_lavoro_id, cursoreData)) {
+            cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
+            oreConsumateOdpNelGiorno = 0
+          }
+
+          const spazioDisponibileOggi = Math.max(0, turnoMaxOdp - oreConsumateOdpNelGiorno)
+
+          if (spazioDisponibileOggi <= 0.01) {
+            // Giornata piena per questo OdP: retrocedi al giorno lavorativo precedente
+            cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
+            oreConsumateOdpNelGiorno = 0
+            continue
+          }
+
+          const oreDaAssegnareOggi = Math.min(oreRimanentiFase, spazioDisponibileOggi)
+          const dataIsoAssegnata = cursoreData.toISOString().split('T')[0]
+          const targetDataIso = dataIsoAssegnata < dataOggiIso ? dataOggiIso : dataIsoAssegnata
+
+          aggiungiCarico(fase.centro_lavoro_id, targetDataIso, oreDaAssegnareOggi, odp.codice_odp)
+
+          oreConsumateOdpNelGiorno += oreDaAssegnareOggi
+          oreRimanentiFase -= oreDaAssegnareOggi
+
+          // Se rimangono ancora ore per completare questa fase interna, passa al giorno lavorativo precedente
+          if (oreRimanentiFase > 0.01) {
+            cursoreData = trovaGiornoLavorativoPrecedente(fase.centro_lavoro_id, cursoreData)
+            oreConsumateOdpNelGiorno = 0
+          }
         }
       }
     })

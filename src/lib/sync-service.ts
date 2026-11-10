@@ -477,17 +477,35 @@ export const syncService = {
         .from('righe_ordine_cliente')
         .select('*')
 
+      // Mappa delle righe salvate in locale per preservare campi non ancora presenti nel DB schema (es. data_consegna_riga)
+      const mappaRigheLocali = new Map<string, any>()
+      ordiniLocali.forEach((ord: any) => {
+        (ord.righe || []).forEach((r: any) => {
+          if (r.id) mappaRigheLocali.set(r.id, r)
+        })
+      })
+
       const mappaRighe = new Map<string, RigaOrdineCliente[]>()
       ;(righeData || []).forEach((r: any) => {
+        const rLocale = mappaRigheLocali.get(r.id)
+        const rUnita = {
+          ...r,
+          data_consegna_riga: r.data_consegna_riga || rLocale?.data_consegna_riga || undefined
+        }
         const arr = mappaRighe.get(r.ordine_cliente_id) || []
-        arr.push(r)
+        arr.push(rUnita)
         mappaRighe.set(r.ordine_cliente_id, arr)
       })
 
-      const ordiniCompletiCloud = ordiniData.map((ord: any) => ({
-        ...ord,
-        righe: mappaRighe.get(ord.id) || ord.righe || []
-      }))
+      const ordiniCompletiCloud = ordiniData.map((ord: any) => {
+        const ordLocale = ordiniLocali.find((ol: any) => ol.id === ord.id)
+        const righeCloud = mappaRighe.get(ord.id) || []
+        const righeFinali = righeCloud.length > 0 ? righeCloud : (ordLocale?.righe || ord.righe || [])
+        return {
+          ...ord,
+          righe: righeFinali
+        }
+      })
 
       // Unisci le fonti:
       // 1. Base: SEED_ORDINI_CLIENTI solo se siamo nell'azienda demo pilota
@@ -564,15 +582,16 @@ export const syncService = {
           id: r.id,
           ordine_cliente_id: ordine.id,
           pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente) : null,
+          data_consegna_riga: r.data_consegna_riga || null,
           articolo_id: r.articolo_id,
           quantita: r.quantita,
           prezzo_unitario: r.prezzo_unitario || 0
         }))
         
         let resRighe = await supabase.from('righe_ordine_cliente').upsert(righeDaSalvare)
-        if (resRighe.error && resRighe.error.message && resRighe.error.message.includes('pos_riga_cliente')) {
-          // Se la colonna pos_riga_cliente non è ancora stata creata in Supabase, salviamo senza quella colonna
-          const righeBase = righeDaSalvare.map(({ pos_riga_cliente, ...rest }) => rest)
+        if (resRighe.error && resRighe.error.message && (resRighe.error.message.includes('pos_riga_cliente') || resRighe.error.message.includes('data_consegna_riga'))) {
+          // Se una delle nuove colonne non è ancora stata creata in Supabase, rimuoviamo in fallback
+          const righeBase = righeDaSalvare.map(({ pos_riga_cliente, data_consegna_riga, ...rest }: any) => rest)
           await supabase.from('righe_ordine_cliente').upsert(righeBase)
         }
       }

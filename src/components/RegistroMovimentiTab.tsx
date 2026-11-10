@@ -19,6 +19,7 @@ import {
   ChevronRight
 } from 'lucide-react'
 import { MovimentoMagazzino, TipoMovimentoMagazzino, Articolo } from '@/types/database'
+import { preparaCriterioRicerca, calcolaRilevanzaRicerca } from '@/lib/search-helper'
 
 interface RegistroMovimentiTabProps {
   movimenti: MovimentoMagazzino[]
@@ -62,45 +63,60 @@ export function RegistroMovimentiTab({
 
   // Movimenti arricchiti con articolo e filtrati
   const movimentiFiltrati = useMemo(() => {
-    return movimenti
-      .map((m) => ({
+    const criterio = preparaCriterioRicerca(filtroRicerca)
+
+    const conScore: { movimento: MovimentoMagazzino & { articolo?: Articolo }; score: number }[] = []
+
+    for (const m of movimenti) {
+      // Filtro per Tipo Movimento
+      if (filtroTipo !== 'tutti' && m.tipo_movimento !== filtroTipo) {
+        continue
+      }
+
+      // Filtro Temporale
+      if (filtroPeriodo !== 'tutto') {
+        const dataMov = new Date(m.creato_il).getTime()
+        const ora = Date.now()
+        const unGiorno = 24 * 60 * 60 * 1000
+
+        if (filtroPeriodo === 'oggi' && ora - dataMov > unGiorno) continue
+        if (filtroPeriodo === '7gg' && ora - dataMov > 7 * unGiorno) continue
+        if (filtroPeriodo === '30gg' && ora - dataMov > 30 * unGiorno) continue
+      }
+
+      const mArricchito: MovimentoMagazzino & { articolo?: Articolo } = {
         ...m,
         articolo: m.articolo || mappaArticoli.get(m.articolo_id)
-      }))
-      .filter((m) => {
-        // Filtro per Tipo Movimento
-        if (filtroTipo !== 'tutti' && m.tipo_movimento !== filtroTipo) {
-          return false
+      }
+
+      if (!criterio.queryOriginale) {
+        conScore.push({ movimento: mArricchito, score: 0 })
+      } else {
+        const score = calcolaRilevanzaRicerca(
+          mArricchito.articolo?.codice_articolo || mArricchito.codice_odp,
+          [
+            mArricchito.articolo?.descrizione,
+            mArricchito.riferimento_documento,
+            mArricchito.codice_odp,
+            mArricchito.lotto_colata,
+            mArricchito.note,
+            mArricchito.tipo_movimento
+          ],
+          criterio
+        )
+
+        if (score >= 0) {
+          conScore.push({ movimento: mArricchito, score })
         }
+      }
+    }
 
-        // Filtro Temporale
-        if (filtroPeriodo !== 'tutto') {
-          const dataMov = new Date(m.creato_il).getTime()
-          const ora = Date.now()
-          const unGiorno = 24 * 60 * 60 * 1000
+    // Se c'è una ricerca attiva, ordina per rilevanza (il match esatto sul codice va per primo assoluto)
+    if (criterio.queryOriginale) {
+      conScore.sort((a, b) => b.score - a.score)
+    }
 
-          if (filtroPeriodo === 'oggi' && ora - dataMov > unGiorno) return false
-          if (filtroPeriodo === '7gg' && ora - dataMov > 7 * unGiorno) return false
-          if (filtroPeriodo === '30gg' && ora - dataMov > 30 * unGiorno) return false
-        }
-
-        // Filtro Ricerca Testuale (Codice Articolo, Descrizione, OdP, Documento, Colata)
-        if (filtroRicerca.trim()) {
-          const q = filtroRicerca.toLowerCase()
-          const matchCodice = m.articolo?.codice_articolo?.toLowerCase().includes(q)
-          const matchDesc = m.articolo?.descrizione?.toLowerCase().includes(q)
-          const matchDoc = m.riferimento_documento?.toLowerCase().includes(q)
-          const matchOdp = m.codice_odp?.toLowerCase().includes(q)
-          const matchColata = m.lotto_colata?.toLowerCase().includes(q)
-          const matchNote = m.note?.toLowerCase().includes(q)
-
-          if (!matchCodice && !matchDesc && !matchDoc && !matchOdp && !matchColata && !matchNote) {
-            return false
-          }
-        }
-
-        return true
-      })
+    return conScore.map((x) => x.movimento)
   }, [movimenti, mappaArticoli, filtroTipo, filtroPeriodo, filtroRicerca])
 
   // Funzione minimale per esportazione Excel / CSV

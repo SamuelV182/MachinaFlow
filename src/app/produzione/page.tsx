@@ -22,7 +22,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Truck,
-  FileText
+  FileText,
+  Pause,
+  Play,
+  Ban,
+  RotateCcw
 } from 'lucide-react'
 import { OrdineProduzione, FaseOdP, Articolo, DocumentoTrasportoCliente, OrdineCliente } from '@/types/database'
 import { SEED_ODP, SEED_ARTICOLI, SEED_ORDINI_CLIENTI } from '@/lib/data-service'
@@ -45,6 +49,85 @@ export default function ProduzionePage() {
   const [modalitaVista, setModalitaVista] = useState<'cards' | 'tabella'>('cards')
   const [paginaCorrente, setPaginaCorrente] = useState<number>(1)
   const ELEMENTI_PER_PAGINA = 20
+  const [notifica, setNotifica] = useState<string | null>(null)
+
+  // Gestione Standby / Ripresa Lavorazione OdP
+  const handleToggleStandbyOdP = async (odp: OdPConFasi) => {
+    const isAttualmenteSospeso = odp.stato === 'sospeso'
+    const nuovoStato = isAttualmenteSospeso ? 'in_lavorazione' : 'sospeso'
+    const messaggioAzione = isAttualmenteSospeso ? 'riattivato e rimesso in coda di lavorazione' : 'messo in STANDBY / SOSPESO'
+
+    // Aggiorna stato locale
+    const aggiornati = odpList.map((o) => (o.id === odp.id ? { ...o, stato: nuovoStato as any } : o))
+    setOdpList(aggiornati)
+    localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    // Sincronizza su Supabase Cloud
+    await syncService.aggiornaStatoOdP(odp.id, nuovoStato)
+    syncService.inviaSegnaleAvanzamento()
+
+    setNotifica(`✓ OdP ${odp.codice_odp} ${messaggioAzione}! Sincronizzato con l'officina.`)
+    setTimeout(() => setNotifica(null), 4000)
+  }
+
+  // Gestione Annullamento OdP
+  const handleAnnullaOdP = async (odp: OdPConFasi) => {
+    const conferma = window.confirm(
+      `Sei sicuro di voler ANNULLARE definitivamente l'OdP ${odp.codice_odp}?\n\nQuesta azione:\n- Segnerà l'OdP come SCARTATO / ANNULLATO\n- Lo rimuoverà dalla coda dei terminali a bordo macchina\n- Sincronizzerà lo stato su Supabase Cloud.`
+    )
+    if (!conferma) return
+
+    // Chiedi se restituire la materia prima a magazzino (se era stata prelevata)
+    if (odp.materia_prima_scaricata) {
+      const restituisciMp = window.confirm(
+        `Per questo OdP era già stata scaricata la materia prima dal magazzino.\n\nVuoi ripristinare la materia prima a stock (es. barra intatta non tagliata)?`
+      )
+      if (restituisciMp) {
+        try {
+          const distinteSalvate = localStorage.getItem('machinaflow_distinte')
+          const distinte = distinteSalvate ? JSON.parse(distinteSalvate) : []
+          const componentiBom = distinte.filter((d: any) => d.articolo_padre_id === odp.articolo_id)
+          const articoliSalvati = localStorage.getItem('machinaflow_articoli')
+          const articoli = articoliSalvati ? JSON.parse(articoliSalvati) : []
+
+          for (const comp of componentiBom) {
+            const mat = articoli.find((a: any) => a.id === comp.articolo_componente_id)
+            if (mat) {
+              const consumo = comp.quantita_necessaria * (odp.quantita_da_produrre || 1)
+              const nuovaGiacenza = Number((mat.giacenza_attuale + consumo).toFixed(3))
+              const matAgg = { ...mat, giacenza_attuale: nuovaGiacenza }
+              await syncService.salvaArticolo(matAgg)
+              await syncService.registraMovimentoMagazzino({
+                articolo_id: mat.id,
+                tipo_movimento: 'rettifica_inventario',
+                quantita: Number(consumo),
+                giacenza_precedente: mat.giacenza_attuale,
+                giacenza_risultante: nuovaGiacenza,
+                unita_misura: mat.unita_misura,
+                codice_odp: odp.codice_odp,
+                riferimento_documento: `Storno OdP ${odp.codice_odp}`,
+                note: `Restituzione materia prima per annullamento OdP ${odp.codice_odp}`
+              })
+            }
+          }
+        } catch (e) {
+          console.warn('Errore ripristino materia prima:', e)
+        }
+      }
+    }
+
+    // Aggiorna stato locale OdP a 'scartato'
+    const aggiornati = odpList.map((o) => (o.id === odp.id ? { ...o, stato: 'scartato' as const } : o))
+    setOdpList(aggiornati)
+    localStorage.setItem('machinaflow_odp', JSON.stringify(aggiornati))
+
+    // Sincronizza su Supabase Cloud
+    await syncService.aggiornaStatoOdP(odp.id, 'scartato')
+    syncService.inviaSegnaleAvanzamento()
+
+    setNotifica(`✓ OdP ${odp.codice_odp} annullato con successo.`)
+    setTimeout(() => setNotifica(null), 4000)
+  }
 
   useEffect(() => {
     const caricaDati = async () => {
@@ -95,6 +178,14 @@ export default function ProduzionePage() {
             ...odp,
             stato: 'spedito' as const,
             quantita_prodotta: odp.quantita_da_produrre,
+            articolo: articoliList.find((a) => a.id === odp.articolo_id)
+          }
+        }
+
+        // Se l'OdP è stato sospeso (standby) o annullato (scartato), preserva rigorosamente lo stato
+        if (odp.stato === 'sospeso' || odp.stato === 'scartato') {
+          return {
+            ...odp,
             articolo: articoliList.find((a) => a.id === odp.articolo_id)
           }
         }
@@ -448,6 +539,44 @@ export default function ProduzionePage() {
                     return null
                   })()}
 
+                  {/* Pulsante Standby / Riprendi (attivo se non spedito e non annullato) */}
+                  {odp.stato !== 'spedito' && odp.stato !== 'scartato' && odp.stato !== 'completato' && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStandbyOdP(odp)}
+                      className={`inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                        odp.stato === 'sospeso'
+                          ? 'bg-amber-500/20 hover:bg-amber-500 border-amber-500/40 text-amber-300 hover:text-white'
+                          : 'bg-slate-800 hover:bg-amber-600/30 border-slate-700 text-slate-300 hover:text-amber-300 hover:border-amber-500/50'
+                      }`}
+                      title={odp.stato === 'sospeso' ? 'Riprendi produzione OdP' : 'Metti in Standby temporaneo'}
+                    >
+                      {odp.stato === 'sospeso' ? (
+                        <>
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>Riprendi</span>
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="w-3.5 h-3.5" />
+                          <span>Standby</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Pulsante Annulla OdP (se non completato o spedito) */}
+                  {odp.stato !== 'spedito' && odp.stato !== 'scartato' && odp.stato !== 'completato' && (
+                    <button
+                      type="button"
+                      onClick={() => handleAnnullaOdP(odp)}
+                      className="inline-flex items-center justify-center p-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/80 border border-slate-700 hover:border-rose-700 text-slate-400 hover:text-rose-300 transition-all cursor-pointer"
+                      title="Annulla OdP definitivamente (sblocca commessa cliente)"
+                    >
+                      <Ban className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
                   <Link
                     href={`/produzione/${odp.id}`}
                     className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all group ${
@@ -546,12 +675,16 @@ export default function ProduzionePage() {
                               ? 'bg-purple-950 text-purple-300 border border-purple-700'
                               : odp.stato === 'completato'
                               ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                              : odp.stato === 'sospeso'
+                              ? 'bg-amber-950 text-amber-300 border border-amber-600 font-bold animate-pulse'
+                              : odp.stato === 'scartato'
+                              ? 'bg-rose-950 text-rose-300 border border-rose-800 line-through'
                               : odp.stato === 'in_lavorazione'
                               ? 'bg-blue-950 text-blue-300 border border-blue-800'
                               : 'bg-slate-800 text-slate-400 border border-slate-700'
                           }`}
                         >
-                          {odp.stato === 'spedito' ? 'Spedito' : odp.stato.replace('_', ' ')}
+                          {odp.stato === 'sospeso' ? '⏸ Standby' : odp.stato === 'scartato' ? '✕ Annullato' : odp.stato === 'spedito' ? 'Spedito' : odp.stato.replace('_', ' ')}
                         </span>
                       </td>
 
@@ -613,6 +746,36 @@ export default function ProduzionePage() {
                             }
                             return null
                           })()}
+
+                          {odp.stato !== 'scartato' && odp.stato !== 'spedito' && odp.stato !== 'completato' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStandbyOdP(odp)}
+                                className={`inline-flex items-center justify-center p-1.5 rounded-lg border shadow-sm transition-all cursor-pointer ${
+                                  odp.stato === 'sospeso'
+                                    ? 'bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-white border-amber-500/50'
+                                    : 'bg-slate-800 hover:bg-amber-600/30 text-slate-400 hover:text-amber-300 border-slate-700/80 hover:border-amber-500/50'
+                                }`}
+                                title={odp.stato === 'sospeso' ? "Ripristina da Standby (torna in Lavorazione)" : "Metti in Standby (sospendi temporaneamente)"}
+                              >
+                                {odp.stato === 'sospeso' ? (
+                                  <Play className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Pause className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleAnnullaOdP(odp)}
+                                className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/30 text-slate-400 hover:text-rose-300 transition-all cursor-pointer border border-slate-700/80 hover:border-rose-500/50 shadow-sm"
+                                title="Annulla OdP (Revoca commessa e opzione scarico/reso materia prima)"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
 
                           <Link
                             href={`/produzione/${odp.id}`}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
   Boxes,
@@ -28,6 +28,7 @@ import { Articolo, TipoArticolo, ComponenteDistintaBase, FaseCicloStandard, Movi
 import { SEED_ARTICOLI, SEED_DISTINTA_BASE, SEED_FASI_CICLO } from '@/lib/data-service'
 import { syncService } from '@/lib/sync-service'
 import { RegistroMovimentiTab } from '@/components/RegistroMovimentiTab'
+import { preparaCriterioRicerca, calcolaRilevanzaRicerca } from '@/lib/search-helper'
 
 export default function ArticoliPage() {
   const [tabSezione, setTabSezione] = useState<'anagrafica' | 'registro_movimenti'>('anagrafica')
@@ -304,14 +305,37 @@ export default function ArticoliPage() {
     setPaginaCorrente(1)
   }, [filtroTipo, termineRicerca])
 
-  // Filtro
-  const articoliFiltrati = articoli.filter((a) => {
-    const combaciaTipo = filtroTipo === 'tutti' || a.tipo === filtroTipo
-    const combaciaTesto =
-      a.codice_articolo.toLowerCase().includes(termineRicerca.toLowerCase()) ||
-      a.descrizione.toLowerCase().includes(termineRicerca.toLowerCase())
-    return combaciaTipo && combaciaTesto
-  })
+  // Filtro e Ricerca Intelligente con Ordinamento per Rilevanza
+  const articoliFiltrati = useMemo(() => {
+    const criterio = preparaCriterioRicerca(termineRicerca)
+
+    const filtrati = articoli
+      .map((a) => {
+        const combaciaTipo = filtroTipo === 'tutti' || a.tipo === filtroTipo
+        if (!combaciaTipo) return null
+
+        if (!criterio.queryOriginale) {
+          return { articolo: a, score: 0 }
+        }
+
+        const score = calcolaRilevanzaRicerca(
+          a.codice_articolo,
+          [a.descrizione, a.tipo, a.unita_misura],
+          criterio
+        )
+
+        if (score < 0) return null
+        return { articolo: a, score }
+      })
+      .filter((elem): elem is { articolo: Articolo; score: number } => elem !== null)
+
+    // Se c'è una query di ricerca attiva, ordina per rilevanza decrescente (il match esatto va in cima!)
+    if (criterio.queryOriginale) {
+      filtrati.sort((a, b) => b.score - a.score)
+    }
+
+    return filtrati.map((x) => x.articolo) as Articolo[]
+  }, [articoli, filtroTipo, termineRicerca])
 
   // Calcolo Paginazione a 25 elementi per pagina
   const totaleElementi = articoliFiltrati.length

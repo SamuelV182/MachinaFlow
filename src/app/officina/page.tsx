@@ -37,7 +37,8 @@ import {
   Eye,
   EyeOff,
   Truck,
-  ExternalLink
+  ExternalLink,
+  Ban
 } from 'lucide-react'
 import {
   CentroLavoro,
@@ -1566,7 +1567,9 @@ export default function TerminaleOfficinaPage() {
               item.fase.centro_lavoro_id === 'mc-esterna-01' &&
               item.fase.stato !== 'completata' &&
               item.fasePrecedenteCompletata &&
-              !item.materiaPrimaMancante
+              !item.materiaPrimaMancante &&
+              item.odp.stato !== 'sospeso' &&
+              item.odp.stato !== 'scartato'
           )
           .forEach((item) => autorizzate.add(item.fase.id))
         return
@@ -1577,7 +1580,7 @@ export default function TerminaleOfficinaPage() {
         (item) => item.fase.centro_lavoro_id === centroId && item.fase.stato === 'in_corso'
       )
 
-      // Se la macchina è libera, la sua prima fase con materiale completo (100%) e fasi precedenti completate è autorizzata
+      // Se la macchina è libera, la sua prima fase con materiale completo (100%), fasi precedenti completate e OdP NON sospeso/scartato è autorizzata
       if (!macchinaOccupata) {
         const primaPronta = fasiOrdinate.find(
           (item) =>
@@ -1585,7 +1588,9 @@ export default function TerminaleOfficinaPage() {
             item.fase.stato !== 'completata' &&
             item.fasePrecedenteCompletata &&
             !item.materiaPrimaMancante &&
-            !item.materiaPrimaParziale
+            !item.materiaPrimaParziale &&
+            item.odp.stato !== 'sospeso' &&
+            item.odp.stato !== 'scartato'
         )
         if (primaPronta) {
           autorizzate.add(primaPronta.fase.id)
@@ -2145,8 +2150,10 @@ export default function TerminaleOfficinaPage() {
             )
 
             // Controllo autorizzazione di avvio per centro di lavoro
-            // Se la fase è già IN CORSO o COMPLETATA, non può essere conteggiata come "da avviare"
-            const isAutorizzataAdAvviare = !isInCorso && !isCompletata && !item.materiaPrimaParziale && idsFasiAutorizzateDaAvviare.has(fase.id)
+            // Se la fase è già IN CORSO o COMPLETATA, o se l'OdP è in STANDBY / SOSPESO / SCARTATO, non può essere avviata
+            const isOdpSospeso = odp.stato === 'sospeso'
+            const isOdpScartato = odp.stato === 'scartato'
+            const isAutorizzataAdAvviare = !isInCorso && !isCompletata && !isOdpSospeso && !isOdpScartato && !item.materiaPrimaParziale && idsFasiAutorizzateDaAvviare.has(fase.id)
             const isBloccata = !isInCorso && !isCompletata && !isAutorizzataAdAvviare
 
             // Configurazione badge Priorità OdP
@@ -2556,14 +2563,30 @@ export default function TerminaleOfficinaPage() {
                           </div>
                         )}
 
-                        {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO O MATERIA PRIMA TOTALMENTE MANCANTE */}
+                        {/* CASO 2: FASE BLOCCATA DALLA CODA, DA LAVORAZIONE IN CORSO, STANDBY O MATERIA PRIMA TOTALMENTE MANCANTE */}
                         {isBloccata && !item.materiaPrimaParziale && (
-                          <div className="col-span-2 py-3 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs flex items-center justify-between select-none">
+                          <div className={`col-span-2 py-3 px-3.5 rounded-xl border text-xs flex items-center justify-between select-none ${
+                            isOdpSospeso
+                              ? 'bg-amber-950/40 border-amber-500/50 text-amber-300'
+                              : isOdpScartato
+                              ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+                              : 'bg-slate-950 border-slate-800 text-slate-500'
+                          }`}>
                             <div className="flex items-center gap-2">
-                              <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                              {isOdpSospeso ? (
+                                <Pause className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                              ) : isOdpScartato ? (
+                                <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                              ) : (
+                                <Lock className="w-4 h-4 text-slate-500 shrink-0" />
+                              )}
                               <div>
-                                <p className={`font-bold ${materiaPrimaMancante ? 'text-amber-400' : 'text-slate-400'}`}>
-                                  {materiaPrimaMancante
+                                <p className={`font-bold ${isOdpSospeso ? 'text-amber-300' : isOdpScartato ? 'text-rose-300' : materiaPrimaMancante ? 'text-amber-400' : 'text-slate-400'}`}>
+                                  {isOdpSospeso
+                                    ? '⏸️ ORDINE IN STANDBY (Sospeso da Ufficio Produzione)'
+                                    : isOdpScartato
+                                    ? '🚫 ORDINE ANNULLATO / REVOCATO'
+                                    : materiaPrimaMancante
                                     ? '⚠️ In attesa materia prima da fornitore (Stock insufficiente)'
                                     : macchinaQuestaFaseOccupata
                                     ? 'Macchina occupata: lavorazione già in corso'
@@ -2571,15 +2594,27 @@ export default function TerminaleOfficinaPage() {
                                     ? 'Fase bloccata: attesa completamento fase precedente'
                                     : 'In attesa del tuo turno (segui la priorità di coda)'}
                                 </p>
-                                <p className="text-[10px] text-slate-500">
-                                  {materiaPrimaMancante && nomeMateriaPrimaMancante
+                                <p className={`text-[10px] ${isOdpSospeso ? 'text-amber-400/80' : isOdpScartato ? 'text-rose-400/80' : 'text-slate-500'}`}>
+                                  {isOdpSospeso
+                                    ? 'La commessa è stata messa in pausa dall’ufficio. La lavorazione non può essere avviata finché non viene riattivata.'
+                                    : isOdpScartato
+                                    ? 'Questa commessa è stata annullata e non deve essere lavorata in officina.'
+                                    : materiaPrimaMancante && nomeMateriaPrimaMancante
                                     ? `Materiale: ${nomeMateriaPrimaMancante} - La macchina esegue intanto il pezzo successivo disponibile.`
                                     : 'L’operatore non può avviare questo ordine prima degli ordini prioritari pronti.'}
                                 </p>
                               </div>
                             </div>
-                            <span className={`font-mono font-black text-sm shrink-0 ${materiaPrimaMancante ? 'text-amber-500' : 'text-slate-600'}`}>
-                              {materiaPrimaMancante ? '⚠️ MATERIA PRIMA' : '🔒 BLOCCO'}
+                            <span className={`font-mono font-black text-sm shrink-0 ${
+                              isOdpSospeso
+                                ? 'text-amber-400 font-extrabold'
+                                : isOdpScartato
+                                ? 'text-rose-400 font-extrabold'
+                                : materiaPrimaMancante
+                                ? 'text-amber-500'
+                                : 'text-slate-600'
+                            }`}>
+                              {isOdpSospeso ? '⏸️ STANDBY' : isOdpScartato ? '🚫 ANNULLATO' : materiaPrimaMancante ? '⚠️ MATERIA PRIMA' : '🔒 BLOCCO'}
                             </span>
                           </div>
                         )}
@@ -2755,7 +2790,9 @@ export default function TerminaleOfficinaPage() {
                   const { odp, fase, articolo, centro, fasePrecedenteCompletata, materiaPrimaMancante, materiaPrimaParziale, pezziFattibiliConGiacenza, nomeMateriaPrimaMancante } = item
                   const isCompletata = fase.stato === 'completata'
                   const isInCorso = fase.stato === 'in_corso'
-                  const isAutorizzataAdAvviare = !isInCorso && !isCompletata && !item.materiaPrimaParziale && idsFasiAutorizzateDaAvviare.has(fase.id)
+                  const isOdpSospeso = odp.stato === 'sospeso'
+                  const isOdpScartato = odp.stato === 'scartato'
+                  const isAutorizzataAdAvviare = !isInCorso && !isCompletata && !isOdpSospeso && !isOdpScartato && !item.materiaPrimaParziale && idsFasiAutorizzateDaAvviare.has(fase.id)
                   const isBloccata = !isInCorso && !isCompletata && !isAutorizzataAdAvviare
 
                   const prioritaMappa: Record<number, { label: string; bg: string; icon: typeof Flame }> = {
@@ -3066,11 +3103,37 @@ export default function TerminaleOfficinaPage() {
 
                               {isBloccata && !item.materiaPrimaParziale && (
                                 <span
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 text-slate-500 border border-slate-800 text-[10px] font-bold select-none"
-                                  title="L'operatore deve prima eseguire l'ordine prioritario o attendere che il materiale sia pronto."
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold select-none border ${
+                                    isOdpSospeso
+                                      ? 'bg-amber-950/60 text-amber-300 border-amber-500/50'
+                                      : isOdpScartato
+                                      ? 'bg-rose-950/60 text-rose-300 border-rose-500/50'
+                                      : 'bg-slate-950 text-slate-500 border-slate-800'
+                                  }`}
+                                  title={
+                                    isOdpSospeso
+                                      ? "Commessa in Standby / Sospesa dall'ufficio produzione."
+                                      : isOdpScartato
+                                      ? "Commessa Annullata / Scartata."
+                                      : "L'operatore deve prima eseguire l'ordine prioritario o attendere che il materiale sia pronto."
+                                  }
                                 >
-                                  <Lock className="w-2.5 h-2.5 text-slate-500" />
-                                  Bloccato
+                                  {isOdpSospeso ? (
+                                    <>
+                                      <Pause className="w-2.5 h-2.5 text-amber-400" />
+                                      Standby
+                                    </>
+                                  ) : isOdpScartato ? (
+                                    <>
+                                      <Ban className="w-2.5 h-2.5 text-rose-400" />
+                                      Annullato
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Lock className="w-2.5 h-2.5 text-slate-500" />
+                                      Bloccato
+                                    </>
+                                  )}
                                 </span>
                               )}
 

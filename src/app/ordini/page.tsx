@@ -1,5 +1,6 @@
 'use client'
 import SelettoreArticoloRicerca from '@/components/SelettoreArticoloRicerca'
+import SelettoreClienteRicerca from '@/components/SelettoreClienteRicerca'
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
@@ -104,9 +105,9 @@ export default function OrdiniPage() {
 
   // Paginazione per Schede (Ordini) e per Tabella (Righe Articolo)
   const [paginaCards, setPaginaCards] = useState<number>(1)
+  const [cardsPerPagina, setCardsPerPagina] = useState<number>(10)
   const [paginaTabella, setPaginaTabella] = useState<number>(1)
-  const ORDINI_PER_PAGINA_CARDS = 10
-  const RIGHE_PER_PAGINA_TABELLA = 25
+  const [righePerPagina, setRighePerPagina] = useState<number>(25)
 
   // Stato espansione ordini multi-riga (fisarmonica/accordion per ordini con più di 3 righe)
   const [ordiniEspansiIds, setOrdiniEspansiIds] = useState<Record<string, boolean>>({})
@@ -213,6 +214,7 @@ export default function OrdiniPage() {
       note: ordine.note || '',
       righe: ordine.righe.map(r => ({
         pos_riga_cliente: String(r.pos_riga_cliente || ''),
+        data_consegna_riga: r.data_consegna_riga ? r.data_consegna_riga.split('T')[0] : (ordine.data_consegna_concordata ? ordine.data_consegna_concordata.split('T')[0] : ''),
         articolo_id: r.articolo_id,
         quantita: r.quantita,
         prezzo_unitario: Number(r.prezzo_unitario || 0)
@@ -230,6 +232,7 @@ export default function OrdiniPage() {
     righe: [
       {
         pos_riga_cliente: '1',
+        data_consegna_riga: '',
         articolo_id: '',
         quantita: 0,
         prezzo_unitario: 0
@@ -576,17 +579,19 @@ export default function OrdiniPage() {
   const apriNuovoOrdine = () => {
     const dataDefault = new Date()
     dataDefault.setDate(dataDefault.getDate() + 10)
+    const dataIso = dataDefault.toISOString().split('T')[0]
     setDettaglioSimulazione(null)
     setFormOrdine({
       numero_ordine: `ORD-2026-${String(ordini.length + 1).padStart(3, '0')}`,
       riferimento_ordine_cliente: '',
       cliente_id: '',
       nuovo_cliente_nome: '',
-      data_consegna_concordata: dataDefault.toISOString().split('T')[0],
+      data_consegna_concordata: dataIso,
       note: '',
       righe: [
         {
           pos_riga_cliente: '1',
+          data_consegna_riga: dataIso,
           articolo_id: '',
           quantita: 0,
           prezzo_unitario: 0
@@ -650,11 +655,13 @@ export default function OrdiniPage() {
           odpModificati = odpModificati.map((odp) => {
             if (odp.riga_ordine_cliente_id === rigaPrecedente.id) {
               countOdpAggiornati++
+              const dataFineAgg = r.data_consegna_riga || formOrdine.data_consegna_concordata
               const odpAgg = {
                 ...odp,
                 fasi: odp.fasi || [],
                 riferimento_ordine_cliente: formOrdine.riferimento_ordine_cliente.trim() || undefined,
                 pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente).trim() : (idx + 1),
+                data_fine_pianificata: dataFineAgg,
                 quantita_da_produrre: odp.stato === 'pianificato' ? quantitaNuova : odp.quantita_da_produrre
               }
               syncService.salvaOrdineProduzione(odpAgg)
@@ -668,6 +675,7 @@ export default function OrdiniPage() {
           id: rigaId,
           ordine_cliente_id: ordineId,
           pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente).trim() : (idx + 1),
+          data_consegna_riga: r.data_consegna_riga || formOrdine.data_consegna_concordata,
           articolo_id: r.articolo_id,
           quantita: quantitaNuova,
           prezzo_unitario: Number(r.prezzo_unitario),
@@ -719,6 +727,7 @@ export default function OrdiniPage() {
         id: `riga-${Date.now()}-${idx}`,
         ordine_cliente_id: nuovoId,
         pos_riga_cliente: r.pos_riga_cliente ? String(r.pos_riga_cliente).trim() : (idx + 1),
+        data_consegna_riga: r.data_consegna_riga || formOrdine.data_consegna_concordata,
         articolo_id: r.articolo_id,
         quantita: Number(r.quantita),
         prezzo_unitario: Number(r.prezzo_unitario),
@@ -850,8 +859,9 @@ export default function OrdiniPage() {
           }
         })
 
+        const dataConsegnaEffettiva = riga.data_consegna_riga || ord.data_consegna_concordata
         const dataInizioOdPCalcolata = calcolaDataInizioOdPAritroso(
-          ord.data_consegna_concordata,
+          dataConsegnaEffettiva,
           fasiArticolo,
           riga.quantita
         )
@@ -871,7 +881,7 @@ export default function OrdiniPage() {
           quantita_da_produrre: riga.quantita,
           quantita_prodotta: 0,
           data_inizio_pianificata: dataInizioOdPCalcolata,
-          data_fine_pianificata: ord.data_consegna_concordata,
+          data_fine_pianificata: dataConsegnaEffettiva,
           stato: 'pianificato',
           priorita: 2,
           qr_code_token: `${codiceOdp}-TOKEN-${Date.now().toString().slice(-4)}`,
@@ -982,8 +992,9 @@ export default function OrdiniPage() {
         }
       })
 
+      const dataConsegnaEffettiva = riga.data_consegna_riga || ordine.data_consegna_concordata
       const dataInizioOdPCalcolata = calcolaDataInizioOdPAritroso(
-        ordine.data_consegna_concordata,
+        dataConsegnaEffettiva,
         fasiArticolo,
         riga.quantita
       )
@@ -1003,7 +1014,7 @@ export default function OrdiniPage() {
         quantita_da_produrre: riga.quantita,
         quantita_prodotta: 0,
         data_inizio_pianificata: dataInizioOdPCalcolata,
-        data_fine_pianificata: ordine.data_consegna_concordata,
+        data_fine_pianificata: dataConsegnaEffettiva,
         stato: 'pianificato',
         priorita: 2,
         qr_code_token: `${codiceOdp}-TOKEN-${Date.now().toString().slice(-4)}`,
@@ -1261,10 +1272,22 @@ export default function OrdiniPage() {
   useEffect(() => {
     setPaginaCards(1)
     setPaginaTabella(1)
-  }, [filtroStato, termineRicerca])
+  }, [filtroStato, termineRicerca, cardsPerPagina, righePerPagina])
+
+  // Ordinamento: ultimi ordini registrati in alto (decrescente per creato_il o data_ordine o id)
+  const ordiniOrdinati = useMemo(() => {
+    return [...ordini].sort((a, b) => {
+      const dataA = a.creato_il || a.data_ordine || ''
+      const dataB = b.creato_il || b.data_ordine || ''
+      if (dataA && dataB && dataA !== dataB) {
+        return dataB.localeCompare(dataA)
+      }
+      return (b.numero_ordine || '').localeCompare(a.numero_ordine || '')
+    })
+  }, [ordini])
 
   // Filtro
-  const ordiniFiltrati = ordini.filter((o) => {
+  const ordiniFiltrati = ordiniOrdinati.filter((o) => {
     const combaciaStato = filtroStato === 'tutti' || o.stato === filtroStato
     const matchNumeroOCliente =
       o.numero_ordine.toLowerCase().includes(termineRicerca.toLowerCase()) ||
@@ -1281,13 +1304,14 @@ export default function OrdiniPage() {
     return combaciaStato && (matchNumeroOCliente || matchArticolo)
   })
 
-  // 1. Paginazione per VISTA SCHEDE (Cards = Ordini Completi)
+  // 1. Paginazione Intelligente per VISTA SCHEDE (Cards = Ordini Completi)
   const totaleOrdiniCards = ordiniFiltrati.length
-  const totalePagineCards = Math.ceil(totaleOrdiniCards / ORDINI_PER_PAGINA_CARDS) || 1
-  const inizioCards = (paginaCards - 1) * ORDINI_PER_PAGINA_CARDS
-  const ordiniPaginatiCards = ordiniFiltrati.slice(inizioCards, inizioCards + ORDINI_PER_PAGINA_CARDS)
+  const totalePagineCards = Math.max(1, Math.ceil(totaleOrdiniCards / cardsPerPagina))
+  const inizioCards = (paginaCards - 1) * cardsPerPagina
+  const fineCards = Math.min(inizioCards + cardsPerPagina, totaleOrdiniCards)
+  const ordiniPaginatiCards = ordiniFiltrati.slice(inizioCards, fineCards)
 
-  // 2. Paginazione per VISTA TABELLA (Tabella = Righe Articolo Flattened)
+  // 2. Paginazione Intelligente per VISTA TABELLA (Tabella = Righe Articolo Flattened)
   // Trasforma tutti gli ordini filtrati in un elenco lineare di righe articolo
   const tutteLeRigheFiltrate = ordiniFiltrati.flatMap((ordine) =>
     ordine.righe.map((riga, indexInOrdine) => ({
@@ -1298,9 +1322,10 @@ export default function OrdiniPage() {
     }))
   )
   const totaleRigheTabella = tutteLeRigheFiltrate.length
-  const totalePagineTabella = Math.ceil(totaleRigheTabella / RIGHE_PER_PAGINA_TABELLA) || 1
-  const inizioTabella = (paginaTabella - 1) * RIGHE_PER_PAGINA_TABELLA
-  const righePaginateTabella = tutteLeRigheFiltrate.slice(inizioTabella, inizioTabella + RIGHE_PER_PAGINA_TABELLA)
+  const totalePagineTabella = Math.max(1, Math.ceil(totaleRigheTabella / righePerPagina))
+  const inizioTabella = (paginaTabella - 1) * righePerPagina
+  const fineTabella = Math.min(inizioTabella + righePerPagina, totaleRigheTabella)
+  const righePaginateTabella = tutteLeRigheFiltrate.slice(inizioTabella, fineTabella)
 
   return (
     <div className="space-y-6">
@@ -1747,6 +1772,28 @@ export default function OrdiniPage() {
                                 <span className="font-mono text-slate-300 font-semibold">
                                   Totale: € {importoRiga.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
+                                {riga.data_consegna_riga ? (
+                                  <span
+                                    className={`inline-flex items-center gap-1 text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${
+                                      riga.data_consegna_riga !== ordine.data_consegna_concordata
+                                        ? 'text-amber-300 bg-amber-950/70 border-amber-600/40 shadow-xs'
+                                        : 'text-slate-300 bg-slate-900 border-slate-700/80'
+                                    }`}
+                                    title={
+                                      riga.data_consegna_riga !== ordine.data_consegna_concordata
+                                        ? 'Scadenza specifica di consegna differenziata per questa riga'
+                                        : 'Scadenza di consegna per questa riga'
+                                    }
+                                  >
+                                    <Clock className="w-3 h-3 text-amber-400" />
+                                    <span>Scadenza riga: {new Date(riga.data_consegna_riga).toLocaleDateString('it-IT')}</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 bg-slate-900 border border-slate-700/80 px-2 py-0.5 rounded">
+                                    <Clock className="w-3 h-3 text-slate-500" />
+                                    <span>Scadenza: {new Date(ordine.data_consegna_concordata).toLocaleDateString('it-IT')}</span>
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1881,40 +1928,77 @@ export default function OrdiniPage() {
             </div>
           )}
 
-          {/* Paginazione Vista Schede (a 10 ordini per pagina) */}
-          {totalePagineCards > 1 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg">
-              <div className="text-xs text-slate-400 font-semibold">
-                Mostrati da <span className="text-white font-bold">{Math.min(inizioCards + 1, totaleOrdiniCards)}</span> a{' '}
-                <span className="text-white font-bold">{Math.min(inizioCards + ORDINI_PER_PAGINA_CARDS, totaleOrdiniCards)}</span> di{' '}
-                <span className="text-orange-400 font-bold">{totaleOrdiniCards}</span> commesse clienti
-              </div>
-
+          {/* BARRA CONTROLLI PAGINAZIONE INTELLIGENTE VISTA SCHEDE */}
+          {totaleOrdiniCards > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg text-xs text-slate-400">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaginaCards((prev) => Math.max(prev - 1, 1))}
-                  disabled={paginaCards === 1}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  <span>Precedenti</span>
-                </button>
-
-                <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-orange-400">
-                  Pagina {paginaCards} / {totalePagineCards}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setPaginaCards((prev) => Math.min(prev + 1, totalePagineCards))}
-                  disabled={paginaCards === totalePagineCards}
-                  className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
-                >
-                  <span>Successivi 10</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                <span>
+                  Visualizzati <strong className="text-white">{inizioCards + 1} - {fineCards}</strong> di{' '}
+                  <strong className="text-orange-400">{totaleOrdiniCards}</strong> commesse clienti
+                </span>
+                <span className="text-slate-600">•</span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <span>Mostra:</span>
+                  <select
+                    value={cardsPerPagina}
+                    onChange={(e) => setCardsPerPagina(Number(e.target.value))}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-orange-500 cursor-pointer"
+                  >
+                    <option value={5}>5</option>
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                  </select>
+                </label>
               </div>
+
+              {totalePagineCards > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={paginaCards === 1}
+                    onClick={() => setPaginaCards((prev) => Math.max(1, prev - 1))}
+                    className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Precedente"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalePagineCards }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalePagineCards || Math.abs(p - paginaCards) <= 1)
+                      .map((p, idx, array) => {
+                        const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                        return (
+                          <div key={p} className="flex items-center gap-1">
+                            {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setPaginaCards(p)}
+                              className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                paginaCards === p
+                                  ? 'bg-orange-600 text-white shadow-xs font-bold'
+                                  : 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </div>
+                        )
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaCards === totalePagineCards}
+                    onClick={() => setPaginaCards((prev) => Math.min(totalePagineCards, prev + 1))}
+                    className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Successiva"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1923,12 +2007,12 @@ export default function OrdiniPage() {
       {/* Elenco Ordini Clienti - Vista a Lista (Tabella Paginata per Righe Articolo) */}
       {modalitaVista === 'tabella' && (
         <div className="space-y-4">
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse min-w-[1050px]">
                 <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 uppercase tracking-wider font-semibold">
-                    <th className="py-3 px-3 w-10 text-center">
+                  <tr className="border-b border-slate-800 bg-slate-950/90 text-slate-400 uppercase tracking-wider font-semibold text-[11px]">
+                    <th className="py-2.5 px-2.5 w-10 text-center whitespace-nowrap">
                       <input
                         type="checkbox"
                         onChange={toggleSelezionaTuttiVisibili}
@@ -1940,18 +2024,18 @@ export default function OrdiniPage() {
                         title="Seleziona/Deseleziona tutti gli articoli visibili in questa pagina pronti al lancio"
                       />
                     </th>
-                    <th className="py-3 px-3">N. Ordine</th>
-                    <th className="py-3 px-3">Cliente</th>
-                    <th className="py-3 px-3">Codice & Articolo</th>
-                    <th className="py-3 px-2.5 text-center">Quantità</th>
-                    <th className="py-3 px-2.5 text-right">Prezzo Unit.</th>
-                    <th className="py-3 px-2.5 text-right">Totale Riga</th>
-                    <th className="py-3 px-3 text-center">Consegna</th>
-                    <th className="py-3 px-2.5 text-center">Stato</th>
-                    <th className="py-3 px-3 text-center">Azione OdP</th>
+                    <th className="py-2.5 px-2.5 whitespace-nowrap">N. Ordine</th>
+                    <th className="py-2.5 px-2.5 whitespace-nowrap">Cliente</th>
+                    <th className="py-2.5 px-2.5">Codice & Articolo</th>
+                    <th className="py-2.5 px-2 text-center whitespace-nowrap">Quantità</th>
+                    <th className="py-2.5 px-2 text-right whitespace-nowrap">Prezzo Unit.</th>
+                    <th className="py-2.5 px-2 text-right whitespace-nowrap">Totale Riga</th>
+                    <th className="py-2.5 px-2 text-center whitespace-nowrap">Scadenza</th>
+                    <th className="py-2.5 px-2 text-center whitespace-nowrap">Stato</th>
+                    <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Azione OdP</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-slate-800/80 text-slate-300">
                   {righePaginateTabella.map(({ ordine, riga, indexInOrdine }) => {
                     // Trova tutti gli OdP associati a questa riga (inclusi sdoppiati /A, /B o ripristini /R)
                     const odpTrovatiPerRiga = odpList.filter((o) => {
@@ -1963,6 +2047,9 @@ export default function OrdiniPage() {
                     const totaleImportoRiga = (riga.quantita || 0) * (riga.prezzo_unitario || 0)
                     const isFirstRowOfOrder = indexInOrdine === 0
                     const isSelected = righeSelezionate.includes(riga.id)
+
+                    // Data di consegna specifica per la riga se presente, altrimenti testata
+                    const dataConsegnaEffettiva = riga.data_consegna_riga || ordine.data_consegna_concordata
 
                     // Calcolo quantità spedita per la riga
                     let quantitaSpeditaRiga = 0
@@ -1984,7 +2071,7 @@ export default function OrdiniPage() {
                         } ${isFirstRowOfOrder ? 'border-t-2 border-slate-800' : ''}`}
                       >
                         {/* Checkbox */}
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-2 px-2.5 text-center whitespace-nowrap">
                           {!odpEsistente ? (
                             <input
                               type="checkbox"
@@ -1998,59 +2085,59 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Numero Ordine */}
-                        <td className="py-2.5 px-3 font-mono font-bold text-orange-400 whitespace-nowrap">
+                        <td className="py-2 px-2.5 font-mono font-bold text-orange-400 whitespace-nowrap">
                           {isFirstRowOfOrder ? (
                             <div>
-                            <div className="flex items-center gap-1.5">
-                              <span>{ordine.numero_ordine}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRichiediModificaOrdine(ordine)}
-                                className="text-orange-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded hover:bg-slate-800"
-                                title="Modifica Commessa"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRichiediEliminaOrdine(ordine)}
-                                className="text-slate-500 hover:text-rose-400 transition-colors cursor-pointer p-0.5 rounded hover:bg-slate-800"
-                                title="Elimina Ordine Cliente"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs">{ordine.numero_ordine}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRichiediModificaOrdine(ordine)}
+                                  className="text-orange-400 hover:text-white transition-colors cursor-pointer p-0.5 rounded hover:bg-slate-800"
+                                  title="Modifica Commessa"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRichiediEliminaOrdine(ordine)}
+                                  className="text-slate-500 hover:text-rose-400 transition-colors cursor-pointer p-0.5 rounded hover:bg-slate-800"
+                                  title="Elimina Ordine Cliente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <span className="block text-[10px] text-slate-500 font-sans font-normal">
+                                {ordine.righe.length} {ordine.righe.length === 1 ? 'art.' : 'artt.'}
+                              </span>
                             </div>
-                            <span className="block text-[10px] text-slate-500 font-sans font-normal">
-                              {ordine.righe.length} art.
-                            </span>
-                          </div>
                           ) : (
                             <span className="text-slate-600 text-[10px] font-mono">↳ {ordine.numero_ordine}</span>
                           )}
                         </td>
 
                         {/* Cliente */}
-                        <td className="py-2.5 px-3 font-medium text-white max-w-[170px]">
+                        <td className="py-2 px-2.5 whitespace-nowrap max-w-[200px]">
                           {isFirstRowOfOrder ? (
                             <div className="flex items-center gap-1.5 truncate">
                               <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate" title={ordine.cliente?.ragione_sociale}>
+                              <span className="truncate font-semibold text-white" title={ordine.cliente?.ragione_sociale}>
                                 {ordine.cliente ? ordine.cliente.ragione_sociale : 'Cliente Sconosciuto'}
                               </span>
                             </div>
                           ) : (
-                            <span className="text-slate-600 text-xs">〃</span>
+                            <span className="text-slate-600 text-xs pl-5">〃</span>
                           )}
                         </td>
 
                         {/* Articolo */}
-                        <td className="py-2.5 px-3">
+                        <td className="py-2 px-2.5 max-w-[280px]">
                           {riga.articolo ? (
                             <div className="space-y-0.5">
-                              <span className="font-mono font-semibold text-white block">
+                              <span className="font-mono font-semibold text-white block text-xs truncate" title={riga.articolo.codice_articolo}>
                                 {riga.articolo.codice_articolo}
                               </span>
-                              <span className="text-[11px] text-slate-400 line-clamp-1" title={riga.articolo.descrizione}>
+                              <span className="text-[11px] text-slate-400 truncate block" title={riga.articolo.descrizione}>
                                 {riga.articolo.descrizione}
                               </span>
                             </div>
@@ -2060,42 +2147,42 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Quantità */}
-                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
-                          <span className="font-bold text-orange-400 bg-orange-950/60 px-2 py-0.5 rounded border border-orange-800/40">
+                        <td className="py-2 px-2 text-center whitespace-nowrap">
+                          <span className="font-bold text-orange-400 bg-orange-950/60 px-2 py-0.5 rounded border border-orange-800/40 text-[11px]">
                             {riga.quantita} {riga.articolo?.unita_misura || 'pz'}
                           </span>
                         </td>
 
                         {/* Prezzo Unitario */}
-                        <td className="py-2.5 px-2.5 text-right font-mono text-slate-300 whitespace-nowrap">
+                        <td className="py-2 px-2 text-right font-mono text-slate-300 whitespace-nowrap text-xs">
                           € {riga.prezzo_unitario?.toFixed(2) || '0.00'}
                         </td>
 
                         {/* Totale Riga */}
-                        <td className="py-2.5 px-2.5 text-right font-mono font-semibold text-slate-200 whitespace-nowrap">
+                        <td className="py-2 px-2 text-right font-mono font-semibold text-slate-200 whitespace-nowrap text-xs">
                           € {totaleImportoRiga.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
 
-                        {/* Scadenza */}
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          {isFirstRowOfOrder ? (
-                            <div className="inline-flex items-center gap-1 text-slate-300 font-medium">
-                              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        {/* Scadenza Specifica Riga */}
+                        <td className="py-2 px-2 text-center whitespace-nowrap">
+                          {dataConsegnaEffettiva ? (
+                            <div className="inline-flex items-center gap-1 text-slate-200 font-medium text-[11px] bg-slate-950/70 px-2 py-0.5 rounded border border-slate-800">
+                              <Clock className="w-3 h-3 text-amber-400 shrink-0" />
                               <span>
-                                {new Date(ordine.data_consegna_concordata).toLocaleDateString('it-IT', {
+                                {new Date(dataConsegnaEffettiva).toLocaleDateString('it-IT', {
                                   day: '2-digit',
-                                  month: 'short',
+                                  month: '2-digit',
                                   year: 'numeric'
                                 })}
                               </span>
                             </div>
                           ) : (
-                            <span className="text-slate-600 text-xs">〃</span>
+                            <span className="text-slate-600 text-xs">-</span>
                           )}
                         </td>
 
                         {/* Stato */}
-                        <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                        <td className="py-2 px-2 text-center whitespace-nowrap">
                           {isFirstRowOfOrder ? (
                             <span
                               className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
@@ -2114,7 +2201,7 @@ export default function OrdiniPage() {
                         </td>
 
                         {/* Azione OdP */}
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <td className="py-2 px-2.5 text-center whitespace-nowrap">
                           {odpTrovatiPerRiga.length > 0 ? (
                             <div className="flex flex-col items-center justify-center gap-1">
                               {odpTrovatiPerRiga.map((currOdp) => {
@@ -2179,12 +2266,12 @@ export default function OrdiniPage() {
                                   <Link
                                     key={currOdp.id}
                                     href={`/produzione/${currOdp.id}`}
-                                    className={`inline-flex items-center justify-between gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all min-w-[170px] ${stileBadge}`}
+                                    className={`inline-flex items-center justify-between gap-1 px-2 py-0.5 rounded-lg text-xs font-bold border transition-all min-w-[150px] ${stileBadge}`}
                                     title={`OdP: ${currOdp.codice_odp} - ${testoStato}`}
                                   >
                                     <div className="flex items-center gap-1">
-                                      <span>{iconaStato}</span>
-                                      <span className="font-mono">{currOdp.codice_odp}</span>
+                                      <span className="text-[11px]">{iconaStato}</span>
+                                      <span className="font-mono text-xs">{currOdp.codice_odp}</span>
                                     </div>
                                     <div className="flex items-center gap-1">
                                       <span className="font-semibold text-[10px] opacity-85">{testoStato}</span>
@@ -2220,40 +2307,77 @@ export default function OrdiniPage() {
             </div>
           </div>
 
-          {/* Paginazione Vista Tabella (a 25 righe articolo per pagina) */}
-          {totalePagineTabella > 1 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg">
-              <div className="text-xs text-slate-400 font-semibold">
-                Mostrati da <span className="text-white font-bold">{Math.min(inizioTabella + 1, totaleRigheTabella)}</span> a{' '}
-                <span className="text-white font-bold">{Math.min(inizioTabella + RIGHE_PER_PAGINA_TABELLA, totaleRigheTabella)}</span> di{' '}
-                <span className="text-orange-400 font-bold">{totaleRigheTabella}</span> articoli in commessa
-              </div>
-
+          {/* BARRA CONTROLLI PAGINAZIONE INTELLIGENTE VISTA TABELLA */}
+          {totaleRigheTabella > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-900/80 border border-slate-800 rounded-2xl shadow-lg text-xs text-slate-400">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaginaTabella((prev) => Math.max(prev - 1, 1))}
-                  disabled={paginaTabella === 1}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border border-slate-700"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  <span>Precedenti</span>
-                </button>
-
-                <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-orange-400">
-                  Pagina {paginaTabella} / {totalePagineTabella}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setPaginaTabella((prev) => Math.min(prev + 1, totalePagineTabella))}
-                  disabled={paginaTabella === totalePagineTabella}
-                  className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-orange-600/30"
-                >
-                  <span>Successivi 25</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
+                <span>
+                  Visualizzati <strong className="text-white">{inizioTabella + 1} - {fineTabella}</strong> di{' '}
+                  <strong className="text-orange-400">{totaleRigheTabella}</strong> articoli in commessa
+                </span>
+                <span className="text-slate-600">•</span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <span>Mostra:</span>
+                  <select
+                    value={righePerPagina}
+                    onChange={(e) => setRighePerPagina(Number(e.target.value))}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 font-semibold focus:outline-none focus:border-orange-500 cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
               </div>
+
+              {totalePagineTabella > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={paginaTabella === 1}
+                    onClick={() => setPaginaTabella((prev) => Math.max(1, prev - 1))}
+                    className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Precedente"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalePagineTabella }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === totalePagineTabella || Math.abs(p - paginaTabella) <= 1)
+                      .map((p, idx, array) => {
+                        const showEllipsis = idx > 0 && p - array[idx - 1] > 1
+                        return (
+                          <div key={p} className="flex items-center gap-1">
+                            {showEllipsis && <span className="px-1 text-slate-600 font-bold">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setPaginaTabella(p)}
+                              className={`w-7 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                paginaTabella === p
+                                  ? 'bg-orange-600 text-white shadow-xs font-bold'
+                                  : 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </div>
+                        )
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paginaTabella === totalePagineTabella}
+                    onClick={() => setPaginaTabella((prev) => Math.min(totalePagineTabella, prev + 1))}
+                    className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                    title="Pagina Successiva"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2571,7 +2695,7 @@ export default function OrdiniPage() {
       {/* MODALE NUOVO ORDINE CLIENTE (MULTI-RIGA) */}
       {modaleAperta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <ShoppingCart className="w-5 h-5 text-orange-500" />
@@ -2682,37 +2806,32 @@ export default function OrdiniPage() {
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Cliente Registrato
-                </label>
-                <select
-                  value={formOrdine.cliente_id}
-                  onChange={(e) => setFormOrdine({ ...formOrdine, cliente_id: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-orange-500"
-                >
-                  <option value="">-- Seleziona o inserisci nuovo sotto --</option>
-                  {clienti.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.ragione_sociale} {c.partita_iva ? `(${c.partita_iva})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {!formOrdine.cliente_id && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Oppure Ragione Sociale Nuovo Cliente:
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Cliente Intestatario Commessa *
                   </label>
-                  <input
-                    type="text"
-                    placeholder="es: Meccanica Industriale S.p.A."
-                    value={formOrdine.nuovo_cliente_nome}
-                    onChange={(e) => setFormOrdine({ ...formOrdine, nuovo_cliente_nome: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-orange-500"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => handleApriNuovoCliente()}
+                    className="text-[11px] font-bold text-orange-400 hover:text-orange-300 transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Crea Nuovo Cliente</span>
+                  </button>
                 </div>
-              )}
+                <SelettoreClienteRicerca
+                  clienti={clienti}
+                  clienteIdSelezionato={formOrdine.cliente_id}
+                  onSeleziona={(c) => {
+                    setFormOrdine((prev) => ({
+                      ...prev,
+                      cliente_id: c ? c.id : '',
+                      nuovo_cliente_nome: ''
+                    }))
+                  }}
+                  placeholder="Digita per cercare il cliente per ragione sociale o P.IVA..."
+                />
+              </div>
 
               {/* SEZIONE ARTICOLI DELLA COMMESSA */}
               <div className="space-y-3 pt-2">
@@ -2727,7 +2846,13 @@ export default function OrdiniPage() {
                         ...formOrdine,
                         righe: [
                           ...formOrdine.righe,
-                          { pos_riga_cliente: String(formOrdine.righe.length + 1), articolo_id: '', quantita: 0, prezzo_unitario: 0 }
+                          {
+                            pos_riga_cliente: String(formOrdine.righe.length + 1),
+                            data_consegna_riga: formOrdine.data_consegna_concordata || '',
+                            articolo_id: '',
+                            quantita: 0,
+                            prezzo_unitario: 0
+                          }
                         ]
                       })
                     }}
@@ -2765,11 +2890,11 @@ export default function OrdiniPage() {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] text-emerald-400 mb-0.5">Item/Pos. Cliente</label>
+                        <div className="sm:col-span-1">
+                          <label className="block text-[10px] text-emerald-400 mb-0.5">Item</label>
                           <input
                             type="text"
-                            placeholder="es. 1, 10"
+                            placeholder="1"
                             value={riga.pos_riga_cliente || ''}
                             onChange={(e) => {
                               const nuoveRighe = [...formOrdine.righe]
@@ -2779,8 +2904,8 @@ export default function OrdiniPage() {
                             className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-emerald-900/70 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
                           />
                         </div>
-                        <div className="sm:col-span-5">
-                          <label className="block text-[10px] text-slate-400 mb-0.5">Articolo * (Cerca codice o descrizione)</label>
+                        <div className="sm:col-span-4">
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Articolo *</label>
                           <SelettoreArticoloRicerca
                             articoli={articoli}
                             articoloIdSelezionato={riga.articolo_id}
@@ -2793,11 +2918,11 @@ export default function OrdiniPage() {
                               }
                               setFormOrdine({ ...formOrdine, righe: nuoveRighe })
                             }}
-                            placeholder="Digita codice o nome articolo..."
+                            placeholder="Cerca articolo..."
                           />
                         </div>
 
-                        <div className="sm:col-span-3">
+                        <div className="sm:col-span-2">
                           <label className="block text-[10px] text-slate-400 mb-0.5">Quantità *</label>
                           <input
                             type="number"
@@ -2810,7 +2935,7 @@ export default function OrdiniPage() {
                               nuoveRighe[index].quantita = e.target.value === '' ? 0 : Number(e.target.value)
                               setFormOrdine({ ...formOrdine, righe: nuoveRighe })
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500 font-bold text-orange-400"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500 font-bold text-orange-400 font-mono"
                           />
                         </div>
 
@@ -2827,7 +2952,24 @@ export default function OrdiniPage() {
                               nuoveRighe[index].prezzo_unitario = Number(e.target.value)
                               setFormOrdine({ ...formOrdine, righe: nuoveRighe })
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100 focus:outline-none focus:border-orange-500 font-mono"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] text-amber-400 mb-0.5 flex items-center justify-between">
+                            <span>Scadenza Riga</span>
+                          </label>
+                          <input
+                            type="date"
+                            value={riga.data_consegna_riga || formOrdine.data_consegna_concordata || ''}
+                            onChange={(e) => {
+                              const nuoveRighe = [...formOrdine.righe]
+                              nuoveRighe[index].data_consegna_riga = e.target.value
+                              setFormOrdine({ ...formOrdine, righe: nuoveRighe })
+                            }}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-amber-900/60 text-xs text-amber-200 font-mono focus:outline-none focus:border-amber-500"
+                            title="Scadenza di consegna specifica per questo particolare"
                           />
                         </div>
                       </div>

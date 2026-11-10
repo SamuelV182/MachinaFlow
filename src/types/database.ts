@@ -178,6 +178,7 @@ export interface RigaOrdineCliente {
   quantita: number
   prezzo_unitario?: number
   pos_riga_cliente?: string | number // Item/riga commessa cliente (es. 1, 10, Pos. A)
+  data_consegna_riga?: string // Data scadenza specifica per la riga singola (se diversa dalla testata ordine)
   articolo?: Articolo
 }
 
