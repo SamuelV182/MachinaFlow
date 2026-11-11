@@ -1434,7 +1434,7 @@ export default function OrdiniPage() {
 
       {/* Barra Filtri, Ricerca e Toggle Vista */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
           {[
             { id: 'tutti', label: 'Tutti gli Ordini' },
             { id: 'confermato', label: 'Confermati (Da Lanciare)' },
@@ -1446,7 +1446,7 @@ export default function OrdiniPage() {
             <button
               key={tab.id}
               onClick={() => setFiltroStato(tab.id)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
                 filtroStato === tab.id
                   ? 'bg-orange-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -1457,7 +1457,7 @@ export default function OrdiniPage() {
           ))}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {/* Selettore Vista Cards / Lista */}
           <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800 shrink-0">
             <button
@@ -2007,9 +2007,9 @@ export default function OrdiniPage() {
       {/* Elenco Ordini Clienti - Vista a Lista (Tabella Paginata per Righe Articolo) */}
       {modalitaVista === 'tabella' && (
         <div className="space-y-4">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse min-w-[1050px]">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl shadow-xl">
+            <div className="overflow-x-auto overflow-y-hidden rounded-2xl">
+              <table className="w-full text-left text-xs border-collapse min-w-[1100px]">
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-950/90 text-slate-400 uppercase tracking-wider font-semibold text-[11px]">
                     <th className="py-2.5 px-2.5 w-10 text-center whitespace-nowrap">
@@ -2032,7 +2032,7 @@ export default function OrdiniPage() {
                     <th className="py-2.5 px-2 text-right whitespace-nowrap">Totale Riga</th>
                     <th className="py-2.5 px-2 text-center whitespace-nowrap">Scadenza</th>
                     <th className="py-2.5 px-2 text-center whitespace-nowrap">Stato</th>
-                    <th className="py-2.5 px-2.5 text-center whitespace-nowrap">Azione OdP</th>
+                    <th className="py-2.5 px-3 text-center whitespace-nowrap">Azione OdP</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80 text-slate-300">
@@ -2084,12 +2084,12 @@ export default function OrdiniPage() {
                           )}
                         </td>
 
-                        {/* Numero Ordine */}
-                        <td className="py-2 px-2.5 font-mono font-bold text-orange-400 whitespace-nowrap">
-                          {isFirstRowOfOrder ? (
-                            <div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs">{ordine.numero_ordine}</span>
+                        {/* Numero Ordine & Commessa */}
+                        <td className="py-2 px-2.5 font-mono whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-orange-400 text-xs">{ordine.numero_ordine}</span>
+                            {isFirstRowOfOrder && (
+                              <>
                                 <button
                                   type="button"
                                   onClick={() => handleRichiediModificaOrdine(ordine)}
@@ -2106,34 +2106,30 @@ export default function OrdiniPage() {
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
-                              </div>
-                              <span className="block text-[10px] text-slate-500 font-sans font-normal">
-                                {ordine.righe.length} {ordine.righe.length === 1 ? 'art.' : 'artt.'}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-600 text-[10px] font-mono">↳ {ordine.numero_ordine}</span>
+                              </>
+                            )}
+                          </div>
+                          {ordine.riferimento_ordine_cliente && (
+                            <span className="block text-[10px] text-emerald-400/90 font-mono truncate max-w-[120px]" title={ordine.riferimento_ordine_cliente}>
+                              Rif: {ordine.riferimento_ordine_cliente}
+                            </span>
                           )}
                         </td>
 
                         {/* Cliente */}
-                        <td className="py-2 px-2.5 whitespace-nowrap max-w-[200px]">
-                          {isFirstRowOfOrder ? (
-                            <div className="flex items-center gap-1.5 truncate">
-                              <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate font-semibold text-white" title={ordine.cliente?.ragione_sociale}>
-                                {ordine.cliente ? ordine.cliente.ragione_sociale : 'Cliente Sconosciuto'}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-600 text-xs pl-5">〃</span>
-                          )}
+                        <td className="py-2 px-2.5 whitespace-nowrap max-w-[180px]">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate font-semibold text-white text-xs" title={ordine.cliente?.ragione_sociale}>
+                              {ordine.cliente ? ordine.cliente.ragione_sociale : 'Cliente Sconosciuto'}
+                            </span>
+                          </div>
                         </td>
 
                         {/* Articolo */}
-                        <td className="py-2 px-2.5 max-w-[280px]">
+                        <td className="py-2 px-2.5 max-w-[260px]">
                           {riga.articolo ? (
-                            <div className="space-y-0.5">
+                            <div className="space-y-0.5 min-w-0">
                               <span className="font-mono font-semibold text-white block text-xs truncate" title={riga.articolo.codice_articolo}>
                                 {riga.articolo.codice_articolo}
                               </span>
@@ -2183,27 +2179,35 @@ export default function OrdiniPage() {
 
                         {/* Stato */}
                         <td className="py-2 px-2 text-center whitespace-nowrap">
-                          {isFirstRowOfOrder ? (
-                            <span
-                              className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                                ordine.stato === 'in_produzione'
-                                  ? 'bg-blue-950 text-blue-300 border border-blue-800'
-                                  : ordine.stato === 'evaso'
-                                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                                  : 'bg-amber-950 text-amber-300 border border-amber-800'
-                              }`}
-                            >
-                              {ordine.stato.replace('_', ' ')}
-                            </span>
-                          ) : (
-                            <span className="text-slate-600 text-xs">〃</span>
-                          )}
+                          <span
+                            className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full inline-block ${
+                              ordine.stato === 'in_produzione'
+                                ? 'bg-blue-950 text-blue-300 border border-blue-800'
+                                : ordine.stato === 'evaso'
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                : ordine.stato === 'pronto_spedizione'
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-600'
+                                : ordine.stato === 'parzialmente_pronto'
+                                ? 'bg-teal-950 text-teal-300 border border-teal-700'
+                                : ordine.stato === 'parzialmente_evaso'
+                                ? 'bg-purple-950 text-purple-300 border border-purple-800'
+                                : 'bg-amber-950 text-amber-300 border border-amber-800'
+                            }`}
+                          >
+                            {ordine.stato === 'pronto_spedizione'
+                              ? 'PRONTO SPED.'
+                              : ordine.stato === 'parzialmente_pronto'
+                              ? 'PARZ. PRONTO'
+                              : ordine.stato === 'parzialmente_evaso'
+                              ? 'PARZ. EVASO'
+                              : ordine.stato.replace('_', ' ')}
+                          </span>
                         </td>
 
                         {/* Azione OdP */}
-                        <td className="py-2 px-2.5 text-center whitespace-nowrap">
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           {odpTrovatiPerRiga.length > 0 ? (
-                            <div className="flex flex-col items-center justify-center gap-1">
+                            <div className="flex flex-col items-center justify-center gap-1.5">
                               {odpTrovatiPerRiga.map((currOdp) => {
                                 const fasiOdp = currOdp.fasi || []
                                 const fasiChiuse = fasiOdp.filter((f) => f.stato === 'completata').length
@@ -2240,53 +2244,68 @@ export default function OrdiniPage() {
                                 const isSpeditoRigaTab = quantitaSpeditaRiga >= riga.quantita && quantitaSpeditaRiga > 0
                                 const isSpedito = isSpeditoQuestoOdpTab || isSpeditoRigaTab
 
-                                let stileBadge = 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30'
+                                let stileBadge = 'bg-blue-950/70 text-blue-300 border-blue-800'
                                 let testoStato = 'In Lavorazione'
-                                let iconaStato = '⚙️'
+                                let dotColor = 'bg-blue-400'
 
                                 if (isSpedito) {
-                                  stileBadge = 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-600/50'
+                                  stileBadge = 'bg-emerald-950/80 text-emerald-300 border-emerald-700'
                                   testoStato = `Spedito (${etichettaDdtTab})`
-                                  iconaStato = '✓'
+                                  dotColor = 'bg-emerald-400'
                                 } else if (tutteChiuse || currOdp.stato === 'completato') {
-                                  stileBadge = 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40'
-                                  testoStato = 'Pronto'
-                                  iconaStato = '✨'
+                                  stileBadge = 'bg-emerald-950/70 text-emerald-300 border-emerald-700'
+                                  testoStato = 'Pronto per Consegna'
+                                  dotColor = 'bg-emerald-400'
+                                } else if (currOdp.stato === 'sospeso') {
+                                  stileBadge = 'bg-amber-950/70 text-amber-300 border-amber-600'
+                                  testoStato = 'In Standby'
+                                  dotColor = 'bg-amber-400 animate-pulse'
+                                } else if (currOdp.stato === 'scartato') {
+                                  stileBadge = 'bg-rose-950/70 text-rose-300 border-rose-800'
+                                  testoStato = 'Annullato'
+                                  dotColor = 'bg-rose-400'
                                 } else if (fasiChiuse > 0 || currOdp.stato === 'in_lavorazione') {
-                                  stileBadge = 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border-amber-500/30'
-                                  testoStato = totFasi > 0 ? `${fasiChiuse}/${totFasi}` : 'In corso'
-                                  iconaStato = '⚙️'
+                                  stileBadge = 'bg-amber-950/70 text-amber-300 border-amber-700'
+                                  testoStato = totFasi > 0 ? `In corso (${fasiChiuse}/${totFasi} fasi)` : 'In lavorazione'
+                                  dotColor = 'bg-amber-400'
                                 } else if (currOdp.stato === 'pianificato') {
-                                  stileBadge = 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700'
+                                  stileBadge = 'bg-slate-900 text-slate-300 border-slate-700'
                                   testoStato = 'Pianificato'
-                                  iconaStato = '⏳'
+                                  dotColor = 'bg-slate-400'
                                 }
 
                                 return (
-                                  <Link
+                                  <div
                                     key={currOdp.id}
-                                    href={`/produzione/${currOdp.id}`}
-                                    className={`inline-flex items-center justify-between gap-1 px-2 py-0.5 rounded-lg text-xs font-bold border transition-all min-w-[150px] ${stileBadge}`}
-                                    title={`OdP: ${currOdp.codice_odp} - ${testoStato}`}
+                                    className="flex flex-col items-center gap-1 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-all shadow-xs"
                                   >
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-[11px]">{iconaStato}</span>
-                                      <span className="font-mono text-xs">{currOdp.codice_odp}</span>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      <span className="font-semibold text-[10px] opacity-85">{testoStato}</span>
-                                      <ArrowRight className="w-3 h-3 opacity-60" />
-                                    </div>
-                                  </Link>
+                                    {/* Riga Superiore: Codice OdP cliccabile */}
+                                    <Link
+                                      href={`/produzione/${currOdp.id}`}
+                                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono font-bold text-xs text-orange-400 hover:text-white hover:bg-orange-600/30 transition-all cursor-pointer"
+                                      title="Apri scheda OdP"
+                                    >
+                                      <span>{currOdp.codice_odp}</span>
+                                      <ArrowRight className="w-3 h-3 text-slate-400" />
+                                    </Link>
+
+                                    {/* Riga Inferiore: Badge Stato / Fasi chiaro e leggibile */}
+                                    <span
+                                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${stileBadge}`}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                                      <span>{testoStato}</span>
+                                    </span>
+                                  </div>
                                 )
                               })}
                             </div>
                           ) : (
                             <button
                               onClick={() => handleGeneraOdP(ordine, riga)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-bold shadow-sm shadow-orange-600/30 transition-all cursor-pointer group"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-bold shadow-md shadow-orange-600/30 transition-all cursor-pointer group whitespace-nowrap active:scale-95"
                             >
-                              <Factory className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+                              <Factory className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform shrink-0" />
                               <span>Lancia OdP</span>
                             </button>
                           )}

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
-import { Printer, Download, Truck, CheckCircle2, QrCode, FileText, ExternalLink, Eye } from 'lucide-react'
+import { Printer, Download, Truck, CheckCircle2, QrCode, FileText, ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { DocumentoTrasportoEsterno, DocumentoTrasportoCliente, OrdineCliente, Azienda } from '@/types/database'
 import { generaDdtPdf } from '@/lib/pdf-ddt-service'
 import { createClient } from '@/lib/supabase/client'
@@ -19,80 +19,99 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
   const terzistaDdt = !isCliente ? (ddt as DocumentoTrasportoEsterno) : null
 
   const supabase = createClient()
-  const [azienda, setAzienda] = useState<Azienda | null>(null)
-  const [logoBase64, setLogoBase64] = useState<string | null>(null)
 
-  // URL del PDF generato dal template predefinito (< 0.1s)
+  // Inizializza SINCRONAMENTE l'azienda dalla cache per azzerare i render a catena
+  const [azienda, setAzienda] = useState<Azienda | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const azCache = localStorage.getItem('machinaflow_session_azienda_dati')
+      if (azCache) return JSON.parse(azCache)
+    } catch {}
+    return null
+  })
+
+  const [logoBase64, setLogoBase64] = useState<string | null>(null)
+  const [datiPronti, setDatiPronti] = useState<boolean>(false)
+
+  // URL del PDF generato dal template
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [isMobile, setIsMobile] = useState<boolean>(false)
+
+  // Opzione: Mostra prezzi nel DDT (con persistenza)
+  const [mostraPrezzi, setMostraPrezzi] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      const saved = localStorage.getItem('machinaflow_ddt_mostra_prezzi')
+      if (saved !== null) return saved === 'true'
+    } catch {}
+    return true
+  })
+
+  const toggleMostraPrezzi = () => {
+    setMostraPrezzi((prev) => {
+      const nuovoValore = !prev
+      try {
+        localStorage.setItem('machinaflow_ddt_mostra_prezzi', String(nuovoValore))
+      } catch {}
+      return nuovoValore
+    })
+  }
 
   const ddtId = ddt.id || ddt.numero_ddt
   const ordiniCount = ordiniClienti?.length || 0
 
-  // Precarica il logo come Base64 per jsPDF
+  // 1. Precarica il logo come Base64 una sola volta all'avvio
   useEffect(() => {
-    if (!azienda?.logo_url) {
-      setLogoBase64(null)
-      return
+    let isMounted = true
+
+    const caricaLogo = async () => {
+      if (!azienda?.logo_url) {
+        if (isMounted) {
+          setLogoBase64(null)
+          setDatiPronti(true)
+        }
+        return
+      }
+
+      try {
+        const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(azienda.logo_url)}`
+        const res = await fetch(proxyUrl)
+        if (res.ok) {
+          const blob = await res.blob()
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            if (isMounted && typeof reader.result === 'string') {
+              setLogoBase64(reader.result)
+              setDatiPronti(true)
+            }
+          }
+          reader.readAsDataURL(blob)
+          return
+        }
+      } catch {}
+
+      // Fallback: se fallisce il proxy, segna comunque dati pronti per evitare blocchi
+      if (isMounted) setDatiPronti(true)
     }
 
-    let isMounted = true
-    const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(azienda.logo_url)}`
-
-    fetch(proxyUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error('Errore fetch proxy')
-        return res.blob()
-      })
-      .then((blob) => {
-        const reader = new FileReader()
-        reader.onloadend = () => {
-          if (isMounted && typeof reader.result === 'string') {
-            setLogoBase64(reader.result)
-          }
-        }
-        reader.readAsDataURL(blob)
-      })
-      .catch(() => {
-        // Fallback: prova caricamento diretto via Image
-        const img = new Image()
-        img.crossOrigin = 'Anonymous'
-        img.onload = () => {
-          const canvas = document.createElement('canvas')
-          canvas.width = img.width
-          canvas.height = img.height
-          const ctx = canvas.getContext('2d')
-          if (ctx) {
-            ctx.drawImage(img, 0, 0)
-            try {
-              if (isMounted) setLogoBase64(canvas.toDataURL('image/png'))
-            } catch {}
-          }
-        }
-        if (azienda?.logo_url) {
-          img.src = azienda.logo_url
-        }
-      })
+    caricaLogo()
 
     return () => {
       isMounted = false
     }
   }, [azienda?.logo_url])
 
-  // Recupera i dati dell'azienda corrente per l'intestazione personalizzata
+  // 2. Controllo dati azienda in background solo se mancanti in cache
   useEffect(() => {
-    // 1. Tenta subito da cache locale per evitare il "lampo" con dati demo
-    try {
-      const azCache = localStorage.getItem('machinaflow_session_azienda_dati')
-      if (azCache) {
-        setAzienda(JSON.parse(azCache))
-      }
-    } catch {}
+    if (azienda) return // Se già presente dalla cache sincrona, non fare nulla (0 render)
 
-    const caricaAzienda = async () => {
+    const caricaAziendaAsync = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
+        if (!user) {
+          setDatiPronti(true)
+          return
+        }
 
         let azId = ''
         try {
@@ -122,15 +141,17 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
             localStorage.setItem('machinaflow_session_azienda_dati', JSON.stringify(azData))
           } catch {}
         }
-      } catch (err) {
-        console.warn('Recupero azienda per DDT fallback:', err)
+      } catch {
+      } finally {
+        setDatiPronti(true)
       }
     }
-    caricaAzienda()
-  }, [supabase])
+
+    caricaAziendaAsync()
+  }, [supabase, azienda])
 
   useEffect(() => {
-    // Rileva smartphone/tablet dove il browser non supporta il rendering dei PDF in iframe
+    // Rileva smartphone/tablet
     if (typeof window !== 'undefined') {
       const ua = navigator.userAgent || ''
       const mobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || window.innerWidth < 768
@@ -138,9 +159,15 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
     }
   }, [])
 
+  // 3. Generazione PDF ESEGUITA UNA SOLA VOLTA quando i dati sono consolidati
   useEffect(() => {
+    if (!datiPronti && azienda?.logo_url) {
+      // Attendi che il logo sia pronto per non fare un doppio render dell'iframe
+      return
+    }
+
     try {
-      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64)
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64, mostraPrezzi)
       const blobUrl = doc.output('bloburl')
       setPdfUrl(String(blobUrl))
 
@@ -150,12 +177,12 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
     } catch (e) {
       console.error('Errore generazione PDF DDT:', e)
     }
-  }, [ddtId, isCliente, ordiniCount, azienda, logoBase64])
+  }, [ddtId, isCliente, ordiniCount, azienda, logoBase64, datiPronti, mostraPrezzi])
 
   // Scarica direttamente il file PDF già pronto
   const handleScaricaPdf = () => {
     try {
-      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64)
+      const doc = generaDdtPdf(ddt, isCliente ? 'cliente' : 'terzista', ordiniClienti, azienda, logoBase64, mostraPrezzi)
       doc.save(`${ddt.numero_ddt || 'DDT'}.pdf`)
     } catch {
       window.print()
@@ -308,6 +335,22 @@ export default function SchedaDDTStampabile({ ddt, tipo = 'terzista', ordiniClie
           </div>
 
           <div className="flex items-center gap-2">
+            {isCliente && (
+              <button
+                type="button"
+                onClick={toggleMostraPrezzi}
+                className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border ${
+                  mostraPrezzi
+                    ? 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-emerald-500/30'
+                    : 'bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border-amber-600/40'
+                }`}
+                title={mostraPrezzi ? 'Prezzi e totali visibili nel DDT' : 'Prezzi e totali non compilati nel DDT'}
+              >
+                {mostraPrezzi ? <Eye className="w-4 h-4 text-emerald-400" /> : <EyeOff className="w-4 h-4 text-amber-400" />}
+                <span>{mostraPrezzi ? 'Prezzi: Visibili' : 'Prezzi: Nascosti'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleDownloadCsv}

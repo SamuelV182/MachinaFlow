@@ -194,7 +194,7 @@ function AppShellContent({ children }: { children: React.ReactNode }) {
         />
         <main
           className={`flex-1 p-4 sm:p-6 lg:p-8 w-full mx-auto transition-all print:p-0 print:m-0 print:max-w-full ${
-            isSidebarCollassata ? 'max-w-[1550px]' : 'max-w-7xl'
+            isSidebarCollassata ? 'max-w-[1850px]' : 'max-w-[1750px]'
           }`}
         >
           {children}

@@ -7,7 +7,8 @@ export function generaDdtPdf(
   tipo: 'cliente' | 'terzista',
   ordiniClienti: OrdineCliente[] = [],
   azienda?: Azienda | null,
-  logoBase64?: string | null
+  logoBase64?: string | null,
+  mostraPrezzi: boolean = true
 ): jsPDF {
   const isCliente = tipo === 'cliente' || 'cliente_nome' in ddt
   const clienteDdt = isCliente ? (ddt as DocumentoTrasportoCliente) : null
@@ -214,6 +215,9 @@ export function generaDdtPdf(
         } catch {}
       }
 
+      const prezzoTxt = mostraPrezzi ? (prezzoUnitario > 0 ? `€ ${prezzoUnitario.toFixed(2)}` : '€ 0,00') : '-'
+      const totRigaTxt = mostraPrezzi ? (totRiga > 0 ? `€ ${totRiga.toFixed(2)}` : '€ 0,00') : '-'
+
       righeDati.push([
         `${labelPos}${labelOdp}`,
         commessa || '-',
@@ -221,8 +225,8 @@ export function generaDdtPdf(
         descArt || 'Particolare Meccanico',
         r.note_riga || (r.quantita_ordinata ? `Saldo (${r.quantita_spedita}/${r.quantita_ordinata})` : 'Consegna'),
         `${r.quantita_spedita} ${r.unita_misura}`,
-        prezzoUnitario > 0 ? `€ ${prezzoUnitario.toFixed(2)}` : '€ 0,00',
-        totRiga > 0 ? `€ ${totRiga.toFixed(2)}` : '€ 0,00'
+        prezzoTxt,
+        totRigaTxt
       ])
     })
   } else if (terzistaDdt) {
@@ -303,13 +307,17 @@ export function generaDdtPdf(
 
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(colorDark[0], colorDark[1], colorDark[2])
-    doc.text(`€ ${totaleImponibileDoc.toFixed(2)}`, xTot + wTot - 3, currentY + 4.5, { align: 'right' })
-    doc.text(`€ ${totaleIvaDoc.toFixed(2)}`, xTot + wTot - 3, currentY + 9, { align: 'right' })
+    const imponibileTxt = mostraPrezzi ? `€ ${totaleImponibileDoc.toFixed(2)}` : '-'
+    const ivaTxt = mostraPrezzi ? `€ ${totaleIvaDoc.toFixed(2)}` : '-'
+    const totDocTxt = mostraPrezzi ? `€ ${totaleFinaleDoc.toFixed(2)}` : '-'
+
+    doc.text(imponibileTxt, xTot + wTot - 3, currentY + 4.5, { align: 'right' })
+    doc.text(ivaTxt, xTot + wTot - 3, currentY + 9, { align: 'right' })
 
     doc.setFontSize(8.5)
     doc.setTextColor(colorPrimario[0], colorPrimario[1], colorPrimario[2])
     doc.text('TOTALE DOCUMENTO:', xTot + 3, currentY + 13.5)
-    doc.text(`€ ${totaleFinaleDoc.toFixed(2)}`, xTot + wTot - 3, currentY + 13.5, { align: 'right' })
+    doc.text(totDocTxt, xTot + wTot - 3, currentY + 13.5, { align: 'right' })
 
     currentY += 19
   }
