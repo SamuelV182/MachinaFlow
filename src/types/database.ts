@@ -71,9 +71,12 @@ export interface TipoProcesso {
   creato_il: string
 }
 
+export type TipoFornitore = 'materia_prima' | 'terzista_lavorazioni' | 'utensileria' | 'commerciale'
+
 export interface FornitoreTerzista {
   id: string
   ragione_sociale: string
+  tipo_fornitore?: TipoFornitore
   partita_iva?: string
   codice_fiscale?: string
   indirizzo?: string
@@ -82,7 +85,11 @@ export interface FornitoreTerzista {
   provincia?: string
   telefono?: string
   email?: string
-  specialita?: string // es. 'Zincatura', 'Trattamenti Termici', 'Anodizzazione', 'Verniciatura', 'Brunitura'
+  pec?: string
+  referente_commerciale?: string
+  specialita?: string // es. 'Zincatura', 'Acciai Speciali', 'Alluminio', 'Trattamenti Termici'
+  note?: string
+  creato_il?: string
 }
 
 export type ModelloTariffaEsterna = 'peso_kg' | 'superficie_dm2' | 'superficie_m2' | 'pezzo_fisso' | 'lotto_forfettario'
@@ -102,15 +109,34 @@ export interface Articolo {
   creato_il: string
 }
 
+export interface RigaOrdineFornitore {
+  id?: string
+  articolo_id: string
+  codice_articolo: string
+  descrizione: string
+  unita_misura: string
+  quantita_ordinata: number
+  prezzo_unitario?: number
+  totale_riga?: number
+  data_arrivo_prevista?: string
+  note_riga?: string
+}
+
 export interface OrdineFornitore {
   id: string
-  articolo_id: string
-  quantita_ordinata: number
+  azienda_id?: string
+  numero_oda?: string // Progressivo univoco (es. ODA-2026-001) per il documento consultabile A4
+  fornitore_id?: string
   fornitore_nome: string
   data_ordine: string
   data_arrivo_prevista: string
-  stato: 'in_ordine' | 'ricevuto' | 'annullato'
+  stato: 'in_ordine' | 'parzialmente_ricevuto' | 'ricevuto' | 'annullato'
   note?: string
+  totale_imponibile?: number
+  righe?: RigaOrdineFornitore[] // Array delle righe articolo per il documento multi-riga
+  // Retro-compatibilità per ordini a riga singola storici
+  articolo_id: string
+  quantita_ordinata: number
   creato_il: string
 }
 

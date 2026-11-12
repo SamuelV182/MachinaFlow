@@ -16,10 +16,13 @@ import {
   Calendar,
   FileSpreadsheet,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Trash2,
+  Undo2
 } from 'lucide-react'
-import { MovimentoMagazzino, TipoMovimentoMagazzino, Articolo } from '@/types/database'
+import { MovimentoMagazzino, TipoMovimentoMagazzino, Articolo, OrdineFornitore } from '@/types/database'
 import { preparaCriterioRicerca, calcolaRilevanzaRicerca } from '@/lib/search-helper'
+import { syncService } from '@/lib/sync-service'
 
 interface RegistroMovimentiTabProps {
   movimenti: MovimentoMagazzino[]
@@ -39,6 +42,8 @@ export function RegistroMovimentiTab({
   // Paginazione Intelligente
   const [paginaCorrente, setPaginaCorrente] = useState<number>(1)
   const [perPagina, setPerPagina] = useState<number>(25)
+  const [inStornoId, setInStornoId] = useState<string | null>(null)
+  const [notifica, setNotifica] = useState<string | null>(null)
 
   // Reset a pagina 1 quando cambiano i filtri
   const impostaFiltroTipo = (tipo: string) => {
@@ -166,6 +171,108 @@ export function RegistroMovimentiTab({
     document.body.removeChild(link)
   }
 
+  // Storno Carico DDT / Annullamento Ricezione Merce da Fornitore
+  const handleStornaCaricoDDT = async (m: MovimentoMagazzino & { articolo?: Articolo }) => {
+    const art = m.articolo || mappaArticoli.get(m.articolo_id)
+    const codiceArt = art?.codice_articolo || m.articolo_id
+    const ddtRif = m.riferimento_documento || 'DDT Fornitore'
+    const qtaDaStornare = Math.abs(m.quantita)
+
+    const conferma = window.confirm(
+      `Confermi lo STORNO del carico di ${qtaDaStornare} ${m.unita_misura || 'pz'} per l'articolo ${codiceArt}?\n\nRiferimento: ${ddtRif}\n\nEffetti:\n1. La giacenza attuale verrà scalata di ${qtaDaStornare}.\n2. Verrà registrato un movimento di storno a fini di tracciabilità.\n3. Se il carico aveva chiuso un ordine fornitore (OdA), l'ordine verrà riaperto nello stato 'in_ordine'.`
+    )
+    if (!conferma) return
+
+    setInStornoId(m.id)
+
+    try {
+      // 1. Calcola e aggiorna giacenza articolo
+      const giacAttuale = art ? art.giacenza_attuale : m.giacenza_risultante
+      const nuovaGiacenza = Number(Math.max(0, giacAttuale - qtaDaStornare).toFixed(2))
+
+      if (art) {
+        const artAggiornato: Articolo = {
+          ...art,
+          giacenza_attuale: nuovaGiacenza
+        }
+        await syncService.salvaArticolo(artAggiornato)
+
+        // Aggiorna cache locale articoli
+        try {
+          const salvati = localStorage.getItem('machinaflow_articoli')
+          if (salvati) {
+            const list: Articolo[] = JSON.parse(salvati)
+            const idx = list.findIndex((a) => a.id === art.id)
+            if (idx >= 0) {
+              list[idx] = artAggiornato
+              localStorage.setItem('machinaflow_articoli', JSON.stringify(list))
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Registra movimento compensatorio di storno nel registro movimenti
+      await syncService.registraMovimentoMagazzino({
+        articolo_id: m.articolo_id,
+        tipo_movimento: 'rettifica_inventario',
+        quantita: -qtaDaStornare,
+        giacenza_precedente: giacAttuale,
+        giacenza_risultante: nuovaGiacenza,
+        unita_misura: m.unita_misura || art?.unita_misura || 'pz',
+        riferimento_documento: `STORNO ${ddtRif}`,
+        lotto_colata: m.lotto_colata,
+        note: `Annullamento/Storno del carico errato ID ${m.id.slice(0, 12)} (${m.note || ''})`
+      })
+
+      // 3. Verifica se c'era un ordine fornitore collegato da riaprire
+      // Cerca in ordini_fornitori sia per OdA citato nelle note, sia per articolo_id arrivato di recente
+      try {
+        const ordini = await syncService.getOrdiniFornitori()
+        // Cerca riferimento OdA nelle note del movimento (es: "Rif. OdA ODA-2026-001" o "Rif. Ordine Fornitore")
+        let ordineDaRiaprire: OrdineFornitore | undefined
+
+        // Pattern regex per trovare ODA-YYYY-XXX
+        const matchOda = (m.note || '').match(/ODA-\d{4}-\d{3}/i)
+        if (matchOda) {
+          const numOdaTrovato = matchOda[0].toUpperCase()
+          ordineDaRiaprire = ordini.find((o) => o.numero_oda?.toUpperCase() === numOdaTrovato && o.stato === 'ricevuto')
+        }
+
+        // Fallback: se non c'è il codice OdA esplicito, cerca l'ultimo ordine ricevuto per questo articolo
+        if (!ordineDaRiaprire) {
+          ordineDaRiaprire = ordini.find(
+            (o) =>
+              o.stato === 'ricevuto' &&
+              (o.articolo_id === m.articolo_id || (o.righe && o.righe.some((r) => r.articolo_id === m.articolo_id)))
+          )
+        }
+
+        if (ordineDaRiaprire) {
+          const ordineRiaperto: OrdineFornitore = {
+            ...ordineDaRiaprire,
+            stato: 'in_ordine'
+          }
+          await syncService.salvaOrdineFornitore(ordineRiaperto)
+        }
+      } catch (errOrd) {
+        console.warn('Avviso recupero/riapertura ordine fornitore:', errOrd)
+      }
+
+      setNotifica(`✓ Carico DDT stornato con successo. Giacenza ${codiceArt} aggiornata a ${nuovaGiacenza}.`)
+      setTimeout(() => setNotifica(null), 5000)
+
+      // Ricarica la lista chiamando il genitore
+      if (onRicarica) {
+        onRicarica()
+      }
+    } catch (e) {
+      console.error('Errore durante lo storno carico DDT:', e)
+      alert('Si è verificato un errore durante lo storno. Riprova.')
+    } finally {
+      setInStornoId(null)
+    }
+  }
+
   // Paginazione
   const totaleMovimenti = movimentiFiltrati.length
   const totalePagine = Math.max(1, Math.ceil(totaleMovimenti / perPagina))
@@ -224,6 +331,19 @@ export function RegistroMovimentiTab({
 
   return (
     <div className="space-y-4">
+      {notifica && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-500/40 rounded-xl text-xs font-semibold text-emerald-300 flex items-center justify-between shadow-lg animate-in fade-in">
+          <span>{notifica}</span>
+          <button
+            type="button"
+            onClick={() => setNotifica(null)}
+            className="text-emerald-400 hover:text-white px-2 py-0.5"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Barra Filtri Rapidi & Export Minimal */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-900/70 p-3 sm:p-4 rounded-2xl border border-slate-800">
         
@@ -312,6 +432,7 @@ export function RegistroMovimentiTab({
                   <th className="p-3 text-right">Giacenza Risultante</th>
                   <th className="p-3">Riferimento / Causale</th>
                   <th className="p-3">Lotto / Colata / Note</th>
+                  <th className="p-3 text-center">Azioni</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -391,6 +512,24 @@ export function RegistroMovimentiTab({
                           </span>
                         )}
                         <span>{m.note || '-'}</span>
+                      </td>
+
+                      {/* Azioni: Storno Carico DDT per carichi fornitore */}
+                      <td className="p-3 text-center whitespace-nowrap">
+                        {m.tipo_movimento === 'carico_fornitore' ? (
+                          <button
+                            type="button"
+                            disabled={inStornoId === m.id}
+                            onClick={() => handleStornaCaricoDDT(m)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 hover:text-white text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40"
+                            title="Storna questo carico DDT: scala la giacenza e riapre l'eventuale ordine fornitore"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>{inStornoId === m.id ? 'Storno...' : 'Storna DDT'}</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-600 text-[11px]">-</span>
+                        )}
                       </td>
                     </tr>
                   )

@@ -19,7 +19,8 @@ import {
   LayoutGrid,
   ChevronLeft,
   ChevronRight,
-  RotateCcw
+  RotateCcw,
+  Sparkles
 } from 'lucide-react'
 import {
   CentroLavoro,
@@ -31,6 +32,7 @@ import {
   ComponenteDistintaBase,
   DocumentoTrasportoCliente
 } from '@/types/database'
+import { eseguiAutoBilanciamentoGlobale } from '@/lib/load-balancer-service'
 import {
   SEED_CENTRI_LAVORO,
   SEED_ODP,
@@ -46,6 +48,7 @@ export default function DashboardPage() {
   const [articoli, setArticoli] = useState<Articolo[]>([])
   const [distinte, setDistinte] = useState<ComponenteDistintaBase[]>([])
   const [ordiniClienti, setOrdiniClienti] = useState<OrdineCliente[]>([])
+  const [notificaBilanciamento, setNotificaBilanciamento] = useState<string | null>(null)
 
   // Orizzonte Temporale Selezionato (Oggi, Settimana, Mese, Trimestre, 6 Mesi)
   type OrizzonteTemporale = 'oggi' | 'settimana' | 'mese' | 'trimestre' | 'semestre'
@@ -241,6 +244,40 @@ export default function DashboardPage() {
       window.removeEventListener('storage', onStorageChange)
     }
   }, [])
+
+  // Esegue l'Auto-Bilanciamento Globale delle Macchine
+  const handleEseguiAutoBilanciamento = async () => {
+    let cicliAttuali: any[] = []
+    try {
+      const cicliRaw = localStorage.getItem('machinaflow_cicli')
+      if (cicliRaw) cicliAttuali = JSON.parse(cicliRaw)
+    } catch {}
+
+    const risultato = eseguiAutoBilanciamentoGlobale(odpList, centriLavoro, cicliAttuali)
+    if (risultato.numeroFasiSpostate === 0) {
+      setNotificaBilanciamento('ℹ️ Tutte le macchine sono già bilanciate in modo ottimale o non hanno alternative sature.')
+      setTimeout(() => setNotificaBilanciamento(null), 4500)
+      return
+    }
+
+    // Salva modifiche in locale
+    setOdpList(risultato.odpModificati)
+    try {
+      localStorage.setItem('machinaflow_odp', JSON.stringify(risultato.odpModificati))
+    } catch {}
+
+    // Salva su Supabase
+    for (const odp of risultato.odpModificati) {
+      syncService.salvaOrdineProduzione(odp)
+    }
+
+    const dettagliTxt = risultato.dettagliSpostamenti
+      .map((d) => `• OdP ${d.codiceOdp} (${d.nomeFase}, ${d.oreFase}h): da ${d.macchinaOrigine} ➔ ${d.macchinaDestinazione} per il ${d.dataTarget}`)
+      .join('\n')
+
+    setNotificaBilanciamento(`✓ Auto-Bilanciamento completato! ${risultato.numeroFasiSpostate} fasi riassegnate su macchine alternative libere.`)
+    setTimeout(() => setNotificaBilanciamento(null), 6000)
+  }
 
   // =========================================================================
   // CALCOLO DINAMICO KPI & CARICO CENTRI DI LAVORO
@@ -644,7 +681,18 @@ export default function DashboardPage() {
             </p>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Pulsante Universale Auto-Bilanciamento Carico */}
+            <button
+              type="button"
+              onClick={handleEseguiAutoBilanciamento}
+              className="px-3.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              title="Analizza i sovraccarichi e dirotta automaticamente le lavorazioni sulle macchine alternative compatibili"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Auto-Bilancia Carico Macchine</span>
+            </button>
+
             {/* Selettore Vista Sintetica vs Matrice Buchi Giornalieri */}
             <div className="flex items-center p-1 bg-slate-950 rounded-xl border border-slate-800">
               <button
@@ -682,6 +730,20 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+
+        {/* Notifica Rapida Esito Auto-Bilanciamento */}
+        {notificaBilanciamento && (
+          <div className="mb-4 p-3 rounded-xl bg-orange-950/40 border border-orange-500/30 text-orange-200 text-xs font-medium flex items-center justify-between animate-fade-in">
+            <span>{notificaBilanciamento}</span>
+            <button
+              type="button"
+              onClick={() => setNotificaBilanciamento(null)}
+              className="text-orange-400 hover:text-white font-bold ml-3"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {vistaCarico === 'sintetica' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

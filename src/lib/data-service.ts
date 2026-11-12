@@ -13,8 +13,56 @@ import {
   DocumentoTrasportoCliente
 } from '@/types/database'
 
-// 0. Anagrafica Fornitori Terzisti Specializzati
+// 0. Anagrafica Fornitori (Materie Prime, Acciai, Alluminio e Terzisti Specializzati)
 export const SEED_FORNITORI_TERZISTI: FornitoreTerzista[] = [
+  {
+    id: 'forn-rodacciai',
+    ragione_sociale: 'Rodacciai S.p.A.',
+    partita_iva: 'IT00201990135',
+    indirizzo: 'Via Roda, 1',
+    citta: 'Bosisio Parini',
+    cap: '23842',
+    provincia: 'LC',
+    telefono: '+39 031 878111',
+    email: 'vendite@rodacciai.com',
+    specialita: 'Acciai Trafilati, Pelati, Rettificati e Inossidabili'
+  },
+  {
+    id: 'forn-eural-gnutti',
+    ragione_sociale: 'Eural Gnutti S.p.A.',
+    partita_iva: 'IT00297680173',
+    indirizzo: 'Via S. Lorenzo, 32',
+    citta: 'Pontevico',
+    cap: '25027',
+    provincia: 'BS',
+    telefono: '+39 030 93701',
+    email: 'commerciale@eural.com',
+    specialita: 'Estrusi, Barre e Tubi in Leghe di Alluminio Anticorodal ed Ergal'
+  },
+  {
+    id: 'forn-lucefin',
+    ragione_sociale: 'Lucefin S.p.A.',
+    partita_iva: 'IT01524380178',
+    indirizzo: 'Via Caduti del Lavoro, 2',
+    citta: 'Esine',
+    cap: '25040',
+    provincia: 'BS',
+    telefono: '+39 0364 3601',
+    email: 'info@lucefin.com',
+    specialita: 'Acciai Finiti a Freddo, Bonificati e Laminati C45'
+  },
+  {
+    id: 'forn-eusider',
+    ragione_sociale: 'Eusider S.p.A.',
+    partita_iva: 'IT01748290132',
+    indirizzo: 'Via Magenta, 27',
+    citta: 'Costa Masnaga',
+    cap: '23845',
+    provincia: 'LC',
+    telefono: '+39 031 858511',
+    email: 'ordini@eusider.com',
+    specialita: 'Tubi Meccanici Senza Saldatura e Lamiere da Treno'
+  },
   {
     id: 'forn-zincatura-veneta',
     ragione_sociale: 'Zincatura Veneta Srl',

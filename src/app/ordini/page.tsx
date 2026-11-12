@@ -45,6 +45,10 @@ import {
   DocumentoTrasportoCliente
 } from '@/types/database'
 import {
+  calcolaMappaCaricoMacchine,
+  selezionaMigliorCentroLavoroPerFase
+} from '@/lib/load-balancer-service'
+import {
   SEED_CLIENTI,
   SEED_ORDINI_CLIENTI,
   SEED_ARTICOLI,
@@ -866,6 +870,36 @@ export default function OrdiniPage() {
           riga.quantita
         )
 
+        // AUTO-BILANCIAMENTO UNIVERSALE SU MACCHINE ALTERNATIVE COMPATIBILI
+        const mappaCaricoAttuale = calcolaMappaCaricoMacchine(tempOdpList, centriLavoro)
+        const fasiBilanciate = fasiEsecutive.map((fase) => {
+          if (fase.is_esterna || !fase.centri_lavoro_alternativi_ids || fase.centri_lavoro_alternativi_ids.length === 0) {
+            return fase
+          }
+          const oreFase = Math.max(0.1, Number(fase.tempo_stimato_totale_min || 60) / 60)
+          const dataTarget = dataInizioOdPCalcolata // data orientativa inizio lavorazione
+          const scelta = selezionaMigliorCentroLavoroPerFase(
+            fase.centro_lavoro_id,
+            fase.centri_lavoro_alternativi_ids,
+            dataTarget,
+            oreFase,
+            mappaCaricoAttuale,
+            centriLavoro
+          )
+
+          if (scelta.eraSaturata && scelta.centroSelezionatoId !== fase.centro_lavoro_id) {
+            const vecchieAlt = fase.centri_lavoro_alternativi_ids || []
+            const nuoveAlt = [fase.centro_lavoro_id, ...vecchieAlt.filter((id) => id !== scelta.centroSelezionatoId)]
+            return {
+              ...fase,
+              centro_lavoro_id: scelta.centroSelezionatoId,
+              centri_lavoro_alternativi_ids: nuoveAlt,
+              note_officina: `${fase.note_officina ? fase.note_officina + ' • ' : ''}[Auto-Bilanciamento carico]`
+            }
+          }
+          return fase
+        })
+
         const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
           id: nuovoOdpId,
           codice_odp: codiceOdp,
@@ -887,7 +921,7 @@ export default function OrdiniPage() {
           qr_code_token: `${codiceOdp}-TOKEN-${Date.now().toString().slice(-4)}`,
           note: `Lancio Batch da Commessa ${ord.numero_ordine} per ${ord.cliente?.ragione_sociale || 'Cliente'}`,
           creato_il: new Date().toISOString(),
-          fasi: fasiEsecutive
+          fasi: fasiBilanciate
         }
 
         tempOdpList = [nuovoOdP, ...tempOdpList]
@@ -999,6 +1033,36 @@ export default function OrdiniPage() {
         riga.quantita
       )
 
+      // AUTO-BILANCIAMENTO UNIVERSALE SU MACCHINE ALTERNATIVE COMPATIBILI
+      const mappaCaricoAttuale = calcolaMappaCaricoMacchine(tempOdpList, centriLavoro)
+      const fasiBilanciate = fasiEsecutive.map((fase) => {
+        if (fase.is_esterna || !fase.centri_lavoro_alternativi_ids || fase.centri_lavoro_alternativi_ids.length === 0) {
+          return fase
+        }
+        const oreFase = Math.max(0.1, Number(fase.tempo_stimato_totale_min || 60) / 60)
+        const dataTarget = dataInizioOdPCalcolata
+        const scelta = selezionaMigliorCentroLavoroPerFase(
+          fase.centro_lavoro_id,
+          fase.centri_lavoro_alternativi_ids,
+          dataTarget,
+          oreFase,
+          mappaCaricoAttuale,
+          centriLavoro
+        )
+
+        if (scelta.eraSaturata && scelta.centroSelezionatoId !== fase.centro_lavoro_id) {
+          const vecchieAlt = fase.centri_lavoro_alternativi_ids || []
+          const nuoveAlt = [fase.centro_lavoro_id, ...vecchieAlt.filter((id) => id !== scelta.centroSelezionatoId)]
+          return {
+            ...fase,
+            centro_lavoro_id: scelta.centroSelezionatoId,
+            centri_lavoro_alternativi_ids: nuoveAlt,
+            note_officina: `${fase.note_officina ? fase.note_officina + ' • ' : ''}[Auto-Bilanciamento carico]`
+          }
+        }
+        return fase
+      })
+
       const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
         id: nuovoOdpId,
         codice_odp: codiceOdp,
@@ -1020,7 +1084,7 @@ export default function OrdiniPage() {
         qr_code_token: `${codiceOdp}-TOKEN-${Date.now().toString().slice(-4)}`,
         note: `Generato da Ordine Cliente ${ordine.numero_ordine} per ${ordine.cliente?.ragione_sociale || 'Cliente'}`,
         creato_il: new Date().toISOString(),
-        fasi: fasiEsecutive
+        fasi: fasiBilanciate
       }
 
       tempOdpList = [nuovoOdP, ...tempOdpList]
@@ -1125,6 +1189,36 @@ export default function OrdiniPage() {
       riga.quantita
     )
 
+    // AUTO-BILANCIAMENTO UNIVERSALE SU MACCHINE ALTERNATIVE COMPATIBILI
+    const mappaCaricoAttuale = calcolaMappaCaricoMacchine(odpList, centriLavoro)
+    const fasiBilanciate = fasiEsecutive.map((fase) => {
+      if (fase.is_esterna || !fase.centri_lavoro_alternativi_ids || fase.centri_lavoro_alternativi_ids.length === 0) {
+        return fase
+      }
+      const oreFase = Math.max(0.1, Number(fase.tempo_stimato_totale_min || 60) / 60)
+      const dataTarget = dataInizioOdPCalcolata
+      const scelta = selezionaMigliorCentroLavoroPerFase(
+        fase.centro_lavoro_id,
+        fase.centri_lavoro_alternativi_ids,
+        dataTarget,
+        oreFase,
+        mappaCaricoAttuale,
+        centriLavoro
+      )
+
+      if (scelta.eraSaturata && scelta.centroSelezionatoId !== fase.centro_lavoro_id) {
+        const vecchieAlt = fase.centri_lavoro_alternativi_ids || []
+        const nuoveAlt = [fase.centro_lavoro_id, ...vecchieAlt.filter((id) => id !== scelta.centroSelezionatoId)]
+        return {
+          ...fase,
+          centro_lavoro_id: scelta.centroSelezionatoId,
+          centri_lavoro_alternativi_ids: nuoveAlt,
+          note_officina: `${fase.note_officina ? fase.note_officina + ' • ' : ''}[Auto-Bilanciamento carico]`
+        }
+      }
+      return fase
+    })
+
     // 3. Crea l'OdP
     const rigaIdx = ordine.righe.findIndex((r) => r.id === riga.id)
     const nuovoOdP: OrdineProduzione & { fasi: FaseOdP[] } = {
@@ -1148,7 +1242,7 @@ export default function OrdiniPage() {
       qr_code_token: `${codiceOdp}-TOKEN-${Date.now().toString().slice(-4)}`,
       note: `Generato da Ordine Cliente ${ordine.numero_ordine} per ${ordine.cliente?.ragione_sociale || 'Cliente'}`,
       creato_il: new Date().toISOString(),
-      fasi: fasiEsecutive
+      fasi: fasiBilanciate
     }
 
     const odpAggiornati = [nuovoOdP, ...odpList]

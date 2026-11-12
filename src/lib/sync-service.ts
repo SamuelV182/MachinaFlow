@@ -780,6 +780,16 @@ export const syncService = {
           let note = f.note_operative || ''
           let metaTerzista: any = {}
           let prelevaMateriaPrima: boolean | undefined = f.preleva_materia_prima
+          let centriAlternativi: string[] = f.centri_lavoro_alternativi_ids || []
+
+          if (note && note.includes('__MF_ALT__=')) {
+            try {
+              const parti = note.split('__MF_ALT__=')
+              note = parti[0].trim()
+              const resto = parti[1].split('\n')[0].trim()
+              centriAlternativi = JSON.parse(resto)
+            } catch {}
+          }
 
           if (note && note.includes('__MF_TERZISTA__=')) {
             try {
@@ -803,6 +813,7 @@ export const syncService = {
             ...f,
             note_operative: note,
             preleva_materia_prima: prelevaMateriaPrima,
+            centri_lavoro_alternativi_ids: centriAlternativi,
             ...metaTerzista
           } as FaseCicloStandard
         })
@@ -837,6 +848,13 @@ export const syncService = {
       }
       if (noteFinali.includes('__MF_PRELEVA__=')) {
         noteFinali = noteFinali.split('__MF_PRELEVA__=')[0].trim()
+      }
+      if (noteFinali.includes('__MF_ALT__=')) {
+        noteFinali = noteFinali.split('__MF_ALT__=')[0].trim()
+      }
+
+      if (fase.centri_lavoro_alternativi_ids && fase.centri_lavoro_alternativi_ids.length > 0) {
+        noteFinali = `${noteFinali.trim()}\n__MF_ALT__=${JSON.stringify(fase.centri_lavoro_alternativi_ids)}`
       }
 
       if (fase.is_esterna) {
@@ -1415,17 +1433,23 @@ export const syncService = {
 
   async salvaOrdineFornitore(ordine: OrdineFornitore) {
     try {
+      const azId = getCurrentAziendaId()
+      const ordineConAzienda: any = {
+        ...ordine,
+        ...(azId ? { azienda_id: azId } : {})
+      }
+
       const salvati = localStorage.getItem('machinaflow_ordini_fornitori')
       const lista: OrdineFornitore[] = salvati ? JSON.parse(salvati) : []
       const idx = lista.findIndex((o) => o.id === ordine.id)
       if (idx >= 0) {
-        lista[idx] = ordine
+        lista[idx] = ordineConAzienda
       } else {
-        lista.unshift(ordine)
+        lista.unshift(ordineConAzienda)
       }
       localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(lista))
 
-      await supabase.from('ordini_fornitori').upsert(ordine)
+      await supabase.from('ordini_fornitori').upsert(ordineConAzienda)
     } catch (e) {
       console.error('Errore salvaOrdineFornitore su Supabase:', e)
     }
