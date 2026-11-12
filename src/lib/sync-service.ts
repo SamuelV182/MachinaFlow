@@ -1450,6 +1450,9 @@ export const syncService = {
       localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(lista))
 
       await supabase.from('ordini_fornitori').upsert(ordineConAzienda)
+
+      // Invia notifica real-time broadcast istantanea a tutti i dispositivi connessi (cellulari, PC, tablet)
+      this.inviaSegnaleAvanzamento()
     } catch (e) {
       console.error('Errore salvaOrdineFornitore su Supabase:', e)
     }

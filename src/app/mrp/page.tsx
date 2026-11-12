@@ -428,6 +428,21 @@ export default function MRPPage() {
         setOrdiniFornitori(fornitoriEffettivi)
         localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(fornitoriEffettivi))
 
+        // Ricava anche l'elenco sincronizzato dei materiali con preventivo attivo da Supabase
+        const idsInPreventivoCloud: string[] = []
+        fornitoriEffettivi.forEach((o) => {
+          if (o.stato === 'in_preventivo') {
+            if (o.righe && o.righe.length > 0) {
+              o.righe.forEach((r) => idsInPreventivoCloud.push(r.articolo_id))
+            } else if (o.articolo_id) {
+              idsInPreventivoCloud.push(o.articolo_id)
+            }
+          }
+        })
+        if (idsInPreventivoCloud.length > 0) {
+          setMaterialiInPreventivoIds((prev) => Array.from(new Set([...prev, ...idsInPreventivoCloud])))
+        }
+
         ricalcolaMrp(articoliEffettivi, distinteEffettive, odpEffettivi, fornitoriEffettivi)
       } catch (err) {
         console.warn('Sync cloud MRP fallback locale:', err)
@@ -547,13 +562,32 @@ export default function MRPPage() {
       mailto = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${oggetto}&body=${corpo}`
     }
 
-    // Segna i materiali come "Preventivo Richiesto"
+    // Segna i materiali come "Preventivo Richiesto" sia localmente che su Supabase Cloud (stato: 'in_preventivo')
     const ids = vociPreventivo.map((v) => v.articolo_id)
     const aggiornati = Array.from(new Set([...materialiInPreventivoIds, ...ids]))
     setMaterialiInPreventivoIds(aggiornati)
     try {
       localStorage.setItem('machinaflow_materiali_in_preventivo', JSON.stringify(aggiornati))
     } catch {}
+
+    // Salva un record di ordine preventivo su Supabase per ogni materiale richiesto
+    const dataOggiIso = new Date().toISOString().split('T')[0]
+    const nomiFornitoriStr = fornitoriPreventivoSelezionati.map((f) => f.nome).join(', ') || 'Fornitori Selezionati'
+
+    vociPreventivo.forEach((v) => {
+      const recordPreventivo: OrdineFornitore = {
+        id: `prev-${Date.now()}-${v.articolo_id.slice(-4)}`,
+        articolo_id: v.articolo_id,
+        quantita_ordinata: v.quantitaDaChiedere,
+        fornitore_nome: nomiFornitoriStr,
+        data_ordine: dataOggiIso,
+        data_arrivo_prevista: v.dataRichiesta || dataOggiIso,
+        stato: 'in_preventivo',
+        note: `Richiesta Preventivo RDO del ${new Date().toLocaleDateString('it-IT')} a: ${nomiFornitoriStr}`,
+        creato_il: new Date().toISOString()
+      }
+      syncService.salvaOrdineFornitore(recordPreventivo)
+    })
 
     window.open(mailto, '_blank')
     setModalePreventivoAperta(false)
@@ -573,7 +607,26 @@ export default function MRPPage() {
       localStorage.setItem('machinaflow_materiali_in_preventivo', JSON.stringify(aggiornati))
     } catch {}
 
-    setNotificaCarico('✓ Testo email copiato negli appunti! Puoi incollarlo direttamente nella mail.')
+    // Salva un record di ordine preventivo su Supabase per ogni materiale richiesto
+    const dataOggiIso = new Date().toISOString().split('T')[0]
+    const nomiFornitoriStr = fornitoriPreventivoSelezionati.map((f) => f.nome).join(', ') || 'Fornitori Selezionati'
+
+    vociPreventivo.forEach((v) => {
+      const recordPreventivo: OrdineFornitore = {
+        id: `prev-${Date.now()}-${v.articolo_id.slice(-4)}`,
+        articolo_id: v.articolo_id,
+        quantita_ordinata: v.quantitaDaChiedere,
+        fornitore_nome: nomiFornitoriStr,
+        data_ordine: dataOggiIso,
+        data_arrivo_prevista: v.dataRichiesta || dataOggiIso,
+        stato: 'in_preventivo',
+        note: `Richiesta Preventivo RDO del ${new Date().toLocaleDateString('it-IT')} a: ${nomiFornitoriStr}`,
+        creato_il: new Date().toISOString()
+      }
+      syncService.salvaOrdineFornitore(recordPreventivo)
+    })
+
+    setNotificaCarico('✓ Testo email copiato negli appunti e sincronizzato su Supabase!')
     setTimeout(() => setNotificaCarico(null), 4000)
   }
 
@@ -801,13 +854,20 @@ export default function MRPPage() {
       } catch {}
     }
 
-    // Se i materiali erano contrassegnati come "In Preventivo", rimuovili dallo stato temporaneo
+    // Se i materiali erano contrassegnati come "In Preventivo", rimuovili dallo stato temporaneo e archivia i vecchi preventivi su Supabase
     const idsInclusi = righeFinaliOdA.map((r) => r.articolo_id)
     const restantiInPreventivo = materialiInPreventivoIds.filter((id) => !idsInclusi.includes(id))
     setMaterialiInPreventivoIds(restantiInPreventivo)
     try {
       localStorage.setItem('machinaflow_materiali_in_preventivo', JSON.stringify(restantiInPreventivo))
     } catch {}
+
+    // Chiudi/annulla eventuali ordini con stato 'in_preventivo' per questi articoli su Supabase
+    ordiniFornitori.forEach((o) => {
+      if (o.stato === 'in_preventivo' && idsInclusi.includes(o.articolo_id)) {
+        syncService.salvaOrdineFornitore({ ...o, stato: 'annullato' })
+      }
+    })
 
     // Resetta selezione checkbox
     setMaterialiSelezionatiIds([])

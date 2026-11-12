@@ -130,7 +130,7 @@ export interface OrdineFornitore {
   fornitore_nome: string
   data_ordine: string
   data_arrivo_prevista: string
-  stato: 'in_ordine' | 'parzialmente_ricevuto' | 'ricevuto' | 'annullato'
+  stato: 'in_preventivo' | 'in_ordine' | 'parzialmente_ricevuto' | 'ricevuto' | 'annullato'
   note?: string
   totale_imponibile?: number
   righe?: RigaOrdineFornitore[] // Array delle righe articolo per il documento multi-riga
