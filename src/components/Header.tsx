@@ -80,6 +80,37 @@ export function Header({ isSidebarCollassata = false, onToggleSidebar }: HeaderP
   }, [supabase])
 
   const handleLogout = async () => {
+    try {
+      // Pulizia totale e aggressiva di tutte le chiavi di cache per evitare residui tra officine diverse
+      const chiaviDaRimuovere = [
+        'machinaflow_session_email',
+        'machinaflow_session_ruolo',
+        'machinaflow_session_azienda',
+        'machinaflow_session_azienda_id',
+        'machinaflow_session_azienda_dati',
+        'machinaflow_supporto_azienda_id',
+        'machinaflow_supporto_azienda_nome',
+        'machinaflow_odp',
+        'machinaflow_articoli',
+        'machinaflow_ordini_clienti',
+        'machinaflow_ddt_clienti',
+        'machinaflow_ddt_esterni',
+        'machinaflow_centri_lavoro',
+        'machinaflow_tipi_processo',
+        'machinaflow_distinte',
+        'machinaflow_cicli',
+        'machinaflow_fasi_ciclo',
+        'machinaflow_clienti',
+        'machinaflow_fornitori_terzisti',
+        'machinaflow_ordini_fornitori',
+        'machinaflow_movimenti_magazzino',
+        'machinaflow_materiali_in_preventivo',
+        'machinaflow_dati_azienda_cache',
+        'machinaflow_postazione_corrente_id'
+      ]
+      chiaviDaRimuovere.forEach((k) => localStorage.removeItem(k))
+    } catch {}
+
     await supabase.auth.signOut()
     router.push('/login')
     router.refresh()

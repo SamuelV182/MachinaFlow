@@ -50,7 +50,8 @@ export function getCurrentAziendaId(): string | null {
       }
     }
   } catch {}
-  return null
+  // Default di isolamento per sessioni senza esplicito ID (account demo pilota)
+  return 'az-pilota-01'
 }
 
 // Restituisce una sigla o codice breve univoco per l'azienda corrente (es. 'BRB', 'PILOTA', ecc.)

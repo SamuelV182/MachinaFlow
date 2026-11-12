@@ -63,23 +63,34 @@ export default function LoginPage() {
             setErrore(error.message)
           }
         } else {
-          // Login riuscito: pulisci cache browser vecchia per non ereditare dati di un altro utente/officina
+          // Login riuscito: pulizia preventiva totale di tutte le chiavi operative per garantire zero contaminazioni tra officine
           try {
-            const previousEmail = localStorage.getItem('machinaflow_session_email')
-            if (previousEmail !== email.trim().toLowerCase()) {
-              localStorage.removeItem('machinaflow_odp')
-              localStorage.removeItem('machinaflow_articoli')
-              localStorage.removeItem('machinaflow_ordini_clienti')
-              localStorage.removeItem('machinaflow_ddt_clienti')
-              localStorage.removeItem('machinaflow_ddt_esterni')
-              localStorage.removeItem('machinaflow_centri_lavoro')
-              localStorage.removeItem('machinaflow_distinte')
-              localStorage.removeItem('machinaflow_dati_azienda_cache')
-              localStorage.removeItem('machinaflow_session_azienda')
-              localStorage.removeItem('machinaflow_session_azienda_id')
-              localStorage.removeItem('machinaflow_supporto_azienda_id')
-              localStorage.removeItem('machinaflow_supporto_azienda_nome')
-            }
+            const chiaviDaResettare = [
+              'machinaflow_session_ruolo',
+              'machinaflow_session_azienda',
+              'machinaflow_session_azienda_id',
+              'machinaflow_session_azienda_dati',
+              'machinaflow_supporto_azienda_id',
+              'machinaflow_supporto_azienda_nome',
+              'machinaflow_odp',
+              'machinaflow_articoli',
+              'machinaflow_ordini_clienti',
+              'machinaflow_ddt_clienti',
+              'machinaflow_ddt_esterni',
+              'machinaflow_centri_lavoro',
+              'machinaflow_tipi_processo',
+              'machinaflow_distinte',
+              'machinaflow_cicli',
+              'machinaflow_fasi_ciclo',
+              'machinaflow_clienti',
+              'machinaflow_fornitori_terzisti',
+              'machinaflow_ordini_fornitori',
+              'machinaflow_movimenti_magazzino',
+              'machinaflow_materiali_in_preventivo',
+              'machinaflow_dati_azienda_cache',
+              'machinaflow_postazione_corrente_id'
+            ]
+            chiaviDaResettare.forEach((k) => localStorage.removeItem(k))
             localStorage.setItem('machinaflow_session_email', email.trim().toLowerCase())
           } catch {}
 
