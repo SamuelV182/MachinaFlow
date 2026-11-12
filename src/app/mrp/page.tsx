@@ -442,7 +442,7 @@ export default function MRPPage() {
         setOrdiniFornitori(fornitoriEffettivi)
         localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(fornitoriEffettivi))
 
-        // Ricava anche l'elenco sincronizzato dei materiali con preventivo attivo da Supabase
+        // Ricava l'elenco sincronizzato dei soli materiali con preventivo attivo da Supabase
         const idsInPreventivoCloud: string[] = []
         fornitoriEffettivi.forEach((o) => {
           if (o.stato === 'in_preventivo') {
@@ -453,9 +453,10 @@ export default function MRPPage() {
             }
           }
         })
-        if (idsInPreventivoCloud.length > 0) {
-          setMaterialiInPreventivoIds((prev) => Array.from(new Set([...prev, ...idsInPreventivoCloud])))
-        }
+        setMaterialiInPreventivoIds(idsInPreventivoCloud)
+        try {
+          localStorage.setItem('machinaflow_materiali_in_preventivo', JSON.stringify(idsInPreventivoCloud))
+        } catch {}
 
         ricalcolaMrp(articoliEffettivi, distinteEffettive, odpEffettivi, fornitoriEffettivi)
       } catch (err) {
@@ -968,9 +969,21 @@ export default function MRPPage() {
   }
 
   // Apertura modale Ricezione Merce da Ordine Fornitore con Tracciabilità DDT
-  const apriRicezioneOrdineFornitore = (ordine: OrdineFornitore, tuttiAperti?: OrdineFornitore[]) => {
+  const apriRicezioneOrdineFornitore = (ordine: OrdineFornitore, tuttiAperti?: OrdineFornitore[], articoloIdCliccato?: string) => {
     setOrdineFornitoreInRicezioneId(ordine.id)
     setOrdiniFornitoreDisponibiliArticolo(tuttiAperti || [ordine])
+
+    // Determina l'articolo target principale (quello della riga MRP su cui l'operatore ha cliccato "Arrivato DDT")
+    const targetArticoloId = articoloIdCliccato || ordine.articolo_id
+
+    // Trova la quantità ordinata specifica per questo articolo (se ordine multi-riga, prendi la quantità della riga specifica)
+    let qtaSpecificaArticolo = ordine.quantita_ordinata
+    if (ordine.righe && ordine.righe.length > 0) {
+      const rigaTrovata = ordine.righe.find((r) => r.articolo_id === targetArticoloId)
+      if (rigaTrovata) {
+        qtaSpecificaArticolo = rigaTrovata.quantita_ordinata
+      }
+    }
 
     // Cerca tutti gli altri ordini o righe aperte per questo stesso fornitore
     const nomeForn = ordine.fornitore_nome || ''
@@ -994,8 +1007,8 @@ export default function MRPPage() {
       ) {
         if (o.righe && o.righe.length > 0) {
           o.righe.forEach((r) => {
-            // Escludi solo la riga dell'ordine principale attivo
-            if (o.id === ordine.id && r.articolo_id === ordine.articolo_id) return
+            // Escludi solo la riga dell'articolo principale attualmente in carico
+            if (o.id === ordine.id && r.articolo_id === targetArticoloId) return
             const artInfo = articoli.find((a) => a.id === r.articolo_id)
             altriAperti.push({
               ordine_id: o.id,
@@ -1005,11 +1018,11 @@ export default function MRPPage() {
               unita_misura: r.unita_misura || artInfo?.unita_misura || 'm',
               quantita_ordinata: r.quantita_ordinata,
               quantita_entrata: r.quantita_ordinata,
-              selezionato: true, // Di default selezionato per carico rapido con 1 clic
+              selezionato: false, // Non preselezionato: l'operatore sceglie esplicitamente se spuntarlo
               numero_oda: o.numero_oda
             })
           })
-        } else if (o.id !== ordine.id) {
+        } else if (o.id !== ordine.id || o.articolo_id !== targetArticoloId) {
           const artInfo = articoli.find((a) => a.id === o.articolo_id)
           altriAperti.push({
             ordine_id: o.id,
@@ -1019,7 +1032,7 @@ export default function MRPPage() {
             unita_misura: artInfo?.unita_misura || 'm',
             quantita_ordinata: o.quantita_ordinata,
             quantita_entrata: o.quantita_ordinata,
-            selezionato: true,
+            selezionato: false, // Non preselezionato
             numero_oda: o.numero_oda
           })
         }
@@ -1028,8 +1041,8 @@ export default function MRPPage() {
 
     setAltriMaterialiFornitoreSelezionati(altriAperti)
     setFormCarico({
-      articolo_id: ordine.articolo_id,
-      quantita_entrata: ordine.quantita_ordinata,
+      articolo_id: targetArticoloId,
+      quantita_entrata: qtaSpecificaArticolo,
       ddt_riferimento: '',
       fornitore_nome: ordine.fornitore_nome || '',
       note: ordine.note ? `Rif. Ordine Fornitore: ${ordine.note}` : ''
@@ -1070,6 +1083,10 @@ export default function MRPPage() {
   const handleRegistraCarico = (e: React.FormEvent) => {
     e.preventDefault()
     if (!formCarico.articolo_id || formCarico.quantita_entrata <= 0) return
+    if (!formCarico.ddt_riferimento || !formCarico.ddt_riferimento.trim()) {
+      alert('Attenzione: inserisci il Numero di DDT o Bolla prima di confermare il carico a magazzino.')
+      return
+    }
 
     let articoliAggiornati = [...articoli]
     const ddtDoc = formCarico.ddt_riferimento ? `DDT Fornitore #${formCarico.ddt_riferimento}` : 'Carico Merci Diretto'
@@ -1134,8 +1151,22 @@ export default function MRPPage() {
       localStorage.setItem('machinaflow_articoli', JSON.stringify(articoliAggiornati))
     } catch {}
 
-    // 3. Chiusura ordini fornitori saldati
+    // 3. Chiusura ordini fornitori saldati e rimozione definitiva dello stato preventivo per gli articoli caricati
+    const articoliCaricatiIds = [formCarico.articolo_id, ...altriDaCaricare.map((a) => a.articolo_id)]
+    const rimastiInPreventivo = materialiInPreventivoIds.filter((id) => !articoliCaricatiIds.includes(id))
+    setMaterialiInPreventivoIds(rimastiInPreventivo)
+    try {
+      localStorage.setItem('machinaflow_materiali_in_preventivo', JSON.stringify(rimastiInPreventivo))
+    } catch {}
+
     let ordiniAggiornati = ordiniFornitori.map((o) => {
+      // Se era un record di preventivo per uno dei materiali appena caricati, archivialo
+      if (o.stato === 'in_preventivo' && articoliCaricatiIds.includes(o.articolo_id)) {
+        const prevArchiviato: OrdineFornitore = { ...o, stato: 'annullato' }
+        syncService.salvaOrdineFornitore(prevArchiviato)
+        return prevArchiviato
+      }
+
       let deveChiudere = false
       if (ordineFornitoreInRicezioneId === 'TUTTI_APERTI') {
         if (ordiniFornitoreDisponibiliArticolo.some((oda) => oda.id === o.id)) deveChiudere = true
@@ -1933,7 +1964,7 @@ export default function MRPPage() {
                           {/* Se ci sono ordini fornitore aperti (In Arrivo) */}
                           {riga.ordiniFornitoreAperti.length > 0 && (
                             <button
-                              onClick={() => apriRicezioneOrdineFornitore(riga.ordiniFornitoreAperti[0], riga.ordiniFornitoreAperti)}
+                              onClick={() => apriRicezioneOrdineFornitore(riga.ordiniFornitoreAperti[0], riga.ordiniFornitoreAperti, mat.id)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
                               title={`Registra arrivo DDT (${riga.ordiniFornitoreAperti.length} ordine/i aperto/i)`}
                             >
@@ -2256,9 +2287,11 @@ export default function MRPPage() {
                           type="button"
                           onClick={() => {
                             setOrdineFornitoreInRicezioneId(ord.id)
+                            const rigaSpecifica = ord.righe?.find((r) => r.articolo_id === formCarico.articolo_id)
+                            const qtaDaCaricare = rigaSpecifica ? rigaSpecifica.quantita_ordinata : ord.quantita_ordinata
                             setFormCarico({
                               ...formCarico,
-                              quantita_entrata: ord.quantita_ordinata,
+                              quantita_entrata: qtaDaCaricare,
                               fornitore_nome: ord.fornitore_nome || formCarico.fornitore_nome,
                               note: ord.note ? `Rif. Ordine Fornitore: ${ord.note}` : formCarico.note
                             })
@@ -2296,9 +2329,22 @@ export default function MRPPage() {
                           </div>
 
                           <div className="text-right shrink-0">
-                            <span className="font-mono font-black text-emerald-400 text-sm block">
-                              {ord.quantita_ordinata} {articoli.find((a) => a.id === formCarico.articolo_id)?.unita_misura}
-                            </span>
+                            {(() => {
+                              const rigaMatch = ord.righe?.find((r) => r.articolo_id === formCarico.articolo_id)
+                              const qtaVisualizzata = rigaMatch ? rigaMatch.quantita_ordinata : ord.quantita_ordinata
+                              return (
+                                <>
+                                  <span className="font-mono font-black text-emerald-400 text-sm block">
+                                    {qtaVisualizzata} {articoli.find((a) => a.id === formCarico.articolo_id)?.unita_misura}
+                                  </span>
+                                  {ord.righe && ord.righe.length > 1 && (
+                                    <span className="text-[9px] text-slate-400 block font-normal">
+                                      di {ord.quantita_ordinata} tot. OdA
+                                    </span>
+                                  )}
+                                </>
+                              )
+                            })()}
                             {isSelected && (
                               <span className="text-[9px] uppercase font-bold text-emerald-400 flex items-center gap-0.5 justify-end">
                                 <Check className="w-2.5 h-2.5" /> Selezionato
@@ -2345,14 +2391,15 @@ export default function MRPPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Numero DDT / Bolla
+                    Numero DDT / Bolla Accompagnatoria *
                   </label>
                   <input
                     type="text"
+                    required
                     placeholder="es: DDT-2026/894"
                     value={formCarico.ddt_riferimento}
                     onChange={(e) => setFormCarico({ ...formCarico, ddt_riferimento: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 uppercase focus:outline-none focus:border-orange-500"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 uppercase focus:outline-none focus:border-orange-500 font-mono font-bold"
                   />
                 </div>
               </div>
