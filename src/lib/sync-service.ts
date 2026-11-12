@@ -1419,8 +1419,38 @@ export const syncService = {
       }
 
       if (data) {
-        localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(data))
-        return data as OrdineFornitore[]
+        // Deserializza eventuali campi estesi (numero_oda, righe) impacchettati in note
+        const arricchiti = data.map((o: any) => {
+          let note = o.note || ''
+          let numOda = o.numero_oda
+          let righe = o.righe
+
+          if (note && note.includes('[ODA-')) {
+            const match = note.match(/\[(ODA-[^\]]+)\]/)
+            if (match && !numOda) {
+              numOda = match[1]
+            }
+          }
+
+          if (note && note.includes('__RIGHE_ODA__=')) {
+            try {
+              const parti = note.split('__RIGHE_ODA__=')
+              note = parti[0].trim()
+              const resto = parti[1].trim()
+              righe = JSON.parse(resto)
+            } catch {}
+          }
+
+          return {
+            ...o,
+            numero_oda: numOda,
+            righe: righe || o.righe,
+            note: note
+          } as OrdineFornitore
+        })
+
+        localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(arricchiti))
+        return arricchiti
       }
       return []
     } catch (e) {
@@ -1449,7 +1479,33 @@ export const syncService = {
       }
       localStorage.setItem('machinaflow_ordini_fornitori', JSON.stringify(lista))
 
-      await supabase.from('ordini_fornitori').upsert(ordineConAzienda)
+      // Prepariamo il payload compatibile con lo schema Supabase (sanitizzando i campi estesi o includendoli in note)
+      let notePayload = ordineConAzienda.note || ''
+      if (ordineConAzienda.numero_oda && !notePayload.includes(`[${ordineConAzienda.numero_oda}]`)) {
+        notePayload = `[${ordineConAzienda.numero_oda}] ${notePayload}`.trim()
+      }
+      if (ordineConAzienda.righe && ordineConAzienda.righe.length > 0 && !notePayload.includes('__RIGHE_ODA__=')) {
+        notePayload = `${notePayload}\n__RIGHE_ODA__=${JSON.stringify(ordineConAzienda.righe)}`.trim()
+      }
+
+      const payloadDb: any = {
+        id: ordineConAzienda.id,
+        articolo_id: ordineConAzienda.articolo_id,
+        quantita_ordinata: ordineConAzienda.quantita_ordinata,
+        fornitore_nome: ordineConAzienda.fornitore_nome,
+        data_ordine: ordineConAzienda.data_ordine,
+        data_arrivo_prevista: ordineConAzienda.data_arrivo_prevista,
+        stato: ordineConAzienda.stato,
+        note: notePayload || null
+      }
+      if (azId) {
+        payloadDb.azienda_id = azId
+      }
+
+      const { error } = await supabase.from('ordini_fornitori').upsert(payloadDb)
+      if (error) {
+        console.error('Errore upsert ordini_fornitori su Supabase:', error.message)
+      }
 
       // Invia notifica real-time broadcast istantanea a tutti i dispositivi connessi (cellulari, PC, tablet)
       this.inviaSegnaleAvanzamento()

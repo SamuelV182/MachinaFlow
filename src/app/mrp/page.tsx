@@ -289,10 +289,24 @@ export default function MRPPage() {
       }
 
       // Calcola gli ordini fornitore già aperti (in arrivo) per questa materia prima
-      const aperti = ordiniFornitoreSalvati.filter(
-        (o) => o.articolo_id === materia.id && o.stato === 'in_ordine'
-      )
-      const quantitaInArrivo = aperti.reduce((acc, o) => acc + o.quantita_ordinata, 0)
+      // Gestisce sia ordini a riga singola che ordini multi-riga cumulativi
+      const aperti: OrdineFornitore[] = []
+      let quantitaInArrivo = 0
+
+      ordiniFornitoreSalvati.forEach((o) => {
+        if (o.stato === 'in_ordine') {
+          if (o.righe && o.righe.length > 0) {
+            const rigaMatch = o.righe.find((r) => r.articolo_id === materia.id)
+            if (rigaMatch) {
+              aperti.push(o)
+              quantitaInArrivo += rigaMatch.quantita_ordinata
+            }
+          } else if (o.articolo_id === materia.id) {
+            aperti.push(o)
+            quantitaInArrivo += o.quantita_ordinata
+          }
+        }
+      })
 
       // Formula MRP reale: Fabbisogno Netto = Fabbisogno Lordo + Scorta Minima - Giacenza - Quantità già ordinata
       const nettoCalcolato = Math.max(0, fabbisognoLordo + scortaMinima - giacenzaAttuale - quantitaInArrivo)
